@@ -21,7 +21,7 @@ app.use('*', async (c, next) => {
   return cors({
     origin: (o) => (allowed.includes(o) ? o : allowed[0]),
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    allowHeaders: ['Content-Type', 'Authorization', 'x-access-token'],
     maxAge: 86400,
   })(c, next);
 });
