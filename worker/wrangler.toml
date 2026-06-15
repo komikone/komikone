@@ -10,7 +10,6 @@ database_name = "komikone"
 database_id = "bd7afe67-a858-4bdf-9f10-e9b93be5116d"
 
 [vars]
-ADMIN_SECRET = "B3thany!"
 FRONTEND_URL = "https://komikone.com"
 
 [[routes]]
