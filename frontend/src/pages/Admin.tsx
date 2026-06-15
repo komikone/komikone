@@ -101,21 +101,22 @@ export default function Admin() {
 
   if (!authed) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-        <form onSubmit={handleLogin} className="bg-gray-900 border border-gray-700 rounded-xl p-8 w-80">
-          <h1 className="text-xl font-bold mb-6 text-center">KomikOne Admin</h1>
-          <label className="block text-sm text-gray-300 mb-1">Admin Secret</label>
+      <div className="min-h-screen bg-black text-white flex items-center justify-center halftone-bg">
+        <form onSubmit={handleLogin} className="bg-gray-950 border-2 border-yellow-400 comic-shadow p-8 w-80">
+          <h1 className="font-bangers text-4xl text-yellow-400 text-center tracking-wide leading-none mb-1">komikone</h1>
+          <p className="text-gray-500 text-xs text-center uppercase tracking-widest mb-6">Admin Access</p>
+          <label className="block text-xs text-gray-400 mb-1 uppercase tracking-wider">Admin Secret</label>
           <input
             type="password"
             value={inputSecret}
             onChange={(e) => setInputSecret(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white mb-4 focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-800 border-2 border-gray-600 px-3 py-2 text-white mb-4 focus:outline-none focus:border-yellow-400"
             autoFocus
           />
           {authError && <p className="text-red-400 text-sm mb-3">{authError}</p>}
           <button
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded transition-colors"
+            className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bangers tracking-wide text-xl py-2 border-2 border-black comic-shadow-sm transition-colors"
           >
             Sign In
           </button>
@@ -129,8 +130,8 @@ export default function Admin() {
       {/* Sidebar */}
       <aside className="w-56 bg-gray-900 border-r border-gray-800 flex flex-col">
         <div className="px-4 py-4 border-b border-gray-800">
-          <Link to="/" className="text-gray-400 hover:text-white text-xs">← Public site</Link>
-          <h1 className="font-bold text-white mt-1">Admin</h1>
+          <Link to="/" className="text-gray-500 hover:text-yellow-400 text-xs uppercase tracking-wider">← Public site</Link>
+          <h1 className="font-bangers text-yellow-400 text-xl tracking-wide mt-1">komikone</h1>
         </div>
 
         <div className="px-3 py-3 border-b border-gray-800">

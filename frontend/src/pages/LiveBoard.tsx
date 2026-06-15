@@ -159,11 +159,13 @@ export default function LiveBoard() {
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
       {/* Top bar */}
-      <div className="bg-gray-900 border-b border-gray-700 px-4 py-2 flex items-center gap-6 flex-wrap">
+      <div className="bg-black border-b-4 border-yellow-400 px-4 py-2 flex items-center gap-4 flex-wrap">
+        <span className="font-bangers text-yellow-400 text-xl tracking-wide shrink-0">komikone</span>
+        <span className="text-gray-700 shrink-0">|</span>
         <div className="flex-1 min-w-0">
-          <span className="font-bold text-yellow-400 text-sm">{event?.name}</span>
-          <span className="ml-2 text-gray-400 text-xs">
-            {event?.reg_type === 'return' ? 'Return Reg' : 'Open Reg'} — Live Board
+          <span className="font-bangers text-white text-lg tracking-wide">{event?.name}</span>
+          <span className="ml-2 text-gray-500 text-xs uppercase tracking-widest">
+            {event?.reg_type === 'return' ? 'Return Reg' : 'Open Reg'} · Live Board
           </span>
         </div>
 
