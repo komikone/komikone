@@ -120,7 +120,7 @@ export function enrichParticipant(p: Participant, event: Event) {
     claim_active: Boolean(claimActive),
     purchase_total: computePurchaseTotal(p, event),
     gaps,
-    all_purchased: allPurchased,
+    all_purchased: Boolean(allPurchased),
     any_purchased: Boolean(anyPurchased),
   };
 }
