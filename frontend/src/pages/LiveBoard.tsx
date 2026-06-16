@@ -722,14 +722,11 @@ function CellContent({
             const req = p[`req_${day}` as keyof Participant] as boolean;
             return (
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                {req && (
-                  <input
-                    type="checkbox"
-                    readOnly
-                    checked={false}
-                    className="w-3.5 h-3.5 cursor-default pointer-events-none opacity-50"
-                  />
-                )}
+                <div className={`w-4 h-4 rounded-sm ${
+                  req
+                    ? 'bg-gray-400 dark:bg-gray-500'
+                    : 'border border-gray-200 dark:border-gray-700/50'
+                }`} />
               </div>
             );
           })}
@@ -744,13 +741,17 @@ function CellContent({
             const bought = p[`pur_${day}` as keyof Participant] as boolean;
             return (
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                {req && (
-                  <input
-                    type="checkbox"
-                    checked={bought}
-                    onChange={(e) => onPurchaseToggle(p, day, e.target.checked)}
-                    className="w-3.5 h-3.5 cursor-pointer accent-green-600 dark:accent-green-500"
+                {req ? (
+                  <button
+                    onClick={() => onPurchaseToggle(p, day, !bought)}
+                    className={`w-4 h-4 rounded-sm border-2 transition-colors ${
+                      bought
+                        ? 'bg-green-500 border-green-600 dark:bg-green-500 dark:border-green-400'
+                        : 'bg-transparent border-gray-300 hover:border-green-400 hover:bg-green-50 dark:border-gray-600 dark:hover:border-green-500'
+                    }`}
                   />
+                ) : (
+                  <div className="w-4 h-4 rounded-sm border border-gray-100 dark:border-gray-700/40" />
                 )}
               </div>
             );
@@ -765,9 +766,11 @@ function CellContent({
             const isGap = p.gaps.includes(day);
             return (
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                {isGap && (
-                  <div className="w-3.5 h-3.5 rounded-sm bg-red-500/80 border border-red-600 dark:bg-red-600/70 dark:border-red-500" />
-                )}
+                <div className={`w-4 h-4 rounded-sm ${
+                  isGap
+                    ? 'bg-red-500 border border-red-600 dark:bg-red-500 dark:border-red-400'
+                    : 'border border-gray-100 dark:border-gray-700/40'
+                }`} />
               </div>
             );
           })}
