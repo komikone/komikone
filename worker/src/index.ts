@@ -476,6 +476,81 @@ admin.patch('/events/:id/participants/sort', async (c) => {
   return json({ ok: true });
 });
 
+// Copy or transfer participants to another event
+admin.post('/events/:id/participants/copy', async (c) => {
+  const sourceEventId = Number(c.req.param('id'));
+  const body = await c.req.json<{
+    target_event_id: number;
+    participant_ids?: number[];
+    reset_purchasing?: boolean;
+    transfer?: boolean;
+  }>();
+
+  if (!body.target_event_id) return err('target_event_id required');
+  if (body.target_event_id === sourceEventId) return err('Source and target must differ');
+
+  const [src, tgt] = await Promise.all([
+    getEvent(c.env.DB, sourceEventId),
+    getEvent(c.env.DB, body.target_event_id),
+  ]);
+  if (!src) return err('Source event not found', 404);
+  if (!tgt) return err('Target event not found', 404);
+
+  let participants: Participant[];
+  if (body.participant_ids?.length) {
+    const placeholders = body.participant_ids.map(() => '?').join(',');
+    const rows = await c.env.DB.prepare(
+      `SELECT * FROM participants WHERE event_id = ? AND id IN (${placeholders}) ORDER BY sort_order ASC, id ASC`
+    ).bind(sourceEventId, ...body.participant_ids).all<Participant>();
+    participants = rows.results;
+  } else {
+    const rows = await c.env.DB.prepare(
+      'SELECT * FROM participants WHERE event_id = ? ORDER BY sort_order ASC, id ASC'
+    ).bind(sourceEventId).all<Participant>();
+    participants = rows.results;
+  }
+
+  if (participants.length === 0) return err('No participants found', 400);
+
+  const reset = body.reset_purchasing ?? true;
+
+  const insertStmts = participants.map((p, idx) =>
+    c.env.DB.prepare(`
+      INSERT INTO participants
+        (event_id, first_name, last_name, member_id, badge_type, return_eligible, sponsor, notes,
+         req_preview, req_thu, req_fri, req_sat, req_sun, sort_order,
+         purchasing_coordinator, purchasing_claimed_by,
+         pur_preview, pur_thu, pur_fri, pur_sat, pur_sun, who_purchased, paid)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      body.target_event_id,
+      p.first_name, p.last_name, p.member_id,
+      p.badge_type, p.return_eligible ? 1 : 0,
+      p.sponsor, p.notes,
+      p.req_preview ? 1 : 0, p.req_thu ? 1 : 0, p.req_fri ? 1 : 0, p.req_sat ? 1 : 0, p.req_sun ? 1 : 0,
+      idx + 1,
+      reset ? '' : p.purchasing_coordinator,
+      reset ? '' : p.purchasing_claimed_by,
+      reset ? 0 : (p.pur_preview ? 1 : 0),
+      reset ? 0 : (p.pur_thu ? 1 : 0),
+      reset ? 0 : (p.pur_fri ? 1 : 0),
+      reset ? 0 : (p.pur_sat ? 1 : 0),
+      reset ? 0 : (p.pur_sun ? 1 : 0),
+      reset ? '' : p.who_purchased,
+      reset ? 0 : (p.paid ? 1 : 0),
+    )
+  );
+
+  const deleteStmts = body.transfer
+    ? participants.map((p) =>
+        c.env.DB.prepare('DELETE FROM participants WHERE id = ? AND event_id = ?').bind(p.id, sourceEventId)
+      )
+    : [];
+
+  await c.env.DB.batch([...insertStmts, ...deleteStmts]);
+  return json({ ok: true, copied: participants.length });
+});
+
 // Delete participant
 admin.delete('/events/:id/participants/:pid', async (c) => {
   const eventId = Number(c.req.param('id'));

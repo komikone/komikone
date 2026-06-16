@@ -204,6 +204,16 @@ export const api = {
           headers: headers(undefined, secret),
           body: JSON.stringify({ order }),
         }),
+      copy: (
+        secret: string,
+        sourceEventId: number,
+        data: { target_event_id: number; reset_purchasing?: boolean; transfer?: boolean; participant_ids?: number[] }
+      ) =>
+        req<{ ok: boolean; copied: number }>(`/api/admin/events/${sourceEventId}/participants/copy`, {
+          method: 'POST',
+          headers: headers(undefined, secret),
+          body: JSON.stringify(data),
+        }),
     },
     coordinators: {
       add: (secret: string, eventId: number, data: Partial<Coordinator>) =>

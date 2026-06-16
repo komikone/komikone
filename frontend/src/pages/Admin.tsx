@@ -215,6 +215,7 @@ export default function Admin() {
                 event={selectedEvent}
                 secret={secret}
                 participants={participants}
+                allEvents={events}
                 onUpdate={() => selectedEventId && loadEventDetail(selectedEventId)}
               />
             )}
@@ -319,11 +320,24 @@ function OverviewTab({
   onUpdate: () => void;
 }) {
   const [status, setStatus] = useState(event.status);
+  const [details, setDetails] = useState({ name: event.name, year: event.year, reg_type: event.reg_type });
+  const [detailSaved, setDetailSaved] = useState(false);
 
   const handleStatusChange = async (newStatus: EventDetail['status']) => {
     try {
       await api.admin.events.update(secret, event.id, { status: newStatus });
       setStatus(newStatus);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const handleDetailSave = async () => {
+    try {
+      await api.admin.events.update(secret, event.id, details);
+      setDetailSaved(true);
+      setTimeout(() => setDetailSaved(false), 2000);
       onUpdate();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed');
@@ -337,6 +351,48 @@ function OverviewTab({
 
   return (
     <div className="space-y-6">
+      {/* Event Details */}
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+        <h3 className="font-semibold text-gray-200 mb-3">Event Details</h3>
+        <div className="flex flex-wrap gap-3 items-end">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Name</label>
+            <input
+              type="text"
+              value={details.name}
+              onChange={(e) => setDetails((d) => ({ ...d, name: e.target.value }))}
+              className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm w-64 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Year</label>
+            <input
+              type="number"
+              value={details.year}
+              onChange={(e) => setDetails((d) => ({ ...d, year: Number(e.target.value) }))}
+              className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm w-24 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Type</label>
+            <select
+              value={details.reg_type}
+              onChange={(e) => setDetails((d) => ({ ...d, reg_type: e.target.value as 'return' | 'open' }))}
+              className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+            >
+              <option value="return">Return Reg</option>
+              <option value="open">Open Reg</option>
+            </select>
+          </div>
+          <button
+            onClick={handleDetailSave}
+            className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-1.5 rounded transition-colors"
+          >
+            {detailSaved ? 'Saved ✓' : 'Save'}
+          </button>
+        </div>
+      </div>
+
       {/* Status */}
       <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
         <h3 className="font-semibold text-gray-200 mb-3">Event Status</h3>
@@ -415,15 +471,18 @@ function ParticipantsTab({
   event,
   secret,
   participants,
+  allEvents,
   onUpdate,
 }: {
   event: EventDetail;
   secret: string;
   participants: Participant[];
+  allEvents: EventDetail[];
   onUpdate: () => void;
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   const [newParticipant, setNewParticipant] = useState<Partial<Participant>>({
     badge_type: 'ADULT',
   });
@@ -481,12 +540,20 @@ function ParticipantsTab({
     <div>
       <div className="flex justify-between items-center mb-4">
         <h3 className="font-semibold text-gray-200">{participants.length} participants</h3>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-3 py-1.5 rounded"
-        >
-          + Add participant
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setCopyOpen(true)}
+            className="bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-1.5 rounded transition-colors"
+          >
+            Copy / Transfer →
+          </button>
+          <button
+            onClick={() => setAddOpen(true)}
+            className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-3 py-1.5 rounded"
+          >
+            + Add participant
+          </button>
+        </div>
       </div>
 
       {/* Add form */}
@@ -592,6 +659,17 @@ function ParticipantsTab({
           </tbody>
         </table>
       </div>
+
+      {/* Copy/Transfer modal */}
+      {copyOpen && (
+        <CopyParticipantsModal
+          event={event}
+          secret={secret}
+          allEvents={allEvents}
+          onDone={() => { setCopyOpen(false); onUpdate(); }}
+          onClose={() => setCopyOpen(false)}
+        />
+      )}
 
       {/* Edit modal */}
       {editingId !== null && (
@@ -944,6 +1022,122 @@ function PricesTab({
       >
         {saved ? 'Saved ✓' : 'Save Prices'}
       </button>
+    </div>
+  );
+}
+
+// ─── Copy / Transfer Modal ────────────────────────────────────────────────────
+
+function CopyParticipantsModal({
+  event, secret, allEvents, onDone, onClose,
+}: {
+  event: EventDetail;
+  secret: string;
+  allEvents: EventDetail[];
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const otherEvents = allEvents.filter((e) => e.id !== event.id);
+  const [targetId, setTargetId] = useState<number>(otherEvents[0]?.id ?? 0);
+  const [mode, setMode] = useState<'copy' | 'transfer'>('copy');
+  const [resetPurchasing, setResetPurchasing] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState('');
+
+  const handleConfirm = async () => {
+    if (!targetId) { alert('Select a target event'); return; }
+    const target = allEvents.find((e) => e.id === targetId);
+    const action = mode === 'transfer' ? 'transfer' : 'copy';
+    if (!confirm(`${action === 'transfer' ? 'Move' : 'Copy'} all ${event.name} participants to ${target?.name}?`)) return;
+    setLoading(true);
+    try {
+      const res = await api.admin.participants.copy(secret, event.id, {
+        target_event_id: targetId,
+        reset_purchasing: resetPurchasing,
+        transfer: mode === 'transfer',
+      });
+      setResult(`✓ ${action === 'transfer' ? 'Transferred' : 'Copied'} ${res.copied} participants`);
+      setTimeout(onDone, 1500);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md">
+        <div className="flex justify-between items-center mb-5">
+          <h3 className="font-bold text-white">Copy / Transfer Participants</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">From</label>
+            <div className="text-sm text-gray-200 bg-gray-800 border border-gray-600 rounded px-3 py-2">{event.name}</div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">To</label>
+            <select
+              value={targetId}
+              onChange={(e) => setTargetId(Number(e.target.value))}
+              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+            >
+              {otherEvents.map((e) => (
+                <option key={e.id} value={e.id}>{e.name} ({e.reg_type} / {e.status})</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-2">Action</label>
+            <div className="flex gap-3">
+              {(['copy', 'transfer'] as const).map((m) => (
+                <label key={m} className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
+                  <input
+                    type="radio"
+                    name="mode"
+                    value={m}
+                    checked={mode === m}
+                    onChange={() => { setMode(m); setResetPurchasing(m === 'copy'); }}
+                    className="accent-blue-500"
+                  />
+                  <span className="capitalize">{m}</span>
+                  <span className="text-gray-500 text-xs">
+                    {m === 'copy' ? '(keep originals)' : '(remove from source)'}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
+            <input
+              type="checkbox"
+              checked={resetPurchasing}
+              onChange={(e) => setResetPurchasing(e.target.checked)}
+              className="accent-blue-500"
+            />
+            Reset purchasing history (coordinator, purchased days, payment)
+          </label>
+
+          {result && <p className="text-green-400 text-sm">{result}</p>}
+        </div>
+
+        <div className="flex gap-2 mt-6">
+          <button
+            onClick={handleConfirm}
+            disabled={loading || !targetId}
+            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2 rounded text-sm font-medium transition-colors"
+          >
+            {loading ? 'Working…' : mode === 'transfer' ? 'Transfer All' : 'Copy All'}
+          </button>
+          <button onClick={onClose} className="text-gray-400 hover:text-white px-4 text-sm">Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }
