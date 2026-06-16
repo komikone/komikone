@@ -74,12 +74,6 @@ export default function Admin() {
     }
   }, [secret]);
 
-  const reloadAll = useCallback(async (year?: number) => {
-    const fresh = await loadEvents();
-    const yr = year ?? selectedYear;
-    if (yr !== null) loadYearData(yr, fresh);
-  }, [loadEvents, loadYearData, selectedYear]);
-
   const loadYearData = useCallback(async (year: number, evts: EventDetail[]) => {
     const retEvt = evts.find((e) => e.year === year && e.reg_type === 'return');
     const openEvt = evts.find((e) => e.year === year && e.reg_type === 'open');
@@ -97,6 +91,12 @@ export default function Admin() {
     setOpenCoordinators(openCs);
     setYearMeta(meta);
   }, [secret]);
+
+  const reloadAll = useCallback(async (year?: number) => {
+    const fresh = await loadEvents();
+    const yr = year ?? selectedYear;
+    if (yr !== null) loadYearData(yr, fresh);
+  }, [loadEvents, loadYearData, selectedYear]);
 
   const reloadEventData = useCallback(async (regType: 'return' | 'open', evts: EventDetail[], year: number) => {
     const evt = evts.find((e) => e.year === year && e.reg_type === regType);
