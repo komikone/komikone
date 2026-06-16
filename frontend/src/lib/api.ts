@@ -79,6 +79,24 @@ export type Participant = {
   updated_at: string;
 };
 
+export type YearMeta = {
+  year: number;
+  return_reg_start: string;
+  return_reg_end: string;
+  open_reg_start: string;
+  open_reg_end: string;
+  address_deadline: string;
+  hotel_deadline: string;
+  preview_date: string;
+  thu_date: string;
+  fri_date: string;
+  sat_date: string;
+  sun_date: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Coordinator = {
   id: number;
   event_id: number;
@@ -223,7 +241,7 @@ export const api = {
       copy: (
         secret: string,
         sourceEventId: number,
-        data: { target_event_id: number; reset_purchasing?: boolean; transfer?: boolean; participant_ids?: number[] }
+        data: { target_event_id: number; reset_purchasing?: boolean; transfer?: boolean; participant_ids?: number[]; carryover?: boolean }
       ) =>
         req<{ ok: boolean; copied: number }>(`/api/admin/events/${sourceEventId}/participants/copy`, {
           method: 'POST',
@@ -244,6 +262,33 @@ export const api = {
           headers: headers(undefined, secret),
         }),
     },
+    yearMeta: {
+      get: (secret: string, year: number) =>
+        req<YearMeta>(`/api/admin/year-meta/${year}`, {
+          headers: headers(undefined, secret),
+        }),
+      upsert: (secret: string, year: number, data: Partial<YearMeta>) =>
+        req<{ ok: boolean }>(`/api/admin/year-meta/${year}`, {
+          method: 'PUT',
+          headers: headers(undefined, secret),
+          body: JSON.stringify(data),
+        }),
+    },
+    initializeYear: (
+      secret: string,
+      data: {
+        year: number;
+        price_preview_adult: number; price_thu_adult: number; price_fri_adult: number;
+        price_sat_adult: number; price_sun_adult: number;
+        price_preview_junior: number; price_thu_junior: number; price_fri_junior: number;
+        price_sat_junior: number; price_sun_junior: number;
+      }
+    ) =>
+      req<{ ok: boolean }>('/api/admin/initialize-year', {
+        method: 'POST',
+        headers: headers(undefined, secret),
+        body: JSON.stringify(data),
+      }),
     exportUrl: (id: number, secret: string) =>
       `${BASE}/api/admin/events/${id}/export.csv?token=${encodeURIComponent(secret)}`,
   },

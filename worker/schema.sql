@@ -71,6 +71,24 @@ CREATE TABLE IF NOT EXISTS coordinators (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS year_meta (
+  year INTEGER PRIMARY KEY,
+  return_reg_start TEXT NOT NULL DEFAULT '',
+  return_reg_end TEXT NOT NULL DEFAULT '',
+  open_reg_start TEXT NOT NULL DEFAULT '',
+  open_reg_end TEXT NOT NULL DEFAULT '',
+  address_deadline TEXT NOT NULL DEFAULT '',
+  hotel_deadline TEXT NOT NULL DEFAULT '',
+  preview_date TEXT NOT NULL DEFAULT '',
+  thu_date TEXT NOT NULL DEFAULT '',
+  fri_date TEXT NOT NULL DEFAULT '',
+  sat_date TEXT NOT NULL DEFAULT '',
+  sun_date TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Index for fast live board queries
 CREATE INDEX IF NOT EXISTS idx_participants_event_sort ON participants(event_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_coordinators_event ON coordinators(event_id);
