@@ -1,4 +1,4 @@
-# KomikOne
+# Komikone
 
 Comic-Con badge purchasing coordinator for a group of ~50-80 people.
 
