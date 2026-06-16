@@ -383,6 +383,16 @@ admin.patch('/events/:id', async (c) => {
   return json({ ok: true });
 });
 
+// Regenerate access token
+admin.post('/events/:id/token', async (c) => {
+  const id = Number(c.req.param('id'));
+  const token = crypto.randomUUID().replace(/-/g, '');
+  await c.env.DB.prepare(
+    "UPDATE events SET access_token = ?, updated_at = datetime('now') WHERE id = ?"
+  ).bind(token, id).run();
+  return json({ access_token: token });
+});
+
 // Delete event
 admin.delete('/events/:id', async (c) => {
   const id = Number(c.req.param('id'));

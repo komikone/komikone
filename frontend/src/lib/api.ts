@@ -175,6 +175,11 @@ export const api = {
           method: 'DELETE',
           headers: headers(undefined, secret),
         }),
+      regenerateToken: (secret: string, id: number) =>
+        req<{ access_token: string }>(`/api/admin/events/${id}/token`, {
+          method: 'POST',
+          headers: headers(undefined, secret),
+        }),
       getWithToken: (secret: string, id: number) =>
         req<EventDetail>(`/api/events/${id}`, {
           headers: headers(undefined, secret),

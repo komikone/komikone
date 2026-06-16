@@ -414,36 +414,7 @@ function OverviewTab({
       </div>
 
       {/* Access token */}
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
-        <h3 className="font-semibold text-gray-200 mb-2">Access Token</h3>
-        <p className="text-gray-400 text-sm mb-3">Share this link with participants:</p>
-        <div className="flex gap-2 items-center">
-          <code className="bg-gray-800 text-green-400 text-xs px-3 py-2 rounded flex-1 break-all">
-            {window.location.origin}/register/{event.id}?token={event.access_token}
-          </code>
-          <button
-            onClick={() => navigator.clipboard.writeText(
-              `${window.location.origin}/register/${event.id}?token=${event.access_token}`
-            )}
-            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded"
-          >
-            Copy
-          </button>
-        </div>
-        <div className="mt-2 flex gap-2 items-center">
-          <code className="bg-gray-800 text-yellow-400 text-xs px-3 py-2 rounded flex-1 break-all">
-            {window.location.origin}/live/{event.id}?token={event.access_token}
-          </code>
-          <button
-            onClick={() => navigator.clipboard.writeText(
-              `${window.location.origin}/live/${event.id}?token=${event.access_token}`
-            )}
-            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded"
-          >
-            Copy
-          </button>
-        </div>
-      </div>
+      <AccessTokenSection event={event} secret={secret} onUpdate={onUpdate} />
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1022,6 +993,66 @@ function PricesTab({
       >
         {saved ? 'Saved ✓' : 'Save Prices'}
       </button>
+    </div>
+  );
+}
+
+// ─── Access Token Section ─────────────────────────────────────────────────────
+
+function AccessTokenSection({
+  event, secret, onUpdate,
+}: { event: EventDetail; secret: string; onUpdate: () => void }) {
+  const [token, setToken] = useState(event.access_token ?? '');
+  const [regenerating, setRegenerating] = useState(false);
+
+  const handleRegenerate = async () => {
+    if (!confirm('Regenerate token? Existing links will stop working.')) return;
+    setRegenerating(true);
+    try {
+      const res = await api.admin.events.regenerateToken(secret, event.id);
+      setToken(res.access_token);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const origin = window.location.origin;
+  const registerUrl = `${origin}/register/${event.id}?token=${token}`;
+  const liveUrl = `${origin}/live/${event.id}?token=${token}`;
+
+  return (
+    <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-semibold text-gray-200">Access Token</h3>
+        <button
+          onClick={handleRegenerate}
+          disabled={regenerating}
+          className="text-xs text-gray-500 hover:text-red-400 disabled:opacity-50 transition-colors"
+        >
+          {regenerating ? 'Regenerating…' : 'Regenerate'}
+        </button>
+      </div>
+      {!token && (
+        <p className="text-yellow-400 text-xs mb-2">⚠ No token set — links won't work. Click Regenerate.</p>
+      )}
+      <p className="text-gray-400 text-sm mb-3">Share these links with participants:</p>
+      <div className="flex gap-2 items-center">
+        <code className="bg-gray-800 text-green-400 text-xs px-3 py-2 rounded flex-1 break-all">{registerUrl}</code>
+        <button
+          onClick={() => navigator.clipboard.writeText(registerUrl)}
+          className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded"
+        >Copy</button>
+      </div>
+      <div className="mt-2 flex gap-2 items-center">
+        <code className="bg-gray-800 text-yellow-400 text-xs px-3 py-2 rounded flex-1 break-all">{liveUrl}</code>
+        <button
+          onClick={() => navigator.clipboard.writeText(liveUrl)}
+          className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded"
+        >Copy</button>
+      </div>
     </div>
   );
 }
