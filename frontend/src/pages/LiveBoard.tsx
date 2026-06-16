@@ -727,16 +727,25 @@ function CellContent({
         <div style={{ display: 'flex', gap: DAY_GAP }}>
           {DAY_KEYS.map((day) => {
             const req = p[`req_${day}` as keyof Participant] as boolean;
+            const bought = p[`pur_${day}` as keyof Participant] as boolean;
             return (
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                <button
-                  onClick={() => onRequestedToggle(p, day, !req)}
-                  className={`w-4 h-4 rounded-sm border-2 transition-colors ${
+                {bought ? (
+                  <div title="Purchased — locked" className={`w-4 h-4 rounded-sm border-2 cursor-not-allowed opacity-60 ${
                     req
                       ? 'bg-gray-400 border-gray-500 dark:bg-gray-500 dark:border-gray-400'
-                      : 'bg-transparent border-gray-300 hover:border-gray-400 dark:border-gray-600 dark:hover:border-gray-500'
-                  }`}
-                />
+                      : 'border-gray-200 dark:border-gray-700'
+                  }`} />
+                ) : (
+                  <button
+                    onClick={() => onRequestedToggle(p, day, !req)}
+                    className={`w-4 h-4 rounded-sm border-2 transition-colors ${
+                      req
+                        ? 'bg-gray-400 border-gray-500 dark:bg-gray-500 dark:border-gray-400'
+                        : 'bg-transparent border-gray-300 hover:border-gray-400 dark:border-gray-600 dark:hover:border-gray-500'
+                    }`}
+                  />
+                )}
               </div>
             );
           })}
@@ -773,7 +782,7 @@ function CellContent({
       return (
         <div style={{ display: 'flex', gap: DAY_GAP }}>
           {DAY_KEYS.map((day) => {
-            const isGap = p.gaps.includes(day);
+            const isGap = p.gaps.some((g) => g.toLowerCase() === day);
             return (
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                 <div className={`w-4 h-4 rounded-sm border-2 ${
