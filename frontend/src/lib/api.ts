@@ -124,7 +124,7 @@ export const api = {
         headers: headers(token),
       }),
     register: (eventId: number, token: string, data: Partial<Participant>) =>
-      req<{ ok: boolean }>(`/api/events/${eventId}/register?token=${token}`, {
+      req<{ ok: boolean; id: number }>(`/api/events/${eventId}/register?token=${token}`, {
         method: 'POST',
         headers: headers(token),
         body: JSON.stringify(data),

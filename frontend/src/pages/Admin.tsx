@@ -4,7 +4,6 @@ import {
   api,
   type EventDetail,
   type Participant,
-  type Coordinator,
   type YearMeta,
   formatDollars,
   DAY_KEYS,
@@ -39,12 +38,10 @@ export default function Admin() {
   // Per-event data — always store both so Overview can show both
   const [returnParticipants, setReturnParticipants] = useState<Participant[]>([]);
   const [openParticipants, setOpenParticipants] = useState<Participant[]>([]);
-  const [returnCoordinators, setReturnCoordinators] = useState<Coordinator[]>([]);
-  const [openCoordinators, setOpenCoordinators] = useState<Coordinator[]>([]);
   const [yearMeta, setYearMeta] = useState<YearMeta | null>(null);
 
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'overview' | 'participants' | 'coordinators' | 'prices' | 'dates'>('overview');
+  const [tab, setTab] = useState<'overview' | 'participants' | 'prices' | 'dates'>('overview');
 
   // Derived
   const years = useMemo(
@@ -56,7 +53,6 @@ export default function Admin() {
   const openEvent = yearEvents.find((e) => e.reg_type === 'open') ?? null;
   const activeEvent = yearEvents.find((e) => e.reg_type === activeRegType) ?? yearEvents[0] ?? null;
   const participants = activeRegType === 'return' ? returnParticipants : openParticipants;
-  const coordinators = activeRegType === 'return' ? returnCoordinators : openCoordinators;
 
   const loadEvents = useCallback(async (): Promise<EventDetail[]> => {
     if (!secret) return [];
@@ -78,17 +74,13 @@ export default function Admin() {
     const retEvt = evts.find((e) => e.year === year && e.reg_type === 'return');
     const openEvt = evts.find((e) => e.year === year && e.reg_type === 'open');
 
-    const [retPs, openPs, retCs, openCs, meta] = await Promise.all([
+    const [retPs, openPs, meta] = await Promise.all([
       retEvt ? api.participants.list(retEvt.id, retEvt.access_token).catch(() => []) : Promise.resolve([]),
       openEvt ? api.participants.list(openEvt.id, openEvt.access_token).catch(() => []) : Promise.resolve([]),
-      retEvt ? api.coordinators.list(retEvt.id, retEvt.access_token).catch(() => []) : Promise.resolve([]),
-      openEvt ? api.coordinators.list(openEvt.id, openEvt.access_token).catch(() => []) : Promise.resolve([]),
       api.admin.yearMeta.get(secret, year).catch(() => null),
     ]);
     setReturnParticipants(retPs);
     setOpenParticipants(openPs);
-    setReturnCoordinators(retCs);
-    setOpenCoordinators(openCs);
     setYearMeta(meta);
   }, [secret]);
 
@@ -101,12 +93,9 @@ export default function Admin() {
   const reloadEventData = useCallback(async (regType: 'return' | 'open', evts: EventDetail[], year: number) => {
     const evt = evts.find((e) => e.year === year && e.reg_type === regType);
     if (!evt) return;
-    const [ps, cs] = await Promise.all([
-      api.participants.list(evt.id, evt.access_token).catch(() => []),
-      api.coordinators.list(evt.id, evt.access_token).catch(() => []),
-    ]);
-    if (regType === 'return') { setReturnParticipants(ps); setReturnCoordinators(cs); }
-    else { setOpenParticipants(ps); setOpenCoordinators(cs); }
+    const ps = await api.participants.list(evt.id, evt.access_token).catch(() => []);
+    if (regType === 'return') setReturnParticipants(ps);
+    else setOpenParticipants(ps);
   }, []);
 
   useEffect(() => {
@@ -243,7 +232,7 @@ export default function Admin() {
               </div>
               {/* Tabs */}
               <div className="flex gap-1">
-                {(['overview', 'participants', 'coordinators', 'prices', 'dates'] as const).map((t) => (
+                {(['overview', 'participants', 'prices', 'dates'] as const).map((t) => (
                   <button
                     key={t}
                     onClick={() => setTab(t)}
@@ -282,18 +271,6 @@ export default function Admin() {
                 secret={secret}
                 participants={participants}
                 allEvents={events}
-                onUpdate={() => { if (selectedYear) reloadEventData(activeRegType, events, selectedYear); }}
-              />
-            )}
-            {tab === 'coordinators' && (
-              <CoordinatorsTab
-                event={activeEvent}
-                activeRegType={activeRegType}
-                returnEvent={returnEvent}
-                openEvent={openEvent}
-                onRegTypeChange={handleRegTypeSwitch}
-                secret={secret}
-                coordinators={coordinators}
                 onUpdate={() => { if (selectedYear) reloadEventData(activeRegType, events, selectedYear); }}
               />
             )}
@@ -795,7 +772,7 @@ function ParticipantsTab({
       {addOpen && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-4">
           <h4 className="font-medium text-gray-200 mb-3">New Participant</h4>
-          <ParticipantForm value={newParticipant} onChange={setNewParticipant} coordinatorNames={[]} />
+          <ParticipantForm value={newParticipant} onChange={setNewParticipant} />
           <div className="flex gap-2 mt-3">
             <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-1.5 rounded">
               Add
@@ -815,7 +792,6 @@ function ParticipantsTab({
               <th className="px-2 py-2 text-center">Type</th>
               <th className="px-2 py-2 text-center">Ret.</th>
               <th className="px-2 py-2 text-center">Requested</th>
-              <th className="px-2 py-2 text-left">Coordinator</th>
               <th className="px-2 py-2 text-center">Purchased</th>
               <th className="px-2 py-2 text-right">Total</th>
               <th className="px-2 py-2 text-center">Paid</th>
@@ -849,7 +825,6 @@ function ParticipantsTab({
                 <td className="px-2 py-2 text-center text-xs text-gray-400">
                   {DAY_KEYS.filter((d) => p[`req_${d}` as keyof Participant]).map((d) => d.slice(0, 2).toUpperCase()).join(' ')}
                 </td>
-                <td className="px-2 py-2 text-xs text-gray-300">{p.purchasing_coordinator || '—'}</td>
                 <td className="px-2 py-2 text-center text-xs">
                   {p.all_purchased ? (
                     <span className="text-green-400">All ✓</span>
@@ -967,7 +942,7 @@ function EditParticipantModal({
           <h3 className="font-bold text-white">Edit Participant</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
         </div>
-        <ParticipantForm value={form} onChange={setForm} coordinatorNames={[]} showAdminFields />
+        <ParticipantForm value={form} onChange={setForm} showAdminFields />
         <div className="flex gap-2 mt-4">
           <button onClick={handleSave} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded">
             Save
@@ -980,11 +955,10 @@ function EditParticipantModal({
 }
 
 function ParticipantForm({
-  value, onChange, coordinatorNames, showAdminFields = false,
+  value, onChange, showAdminFields = false,
 }: {
   value: Partial<Participant>;
   onChange: (v: Partial<Participant>) => void;
-  coordinatorNames: string[];
   showAdminFields?: boolean;
 }) {
   const set = (key: keyof Participant, val: unknown) => onChange({ ...value, [key]: val });
@@ -1010,23 +984,9 @@ function ParticipantForm({
           </select>
         </Field>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Sponsor">
-          <input type="text" value={value.sponsor ?? ''} onChange={(e) => set('sponsor', e.target.value)} className={inputCls} />
-        </Field>
-        {showAdminFields && (
-          <Field label="Coordinator">
-            <input
-              type="text" value={value.purchasing_coordinator ?? ''}
-              onChange={(e) => set('purchasing_coordinator', e.target.value)}
-              list="coord-names" className={inputCls}
-            />
-            <datalist id="coord-names">
-              {coordinatorNames.map((n) => <option key={n} value={n} />)}
-            </datalist>
-          </Field>
-        )}
-      </div>
+      <Field label="Sponsor">
+        <input type="text" value={value.sponsor ?? ''} onChange={(e) => set('sponsor', e.target.value)} className={inputCls} />
+      </Field>
       <Field label="Requested Days">
         <div className="flex flex-wrap gap-3">
           {DAY_KEYS.map((day) => (
@@ -1056,93 +1016,6 @@ function ParticipantForm({
           </Field>
         </>
       )}
-    </div>
-  );
-}
-
-// ─── Coordinators Tab ─────────────────────────────────────────────────────────
-
-function CoordinatorsTab({
-  event, activeRegType, returnEvent, openEvent, onRegTypeChange,
-  secret, coordinators, onUpdate,
-}: {
-  event: EventDetail | null;
-  activeRegType: 'return' | 'open';
-  returnEvent: EventDetail | null;
-  openEvent: EventDetail | null;
-  onRegTypeChange: (t: 'return' | 'open') => void;
-  secret: string;
-  coordinators: Coordinator[];
-  onUpdate: () => void;
-}) {
-  const [newName, setNewName] = useState('');
-
-  if (!event) return <div className="text-gray-500">No event for this registration type.</div>;
-
-  const handleAdd = async () => {
-    if (!newName.trim()) return;
-    try {
-      await api.admin.coordinators.add(secret, event.id, { name: newName.trim() });
-      setNewName('');
-      onUpdate();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed');
-    }
-  };
-
-  const handleDelete = async (c: Coordinator) => {
-    if (!confirm(`Remove ${c.name}?`)) return;
-    try {
-      await api.admin.coordinators.delete(secret, event.id, c.id);
-      onUpdate();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed');
-    }
-  };
-
-  return (
-    <div>
-      <EventToggle returnEvent={returnEvent} openEvent={openEvent} active={activeRegType} onChange={onRegTypeChange} />
-
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 mb-5">
-        <h3 className="font-semibold text-gray-200 mb-3">Add Coordinator</h3>
-        <div className="flex gap-2">
-          <input
-            type="text" placeholder="Name" value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-            className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-          />
-          <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded transition-colors">
-            Add
-          </button>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        {coordinators.map((c) => (
-          <div key={c.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4 flex items-center justify-between">
-            <div>
-              <div className="text-white font-medium">{c.name}</div>
-              <div className="flex gap-3 mt-1 text-xs text-gray-400">
-                {c.venmo && <span>Venmo: {c.venmo}</span>}
-                {c.zelle && <span>Zelle: {c.zelle}</span>}
-                {c.paypal && <span>PayPal: {c.paypal}</span>}
-                {c.phone_last4 && <span>Phone: ...{c.phone_last4}</span>}
-                {!c.venmo && !c.zelle && !c.paypal && (
-                  <span className="text-gray-600 italic">No payment info yet</span>
-                )}
-              </div>
-            </div>
-            <button onClick={() => handleDelete(c)} className="text-gray-500 hover:text-red-400 text-sm ml-4">
-              Remove
-            </button>
-          </div>
-        ))}
-        {coordinators.length === 0 && (
-          <p className="text-gray-500 text-sm">No coordinators added yet.</p>
-        )}
-      </div>
     </div>
   );
 }
