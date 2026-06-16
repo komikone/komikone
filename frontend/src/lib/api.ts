@@ -10,8 +10,9 @@ function headers(token?: string, adminSecret?: string): HeadersInit {
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, opts);
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error((body as { error: string }).error ?? res.statusText);
+    const body = await res.json().catch(() => ({}));
+    const msg = (body as { error?: string }).error || res.statusText || `HTTP ${res.status}`;
+    throw new Error(msg);
   }
   return res.json() as Promise<T>;
 }
