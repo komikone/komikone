@@ -773,7 +773,69 @@ admin.put('/year-meta/:year', async (c) => {
 
 app.route('/api/admin', admin);
 
-// Add unique constraint for coordinators (name per event)
+// ── Stats endpoint (public aggregate data for dashboard) ──────────────────────
+
+app.get('/api/stats', async (c) => {
+  const db = c.env.DB;
+
+  const [yearRows, buyerRows, retentionRows] = await Promise.all([
+    // Per year/type: totals, success, day breakdowns
+    db.prepare(`
+      SELECT
+        e.year, e.reg_type,
+        COUNT(p.id) AS total,
+        SUM(CASE WHEN p.pur_preview OR p.pur_thu OR p.pur_fri OR p.pur_sat OR p.pur_sun THEN 1 ELSE 0 END) AS purchased_any,
+        SUM(p.paid) AS paid_count,
+        SUM(p.req_preview) AS req_preview, SUM(p.req_thu) AS req_thu,
+        SUM(p.req_fri) AS req_fri, SUM(p.req_sat) AS req_sat, SUM(p.req_sun) AS req_sun,
+        SUM(p.pur_preview) AS pur_preview, SUM(p.pur_thu) AS pur_thu,
+        SUM(p.pur_fri) AS pur_fri, SUM(p.pur_sat) AS pur_sat, SUM(p.pur_sun) AS pur_sun,
+        SUM(p.badge_type = 'JUNIOR') AS junior_count
+      FROM events e JOIN participants p ON p.event_id = e.id
+      WHERE e.status = 'complete'
+      GROUP BY e.year, e.reg_type
+      ORDER BY e.year, e.reg_type
+    `).all(),
+
+    // Top buyers across all history
+    db.prepare(`
+      SELECT
+        who_purchased AS name,
+        COUNT(*) AS participants_served,
+        COUNT(DISTINCT e.year) AS years_active,
+        GROUP_CONCAT(DISTINCT e.year ORDER BY e.year) AS year_list
+      FROM participants p JOIN events e ON e.id = p.event_id
+      WHERE who_purchased != '' AND LENGTH(who_purchased) < 25
+        AND (p.pur_preview OR p.pur_thu OR p.pur_fri OR p.pur_sat OR p.pur_sun)
+      GROUP BY who_purchased
+      ORDER BY participants_served DESC
+      LIMIT 20
+    `).all(),
+
+    // Return members: appear in 2+ years
+    db.prepare(`
+      SELECT
+        UPPER(p.member_id) AS member_id,
+        MAX(p.first_name) AS first_name,
+        MAX(p.last_name) AS last_name,
+        COUNT(DISTINCT e.year) AS year_count,
+        GROUP_CONCAT(DISTINCT e.year ORDER BY e.year) AS years
+      FROM participants p JOIN events e ON e.id = p.event_id
+      WHERE p.member_id != ''
+      GROUP BY UPPER(p.member_id)
+      HAVING year_count >= 2
+      ORDER BY year_count DESC, UPPER(p.member_id)
+      LIMIT 30
+    `).all(),
+  ]);
+
+  return json({
+    years: yearRows.results,
+    top_buyers: buyerRows.results,
+    retention: retentionRows.results,
+  });
+});
+
 // Health check
 app.get('/api/health', (c) => json({ ok: true, ts: new Date().toISOString() }));
 
