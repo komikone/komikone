@@ -135,6 +135,16 @@ export const api = {
         `/api/events/${eventId}/participants/${pid}/purchased?token=${token}`,
         { method: 'PATCH', headers: headers(token), body: JSON.stringify(data) }
       ),
+    updateRequested: (
+      eventId: number,
+      pid: number,
+      token: string,
+      data: { req_preview?: boolean; req_thu?: boolean; req_fri?: boolean; req_sat?: boolean; req_sun?: boolean }
+    ) =>
+      req<{ ok: boolean }>(
+        `/api/events/${eventId}/participants/${pid}/requested?token=${token}`,
+        { method: 'PATCH', headers: headers(token), body: JSON.stringify(data) }
+      ),
     markPaid: (eventId: number, pid: number, token: string, paid: boolean) =>
       req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/paid?token=${token}`, {
         method: 'PATCH',

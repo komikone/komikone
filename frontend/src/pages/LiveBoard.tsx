@@ -235,6 +235,15 @@ export default function LiveBoard() {
     await fetchAll();
   };
 
+  const handleRequestedToggle = async (p: Participant, day: DayKey, checked: boolean) => {
+    await api.participants.updateRequested(Number(eventId), p.id, token, {
+      req_preview: p.req_preview, req_thu: p.req_thu, req_fri: p.req_fri,
+      req_sat: p.req_sat, req_sun: p.req_sun,
+      [`req_${day}`]: checked,
+    }).catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
+    await fetchAll();
+  };
+
   const handleWhoChange = async (p: Participant, who: string) => {
     await api.participants.updatePurchased(Number(eventId), p.id, token, {
       pur_preview: p.pur_preview, pur_thu: p.pur_thu, pur_fri: p.pur_fri,
@@ -621,6 +630,7 @@ export default function LiveBoard() {
                             setEditingRow={setEditingRow}
                             onClaim={handleClaim}
                             onUnclaim={handleUnclaim}
+                            onRequestedToggle={handleRequestedToggle}
                             onPurchaseToggle={handlePurchaseToggle}
                             onWhoChange={handleWhoChange}
                           />
@@ -650,7 +660,7 @@ export default function LiveBoard() {
 
 function CellContent({
   col, p, status, editingRow, setEditingRow,
-  onClaim, onUnclaim, onPurchaseToggle, onWhoChange,
+  onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange,
 }: {
   col: ColKey;
   p: Participant;
@@ -660,6 +670,7 @@ function CellContent({
   setEditingRow: (id: number | null) => void;
   onClaim: (p: Participant) => void;
   onUnclaim: (p: Participant) => void;
+  onRequestedToggle: (p: Participant, day: DayKey, checked: boolean) => void;
   onPurchaseToggle: (p: Participant, day: DayKey, checked: boolean) => void;
   onWhoChange: (p: Participant, who: string) => void;
 }) {
@@ -718,11 +729,14 @@ function CellContent({
             const req = p[`req_${day}` as keyof Participant] as boolean;
             return (
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                <div className={`w-4 h-4 rounded-sm ${
-                  req
-                    ? 'bg-gray-400 dark:bg-gray-500'
-                    : 'border border-gray-200 dark:border-gray-700/50'
-                }`} />
+                <button
+                  onClick={() => onRequestedToggle(p, day, !req)}
+                  className={`w-4 h-4 rounded-sm border-2 transition-colors ${
+                    req
+                      ? 'bg-gray-400 border-gray-500 dark:bg-gray-500 dark:border-gray-400'
+                      : 'bg-transparent border-gray-300 hover:border-gray-400 dark:border-gray-600 dark:hover:border-gray-500'
+                  }`}
+                />
               </div>
             );
           })}
@@ -747,7 +761,7 @@ function CellContent({
                     }`}
                   />
                 ) : (
-                  <div className="w-4 h-4 rounded-sm border border-gray-100 dark:border-gray-700/40" />
+                  <div className="w-4 h-4 rounded-sm border border-gray-200 dark:border-gray-700" />
                 )}
               </div>
             );
@@ -762,10 +776,10 @@ function CellContent({
             const isGap = p.gaps.includes(day);
             return (
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                <div className={`w-4 h-4 rounded-sm ${
+                <div className={`w-4 h-4 rounded-sm border-2 ${
                   isGap
-                    ? 'bg-red-500 border border-red-600 dark:bg-red-500 dark:border-red-400'
-                    : 'border border-gray-100 dark:border-gray-700/40'
+                    ? 'bg-red-500 border-red-600 dark:bg-red-500 dark:border-red-400'
+                    : 'border-gray-200 dark:border-gray-700'
                 }`} />
               </div>
             );
