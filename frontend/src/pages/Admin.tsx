@@ -1287,31 +1287,14 @@ function DatesTab({
     </div>
   );
 
-  const DateRange = ({ label, startField, endField }: { label: string; startField: keyof DateFields; endField: keyof DateFields }) => (
-    <div className="flex items-center gap-3">
-      <label className="text-sm text-gray-300 w-52 shrink-0">{label}</label>
-      <input
-        type="date" value={form[startField]}
-        onChange={(e) => set(startField, e.target.value)}
-        className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
-      />
-      <span className="text-gray-500 text-sm">to</span>
-      <input
-        type="date" value={form[endField]}
-        onChange={(e) => set(endField, e.target.value)}
-        className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
-      />
-    </div>
-  );
-
   return (
     <div className="max-w-2xl space-y-8">
-      {/* Registration windows */}
+      {/* Registration dates */}
       <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
-        <h3 className="font-semibold text-gray-200 mb-4">Registration Windows</h3>
+        <h3 className="font-semibold text-gray-200 mb-4">Registration Dates</h3>
         <div className="space-y-3">
-          <DateRange label="Return Registration" startField="return_reg_start" endField="return_reg_end" />
-          <DateRange label="Open Registration" startField="open_reg_start" endField="open_reg_end" />
+          <DateInput label="Return Registration" field="return_reg_start" />
+          <DateInput label="Open Registration" field="open_reg_start" />
         </div>
       </div>
 
