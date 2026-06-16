@@ -4,6 +4,7 @@ import Registration from './pages/Registration';
 import LiveBoard from './pages/LiveBoard';
 import Payment from './pages/Payment';
 import Admin from './pages/Admin';
+import Stats from './pages/Stats';
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/live/:eventId" element={<LiveBoard />} />
         <Route path="/payment/:eventId" element={<Payment />} />
         <Route path="/admin" element={<Admin />} />
+        <Route path="/stats" element={<Stats />} />
       </Routes>
     </BrowserRouter>
   );
