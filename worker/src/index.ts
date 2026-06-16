@@ -118,7 +118,7 @@ app.post('/api/events/:id/register', async (c) => {
 
   const badgeType = body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT';
 
-  await c.env.DB.prepare(`
+  const result = await c.env.DB.prepare(`
     INSERT INTO participants
       (event_id, first_name, last_name, member_id, badge_type, sponsor,
        req_preview, req_thu, req_fri, req_sat, req_sun, sort_order)
@@ -137,7 +137,7 @@ app.post('/api/events/:id/register', async (c) => {
     body.req_sun ? 1 : 0,
   ).run();
 
-  return json({ ok: true }, 201);
+  return json({ ok: true, id: result.meta.last_row_id }, 201);
 });
 
 // Claim a participant row for purchasing

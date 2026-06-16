@@ -39,7 +39,8 @@ export default function Registration() {
       return;
     }
     try {
-      await api.participants.register(Number(eventId), token, form);
+      const res = await api.participants.register(Number(eventId), token, form);
+      localStorage.setItem(`komikone_id_${eventId}`, String(res.id));
       setSubmitted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Submission failed');
@@ -61,7 +62,7 @@ export default function Registration() {
           <div className="text-green-400 text-4xl mb-4">✓</div>
           <h2 className="text-white text-xl font-bold mb-2">You're registered!</h2>
           <p className="text-gray-400 text-sm mb-6">
-            Tony will review your registration and assign you a coordinator before purchase day.
+            On purchase day, open the live board link — you'll be recognized automatically.
           </p>
           <Link to="/" className="text-blue-400 hover:text-blue-300 text-sm">← Back to home</Link>
         </div>

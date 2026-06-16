@@ -96,7 +96,11 @@ export default function LiveBoard() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [myName, setMyName] = useState(() => localStorage.getItem('komikone_myname') ?? '');
+  const [identityId, setIdentityId] = useState<number | null>(() => {
+    const stored = localStorage.getItem(`komikone_id_${eventId}`);
+    return stored ? Number(stored) : null;
+  });
+  const [showWhoModal, setShowWhoModal] = useState(false);
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [flash, setFlash] = useState<Record<number, boolean>>({});
   const prevIds = useRef<Set<number>>(new Set());
@@ -201,19 +205,18 @@ export default function LiveBoard() {
     return () => clearInterval(interval);
   }, [eventId, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Show identity modal on first load if not identified
+  useEffect(() => {
+    if (identityId === null && participants.length > 0) setShowWhoModal(true);
+  }, [participants.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Actions ────────────────────────────────────────────────────────────────
 
   const handleClaim = async (p: Participant) => {
-    let name = myName.trim();
-    if (!name) {
-      const entered = prompt('Enter your name:');
-      if (!entered) return;
-      name = entered;
-      localStorage.setItem('komikone_myname', name);
-      setMyName(name);
-    }
+    const me = participants.find((x) => x.id === identityId);
+    if (!me) { setShowWhoModal(true); return; }
     try {
-      await api.participants.claim(Number(eventId), p.id, token, name);
+      await api.participants.claim(Number(eventId), p.id, token, `${me.first_name} ${me.last_name}`);
       await fetchAll();
     } catch (e) { alert(e instanceof Error ? e.message : 'Failed'); }
   };
@@ -226,10 +229,12 @@ export default function LiveBoard() {
   };
 
   const handlePurchaseToggle = async (p: Participant, day: DayKey, checked: boolean) => {
+    const me = participants.find((x) => x.id === identityId);
+    const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
     await api.participants.updatePurchased(Number(eventId), p.id, token, {
       pur_preview: p.pur_preview, pur_thu: p.pur_thu, pur_fri: p.pur_fri,
       pur_sat: p.pur_sat, pur_sun: p.pur_sun,
-      who_purchased: p.who_purchased || myName,
+      who_purchased: p.who_purchased || myDisplayName,
       [`pur_${day}`]: checked,
     }).catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
     await fetchAll();
@@ -358,9 +363,37 @@ export default function LiveBoard() {
   const inProgress = participants.filter((p) => !p.all_purchased && p.claim_active).length;
   const remaining  = participants.filter((p) => !p.all_purchased && !p.claim_active).length;
   const withGaps   = participants.filter((p) => p.gaps.length > 0 && p.any_purchased).length;
-  const myCandidates = participants.filter((p) => !p.all_purchased && !p.claim_active).slice(0, 3);
+
+  const me = participants.find((p) => p.id === identityId) ?? null;
+  const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
+
+  const priorityQueue = participants
+    .filter((p) => !p.all_purchased && !p.claim_active)
+    .sort((a, b) => {
+      // 1. Self first
+      const aMe = a.id === identityId ? 1 : 0;
+      const bMe = b.id === identityId ? 1 : 0;
+      if (bMe !== aMe) return bMe - aMe;
+      // 2. Same sponsor group
+      const aGroup = me?.sponsor && a.sponsor === me.sponsor ? 1 : 0;
+      const bGroup = me?.sponsor && b.sponsor === me.sponsor ? 1 : 0;
+      if (bGroup !== aGroup) return bGroup - aGroup;
+      // 3. More days requested = higher priority
+      const aDays = DAY_KEYS.filter((d) => a[`req_${d}` as keyof Participant]).length;
+      const bDays = DAY_KEYS.filter((d) => b[`req_${d}` as keyof Participant]).length;
+      if (bDays !== aDays) return bDays - aDays;
+      // 4. Registration order
+      return a.sort_order - b.sort_order;
+    })
+    .slice(0, 3);
 
   const allCols = [...FROZEN, ...movableCols];
+
+  const handleSetIdentity = (pid: number) => {
+    localStorage.setItem(`komikone_id_${eventId}`, String(pid));
+    setIdentityId(pid);
+    setShowWhoModal(false);
+  };
 
   // ─── Loading / error ─────────────────────────────────────────────────────────
 
@@ -399,14 +432,25 @@ export default function LiveBoard() {
           {withGaps > 0 && <span className="text-red-200 dark:text-red-400 font-bold">{withGaps} gaps</span>}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-red-100 dark:text-gray-400 text-xs">You:</span>
-          <input
-            type="text"
-            value={myName}
-            onChange={(e) => { setMyName(e.target.value); localStorage.setItem('komikone_myname', e.target.value); }}
-            placeholder="Your name"
-            className="bg-white dark:bg-gray-800 border border-red-200 dark:border-gray-600 rounded px-2 py-1 text-xs text-gray-900 dark:text-white w-28 focus:outline-none focus:border-yellow-400"
-          />
+          {me ? (
+            <>
+              <span className="text-red-100 dark:text-gray-400 text-xs">You:</span>
+              <span className="text-white dark:text-yellow-300 text-xs font-semibold">{myDisplayName}</span>
+              <button
+                onClick={() => setShowWhoModal(true)}
+                className="text-red-300 dark:text-gray-500 hover:text-white dark:hover:text-gray-300 text-xs underline"
+              >
+                change
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setShowWhoModal(true)}
+              className="text-xs font-bold px-3 py-1 rounded bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-black"
+            >
+              Who are you? →
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className="text-red-200 dark:text-gray-500 text-xs">
@@ -418,15 +462,19 @@ export default function LiveBoard() {
         </div>
       </div>
 
-      {/* ── Candidates bar ── */}
-      {myCandidates.length > 0 && myName && (
+      {/* ── Priority queue bar ── */}
+      {priorityQueue.length > 0 && me && (
         <div className="bg-blue-600 dark:bg-blue-950/40 border-b-2 border-black dark:border-blue-800 px-4 py-2 shrink-0">
-          <span className="text-white dark:text-blue-300 text-xs font-bold">Next to buy for: </span>
-          {myCandidates.map((p, i) => (
+          <span className="text-white dark:text-blue-300 text-xs font-bold">Buy next: </span>
+          {priorityQueue.map((p, i) => (
             <span key={p.id} className="text-xs">
               {i > 0 && <span className="text-blue-300 dark:text-gray-600">, </span>}
               <button onClick={() => handleClaim(p)} className="text-yellow-300 dark:text-white underline hover:text-white dark:hover:text-blue-300">
                 {p.first_name} {p.last_name}
+                {p.id === identityId && <span className="text-blue-200 dark:text-blue-400 ml-1">(you)</span>}
+                {me.sponsor && p.sponsor === me.sponsor && p.id !== identityId && (
+                  <span className="text-blue-200 dark:text-blue-400 ml-1">· {p.sponsor}</span>
+                )}
               </button>
             </span>
           ))}
@@ -485,6 +533,15 @@ export default function LiveBoard() {
           )}
         </div>
       </div>
+
+      {/* ── Who are you modal ── */}
+      {showWhoModal && (
+        <WhoAreYouModal
+          participants={participants}
+          onSelect={handleSetIdentity}
+          onDismiss={() => setShowWhoModal(false)}
+        />
+      )}
 
       {/* ── Table ── */}
       <div className="flex-1 overflow-auto">
@@ -850,6 +907,64 @@ function CellContent({
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function WhoAreYouModal({
+  participants, onSelect, onDismiss,
+}: {
+  participants: Participant[];
+  onSelect: (id: number) => void;
+  onDismiss: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const filtered = participants.filter((p) => {
+    const q = search.toLowerCase();
+    return !q || p.first_name.toLowerCase().includes(q) || p.last_name.toLowerCase().includes(q);
+  });
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-sm shadow-2xl">
+        <div className="px-5 pt-5 pb-3 border-b border-gray-800">
+          <h2 className="text-white font-bold text-lg">Who are you?</h2>
+          <p className="text-gray-400 text-sm mt-0.5">Select yourself from the participant list</p>
+          <input
+            autoFocus
+            type="search"
+            placeholder="Search by name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full mt-3 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 placeholder-gray-500"
+          />
+        </div>
+        <div className="overflow-y-auto max-h-72 py-1">
+          {filtered.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => onSelect(p.id)}
+              className="w-full text-left px-5 py-2.5 hover:bg-gray-800 transition-colors"
+            >
+              <span className="text-white font-medium text-sm">{p.first_name} {p.last_name}</span>
+              {p.sponsor && (
+                <span className="ml-2 text-xs text-gray-500">via {p.sponsor}</span>
+              )}
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <p className="text-gray-500 text-sm px-5 py-4 text-center">No match</p>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t border-gray-800">
+          <button
+            onClick={onDismiss}
+            className="text-gray-500 hover:text-gray-300 text-sm"
+          >
+            I'm not on the list — continue as observer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function WhoInput({ initial, onSave, onCancel }: { initial: string; onSave: (v: string) => void; onCancel: () => void }) {
   const [val, setVal] = useState(initial);
