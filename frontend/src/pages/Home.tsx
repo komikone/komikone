@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, type EventSummary } from '../lib/api';
+import { useTheme } from '../lib/useTheme';
 
 export default function Home() {
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') ?? '';
+  const { toggle, isDark } = useTheme();
 
   useEffect(() => {
     api.events.list().then(setEvents).catch(() => {});
@@ -15,23 +17,31 @@ export default function Home() {
   const past = events.filter((e) => e.status === 'complete');
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
+    <div className="min-h-screen bg-amber-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
       {/* Header */}
-      <header className="relative bg-black border-b-4 border-yellow-400 overflow-hidden">
+      <header className="relative bg-red-600 dark:bg-black border-b-4 border-black dark:border-yellow-400 overflow-hidden">
         <div className="halftone-bg absolute inset-0" />
         <div className="relative px-6 py-6 flex items-center justify-between">
           <div>
-            <h1 className="font-bangers text-5xl text-yellow-400 leading-none">komikone</h1>
-            <p className="text-gray-400 text-xs mt-1 uppercase tracking-widest">
+            <h1 className="font-bangers text-5xl text-white dark:text-yellow-400 leading-none">komikone</h1>
+            <p className="text-red-200 dark:text-gray-400 text-xs mt-1 uppercase tracking-widest">
               San Diego Comic-Con · Badge Coordinator
             </p>
           </div>
-          <Link
-            to="/admin"
-            className="text-xs text-gray-500 hover:text-yellow-400 transition-colors uppercase tracking-widest"
-          >
-            Admin
-          </Link>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={toggle}
+              className="text-xs text-red-200 dark:text-gray-500 hover:text-white dark:hover:text-yellow-400 border border-red-400 dark:border-gray-700 px-2 py-1 rounded transition-colors uppercase tracking-widest"
+            >
+              {isDark ? '☀ Day' : '◑ Night'}
+            </button>
+            <Link
+              to="/admin"
+              className="text-xs text-red-200 dark:text-gray-500 hover:text-white dark:hover:text-yellow-400 transition-colors uppercase tracking-widest"
+            >
+              Admin
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -39,7 +49,7 @@ export default function Home() {
         {/* Active events */}
         {active.length > 0 && (
           <section>
-            <h2 className="font-bangers text-2xl text-yellow-400 mb-4 tracking-wide">Active Events</h2>
+            <h2 className="font-bangers text-2xl text-red-600 dark:text-yellow-400 mb-4 tracking-wide">Active Events</h2>
             <div className="space-y-4">
               {active.map((e) => (
                 <EventCard key={e.id} event={e} token={token} />
@@ -50,17 +60,17 @@ export default function Home() {
 
         {/* Instructions */}
         <section>
-          <h2 className="font-bangers text-2xl text-yellow-400 mb-4 tracking-wide">How It Works</h2>
+          <h2 className="font-bangers text-2xl text-red-600 dark:text-yellow-400 mb-4 tracking-wide">How It Works</h2>
           <BuyingInstructions />
         </section>
 
         {/* Past events */}
         {past.length > 0 && (
           <section>
-            <h2 className="font-bangers text-xl text-gray-600 mb-3 tracking-wide">Past Events</h2>
+            <h2 className="font-bangers text-xl text-gray-400 dark:text-gray-600 mb-3 tracking-wide">Past Events</h2>
             <div className="space-y-1">
               {past.map((e) => (
-                <div key={e.id} className="text-gray-600 text-sm">
+                <div key={e.id} className="text-gray-500 dark:text-gray-600 text-sm">
                   {e.name} — {e.reg_type === 'return' ? 'Return Reg' : 'Open Reg'}
                 </div>
               ))}
@@ -74,11 +84,11 @@ export default function Home() {
 
 function StatusBadge({ status }: { status: EventSummary['status'] }) {
   const styles: Record<EventSummary['status'], string> = {
-    setup:        'bg-gray-800 text-gray-400 border border-gray-600',
+    setup:        'bg-gray-200 text-gray-600 border border-gray-400 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600',
     registration: 'bg-blue-600 text-white border border-blue-400',
-    purchasing:   'bg-yellow-400 text-black border-2 border-black animate-pulse',
+    purchasing:   'bg-red-600 text-white border-2 border-black dark:bg-yellow-400 dark:text-black dark:border-black animate-pulse',
     payment:      'bg-purple-600 text-white border border-purple-400',
-    complete:     'bg-green-800 text-green-300 border border-green-600',
+    complete:     'bg-green-600 text-white border border-green-400 dark:bg-green-800 dark:text-green-300 dark:border-green-600',
   };
   const labels: Record<EventSummary['status'], string> = {
     setup:        'Setting Up',
@@ -103,14 +113,14 @@ function EventCard({ event, token }: { event: EventSummary; token: string }) {
     <div
       className={`border-2 p-5 comic-shadow ${
         isPurchasing
-          ? 'border-yellow-400 bg-yellow-950/20'
-          : 'border-gray-600 bg-gray-900'
+          ? 'border-red-600 bg-red-50 dark:border-yellow-400 dark:bg-yellow-950/20'
+          : 'border-black bg-white dark:border-gray-600 dark:bg-gray-900'
       }`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="font-bangers text-2xl text-white tracking-wide leading-tight">{event.name}</h3>
-          <p className="text-xs text-gray-500 mt-0.5 uppercase tracking-widest">
+          <h3 className="font-bangers text-2xl text-gray-900 dark:text-white tracking-wide leading-tight">{event.name}</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5 uppercase tracking-widest">
             {event.reg_type === 'return' ? 'Return Registration' : 'Open Registration'}
           </p>
         </div>
@@ -122,7 +132,7 @@ function EventCard({ event, token }: { event: EventSummary; token: string }) {
           {isRegistration && (
             <Link
               to={`/register/${event.id}?token=${token}`}
-              className="font-bangers tracking-wide text-base bg-blue-600 hover:bg-blue-500 text-white px-5 py-1.5 border-2 border-blue-400 comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
+              className="font-bangers tracking-wide text-base bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
             >
               Register →
             </Link>
@@ -130,7 +140,7 @@ function EventCard({ event, token }: { event: EventSummary; token: string }) {
           {isPurchasing && (
             <Link
               to={`/live/${event.id}?token=${token}`}
-              className="font-bangers tracking-wide text-base bg-yellow-400 hover:bg-yellow-300 text-black px-5 py-1.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
+              className="font-bangers tracking-wide text-base bg-red-600 hover:bg-red-700 text-white px-5 py-1.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all dark:bg-yellow-400 dark:hover:bg-yellow-300 dark:text-black"
             >
               Open Live Board →
             </Link>
@@ -138,7 +148,7 @@ function EventCard({ event, token }: { event: EventSummary; token: string }) {
           {(isPayment || isPurchasing) && (
             <Link
               to={`/payment/${event.id}?token=${token}`}
-              className="font-bangers tracking-wide text-base bg-purple-600 hover:bg-purple-500 text-white px-5 py-1.5 border-2 border-purple-400 comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
+              className="font-bangers tracking-wide text-base bg-purple-600 hover:bg-purple-700 text-white px-5 py-1.5 border-2 border-purple-400 comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
             >
               Payment Info →
             </Link>
@@ -191,12 +201,12 @@ function BuyingInstructions() {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       {sections.map(({ title, items }) => (
-        <div key={title} className="border-2 border-gray-700 bg-gray-900 p-4 comic-shadow">
-          <h3 className="font-bangers text-lg text-yellow-400 tracking-wide mb-2">{title}</h3>
+        <div key={title} className="border-2 border-black dark:border-gray-700 bg-white dark:bg-gray-900 p-4 comic-shadow">
+          <h3 className="font-bangers text-lg text-red-600 dark:text-yellow-400 tracking-wide mb-2">{title}</h3>
           <ul className="space-y-1.5">
             {items.map((item) => (
-              <li key={item} className="text-gray-400 text-sm leading-snug flex gap-2">
-                <span className="text-yellow-600 mt-0.5 shrink-0">▸</span>
+              <li key={item} className="text-gray-700 dark:text-gray-400 text-sm leading-snug flex gap-2">
+                <span className="text-red-500 dark:text-yellow-600 mt-0.5 shrink-0">▸</span>
                 <span>{item}</span>
               </li>
             ))}

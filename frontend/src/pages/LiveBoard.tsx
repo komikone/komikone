@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { api, type EventDetail, type Participant, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
+import { useTheme } from '../lib/useTheme';
 
 const POLL_MS = 8000;
 
@@ -15,9 +16,9 @@ function rowStatus(p: Participant): RowStatus {
 
 function rowBg(status: RowStatus): string {
   switch (status) {
-    case 'complete': return 'bg-green-900/40 border-l-4 border-l-green-500';
-    case 'claiming': return 'bg-yellow-900/40 border-l-4 border-l-yellow-400';
-    case 'partial': return 'bg-blue-900/20 border-l-4 border-l-blue-500';
+    case 'complete': return 'bg-green-100 border-l-4 border-l-green-600 dark:bg-green-900/40 dark:border-l-green-500';
+    case 'claiming': return 'bg-yellow-50 border-l-4 border-l-orange-500 dark:bg-yellow-900/40 dark:border-l-yellow-400';
+    case 'partial': return 'bg-blue-50 border-l-4 border-l-blue-500 dark:bg-blue-900/20 dark:border-l-blue-500';
     default: return 'border-l-4 border-l-transparent';
   }
 }
@@ -26,6 +27,7 @@ export default function LiveBoard() {
   const { eventId } = useParams<{ eventId: string }>();
   const [params] = useSearchParams();
   const token = params.get('token') ?? '';
+  const { toggle, isDark } = useTheme();
 
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -45,7 +47,6 @@ export default function LiveBoard() {
       ]);
       setEvent(ev);
 
-      // Flash rows that changed since last fetch
       const newFlash: Record<number, boolean> = {};
       for (const p of ps) {
         if (prevIds.current.has(p.id)) {
@@ -58,7 +59,6 @@ export default function LiveBoard() {
         setTimeout(() => setFlash({}), 1200);
       }
       prevIds.current = new Set(ps.map((p) => p.id));
-
       setParticipants(ps);
       setLastUpdated(new Date());
       setError('');
@@ -100,11 +100,8 @@ export default function LiveBoard() {
 
   const handlePurchaseToggle = async (p: Participant, day: DayKey, checked: boolean) => {
     const data = {
-      pur_preview: p.pur_preview,
-      pur_thu: p.pur_thu,
-      pur_fri: p.pur_fri,
-      pur_sat: p.pur_sat,
-      pur_sun: p.pur_sun,
+      pur_preview: p.pur_preview, pur_thu: p.pur_thu, pur_fri: p.pur_fri,
+      pur_sat: p.pur_sat, pur_sun: p.pur_sun,
       who_purchased: p.who_purchased || myName,
       [`pur_${day}`]: checked,
     };
@@ -135,14 +132,11 @@ export default function LiveBoard() {
   const remaining = participants.filter((p) => !p.all_purchased && !p.claim_active).length;
   const withGaps = participants.filter((p) => p.gaps.length > 0 && p.any_purchased).length;
 
-  // "Who should I buy for?" — first unclaimed, unpurchased rows
-  const myCandidates = participants
-    .filter((p) => !p.all_purchased && !p.claim_active)
-    .slice(0, 3);
+  const myCandidates = participants.filter((p) => !p.all_purchased && !p.claim_active).slice(0, 3);
 
   if (!event && !error) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-amber-50 dark:bg-gray-950 text-gray-900 dark:text-white flex items-center justify-center">
         <div className="text-gray-400">Loading...</div>
       </div>
     );
@@ -150,36 +144,37 @@ export default function LiveBoard() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-        <div className="text-red-400">{error}</div>
+      <div className="min-h-screen bg-amber-50 dark:bg-gray-950 text-gray-900 dark:text-white flex items-center justify-center">
+        <div className="text-red-600 dark:text-red-400">{error}</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+    <div className="min-h-screen bg-amber-50 dark:bg-gray-950 text-gray-950 dark:text-white flex flex-col">
+
       {/* Top bar */}
-      <div className="bg-black border-b-4 border-yellow-400 px-4 py-2 flex items-center gap-4 flex-wrap">
-        <span className="font-bangers text-yellow-400 text-xl tracking-wide shrink-0">komikone</span>
-        <span className="text-gray-700 shrink-0">|</span>
+      <div className="bg-red-600 border-b-4 border-black dark:bg-black dark:border-yellow-400 px-4 py-2 flex items-center gap-4 flex-wrap">
+        <span className="font-bangers text-white dark:text-yellow-400 text-xl tracking-wide shrink-0">komikone</span>
+        <span className="text-red-300 dark:text-gray-700 shrink-0">|</span>
         <div className="flex-1 min-w-0">
           <span className="font-bangers text-white text-lg tracking-wide">{event?.name}</span>
-          <span className="ml-2 text-gray-500 text-xs uppercase tracking-widest">
+          <span className="ml-2 text-red-200 dark:text-gray-500 text-xs uppercase tracking-widest">
             {event?.reg_type === 'return' ? 'Return Reg' : 'Open Reg'} · Live Board
           </span>
         </div>
 
         {/* Stats */}
         <div className="flex gap-4 text-sm font-mono">
-          <span className="text-green-400">{purchased} complete</span>
-          <span className="text-yellow-400">{inProgress} in progress</span>
-          <span className="text-gray-300">{remaining} remaining</span>
-          {withGaps > 0 && <span className="text-red-400">{withGaps} with gaps</span>}
+          <span className="text-green-200 font-bold dark:text-green-400 dark:font-normal">{purchased} complete</span>
+          <span className="text-yellow-200 font-bold dark:text-yellow-400 dark:font-normal">{inProgress} in progress</span>
+          <span className="text-white dark:text-gray-300">{remaining} remaining</span>
+          {withGaps > 0 && <span className="text-red-200 font-bold dark:text-red-400 dark:font-normal">{withGaps} with gaps</span>}
         </div>
 
-        {/* My name */}
+        {/* You: */}
         <div className="flex items-center gap-2">
-          <span className="text-gray-400 text-xs">You:</span>
+          <span className="text-red-100 dark:text-gray-400 text-xs">You:</span>
           <input
             type="text"
             value={myName}
@@ -188,26 +183,34 @@ export default function LiveBoard() {
               localStorage.setItem('komikone_myname', e.target.value);
             }}
             placeholder="Your name"
-            className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white w-28 focus:outline-none focus:border-blue-400"
+            className="bg-white dark:bg-gray-800 border border-red-200 dark:border-gray-600 rounded px-2 py-1 text-xs text-gray-900 dark:text-white w-28 focus:outline-none focus:border-yellow-400"
           />
         </div>
 
-        {/* Last updated */}
-        <div className="text-gray-500 text-xs">
-          {lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Loading...'}
+        {/* Updated + theme toggle */}
+        <div className="flex items-center gap-3">
+          <span className="text-red-200 dark:text-gray-500 text-xs">
+            {lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Loading...'}
+          </span>
+          <button
+            onClick={toggle}
+            className="text-red-100 dark:text-gray-400 hover:text-white dark:hover:text-yellow-400 text-xs border border-red-300 dark:border-gray-700 px-2 py-0.5 rounded transition-colors"
+          >
+            {isDark ? '☀ Day' : '◑ Night'}
+          </button>
         </div>
       </div>
 
       {/* Who should I buy for? */}
       {myCandidates.length > 0 && myName && (
-        <div className="bg-blue-950/40 border-b border-blue-800 px-4 py-2">
-          <span className="text-blue-300 text-xs font-medium">Next to buy for: </span>
+        <div className="bg-blue-600 dark:bg-blue-950/40 border-b-2 border-black dark:border-blue-800 px-4 py-2">
+          <span className="text-white font-bold dark:text-blue-300 dark:font-medium text-xs">Next to buy for: </span>
           {myCandidates.map((p, i) => (
-            <span key={p.id} className="text-white text-xs">
-              {i > 0 && ', '}
+            <span key={p.id} className="text-xs">
+              {i > 0 && <span className="text-blue-300 dark:text-gray-600">, </span>}
               <button
                 onClick={() => handleClaim(p)}
-                className="underline hover:text-blue-300"
+                className="text-yellow-300 dark:text-white underline hover:text-white dark:hover:text-blue-300"
               >
                 {p.first_name} {p.last_name}
               </button>
@@ -218,11 +221,13 @@ export default function LiveBoard() {
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
-        <table className="w-full text-sm min-w-[900px]">
-          <thead className="sticky top-0 bg-gray-900 text-gray-400 text-xs uppercase">
+        <table className="w-full text-sm min-w-[1100px]">
+          <thead className="sticky top-0 bg-black dark:bg-gray-900 text-white dark:text-gray-400 text-xs uppercase">
             <tr>
               <th className="px-3 py-2 text-left w-6">#</th>
-              <th className="px-3 py-2 text-left">Name</th>
+              <th className="px-3 py-2 text-left">First</th>
+              <th className="px-3 py-2 text-left">Last</th>
+              <th className="px-3 py-2 text-left">Sponsor</th>
               <th className="px-3 py-2 text-left">Member ID</th>
               <th className="px-3 py-2 text-center">Requested</th>
               <th className="px-3 py-2 text-center">Status</th>
@@ -232,60 +237,65 @@ export default function LiveBoard() {
               <th className="px-3 py-2 text-left">Who Bought</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-800">
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
             {participants.map((p, idx) => {
               const status = rowStatus(p);
               const isFlashing = flash[p.id];
               return (
                 <tr
                   key={p.id}
-                  className={`${rowBg(status)} ${isFlashing ? 'animate-pulse' : ''} hover:bg-white/5 transition-colors`}
+                  className={`${rowBg(status)} ${isFlashing ? 'animate-pulse' : ''} hover:bg-black/5 dark:hover:bg-white/5 transition-colors`}
                 >
-                  {/* Sort # */}
-                  <td className="px-3 py-2 text-gray-500 text-xs">{idx + 1}</td>
+                  {/* # */}
+                  <td className="px-3 py-2 text-gray-400 dark:text-gray-500 text-xs">{idx + 1}</td>
 
-                  {/* Name */}
+                  {/* First name */}
                   <td className="px-3 py-2">
-                    <div className="font-medium text-white">
-                      {p.first_name} {p.last_name}
-                    </div>
+                    <div className="font-semibold text-gray-900 dark:text-white">{p.first_name}</div>
                     {p.badge_type === 'JUNIOR' && (
-                      <span className="text-xs text-blue-400">JR</span>
+                      <span className="text-[10px] px-1 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-300 dark:bg-blue-900/60 dark:text-blue-300 dark:border-blue-700">JR</span>
                     )}
+                  </td>
+
+                  {/* Last name */}
+                  <td className="px-3 py-2">
+                    <div className="font-semibold text-gray-900 dark:text-white">{p.last_name}</div>
                     {p.return_eligible && (
-                      <span className="text-xs text-green-400 ml-1">✓ Return</span>
+                      <span className="text-[10px] font-semibold text-green-700 dark:font-normal dark:text-green-400">✓ Return</span>
                     )}
-                    {p.sponsor && (
-                      <div className="text-xs text-gray-500">via {p.sponsor}</div>
-                    )}
-                    {p.purchasing_coordinator && (
-                      <div className="text-xs text-gray-400">→ {p.purchasing_coordinator}</div>
+                  </td>
+
+                  {/* Sponsor */}
+                  <td className="px-3 py-2">
+                    {p.sponsor ? (
+                      <span className="text-xs px-1.5 py-0.5 rounded-sm font-medium bg-purple-100 text-purple-800 border border-purple-300 dark:bg-purple-900/60 dark:text-purple-300 dark:border-purple-700">
+                        {p.sponsor}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-300 dark:text-gray-700">—</span>
                     )}
                   </td>
 
                   {/* Member ID */}
-                  <td className="px-3 py-2 font-mono text-xs text-gray-300">{p.member_id || '—'}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-gray-700 dark:text-gray-300">{p.member_id || '—'}</td>
 
                   {/* Requested days */}
                   <td className="px-3 py-2">
-                    <DayPips
-                      days={{ preview: p.req_preview, thu: p.req_thu, fri: p.req_fri, sat: p.req_sat, sun: p.req_sun }}
-                      color="bg-gray-400"
-                    />
+                    <DayPips days={{ preview: p.req_preview, thu: p.req_thu, fri: p.req_fri, sat: p.req_sat, sun: p.req_sun }} />
                   </td>
 
-                  {/* Claim status / action */}
+                  {/* Claim status */}
                   <td className="px-3 py-2 text-center">
                     {status === 'complete' ? (
-                      <span className="text-green-400 text-xs font-medium">Complete</span>
+                      <span className="text-xs font-bold text-green-700 dark:font-medium dark:text-green-400">Complete</span>
                     ) : p.claim_active ? (
                       <div className="flex flex-col items-center gap-1">
-                        <span className="text-yellow-400 text-xs font-medium">
+                        <span className="text-xs font-bold text-orange-600 dark:font-medium dark:text-yellow-400">
                           {p.purchasing_claimed_by}
                         </span>
                         <button
                           onClick={() => handleUnclaim(p)}
-                          className="text-xs text-gray-400 hover:text-red-400 underline"
+                          className="text-xs underline text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
                         >
                           Release
                         </button>
@@ -293,7 +303,7 @@ export default function LiveBoard() {
                     ) : (
                       <button
                         onClick={() => handleClaim(p)}
-                        className="bg-yellow-500 hover:bg-yellow-400 text-yellow-950 text-xs font-bold px-3 py-1 rounded transition-colors"
+                        className="text-xs font-bold px-3 py-1 rounded transition-colors bg-red-600 hover:bg-red-700 text-white border-2 border-black dark:bg-yellow-500 dark:hover:bg-yellow-400 dark:text-yellow-950 dark:border-transparent"
                       >
                         Claim
                       </button>
@@ -316,7 +326,7 @@ export default function LiveBoard() {
                               type="checkbox"
                               checked={purchased}
                               onChange={(e) => handlePurchaseToggle(p, day, e.target.checked)}
-                              className="w-4 h-4 rounded accent-green-500 cursor-pointer"
+                              className="w-4 h-4 rounded accent-green-600 dark:accent-green-500 cursor-pointer"
                             />
                           </label>
                         );
@@ -327,16 +337,16 @@ export default function LiveBoard() {
                   {/* Gaps */}
                   <td className="px-3 py-2 text-center">
                     {p.gaps.length > 0 ? (
-                      <span className="text-red-400 text-xs font-medium">{p.gaps.join(', ')}</span>
+                      <span className="text-xs font-bold text-red-700 dark:font-medium dark:text-red-400">{p.gaps.join(', ')}</span>
                     ) : p.any_purchased ? (
-                      <span className="text-green-500 text-xs">—</span>
+                      <span className="text-xs text-green-600 dark:text-green-500">—</span>
                     ) : (
-                      <span className="text-gray-600 text-xs">—</span>
+                      <span className="text-xs text-gray-300 dark:text-gray-600">—</span>
                     )}
                   </td>
 
                   {/* Total */}
-                  <td className="px-3 py-2 text-right font-mono text-xs text-gray-200">
+                  <td className="px-3 py-2 text-right font-mono text-xs text-gray-800 dark:text-gray-200">
                     {p.purchase_total > 0 ? formatDollars(p.purchase_total) : '—'}
                   </td>
 
@@ -351,9 +361,9 @@ export default function LiveBoard() {
                     ) : (
                       <button
                         onClick={() => setEditingRow(p.id)}
-                        className="text-xs text-gray-400 hover:text-white text-left"
+                        className="text-xs text-left text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
                       >
-                        {p.who_purchased || <span className="text-gray-600 italic">tap to set</span>}
+                        {p.who_purchased || <span className="italic text-gray-400 dark:text-gray-600">tap to set</span>}
                       </button>
                     )}
                   </td>
@@ -367,7 +377,7 @@ export default function LiveBoard() {
   );
 }
 
-function DayPips({ days, color }: { days: Record<string, boolean>; color: string }) {
+function DayPips({ days }: { days: Record<string, boolean> }) {
   const labels: [string, string][] = [
     ['preview', 'PV'], ['thu', 'Th'], ['fri', 'Fr'], ['sat', 'Sa'], ['sun', 'Su'],
   ];
@@ -375,7 +385,7 @@ function DayPips({ days, color }: { days: Record<string, boolean>; color: string
     <div className="flex gap-0.5 justify-center">
       {labels.map(([key, label]) =>
         days[key] ? (
-          <span key={key} className={`${color} text-white text-[10px] rounded px-1 leading-4`}>
+          <span key={key} className="bg-gray-700 dark:bg-gray-400 text-white text-[10px] rounded px-1 leading-4">
             {label}
           </span>
         ) : (
@@ -399,10 +409,10 @@ function WhoInput({ initial, onSave, onCancel }: { initial: string; onSave: (v: 
           if (e.key === 'Enter') onSave(val);
           if (e.key === 'Escape') onCancel();
         }}
-        className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-xs text-white w-24 focus:outline-none"
+        className="bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-600 rounded px-1.5 py-0.5 text-xs text-gray-900 dark:text-white w-24 focus:outline-none"
       />
-      <button onClick={() => onSave(val)} className="text-xs text-green-400 hover:text-green-300">✓</button>
-      <button onClick={onCancel} className="text-xs text-gray-500 hover:text-red-400">✕</button>
+      <button onClick={() => onSave(val)} className="text-xs text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300">✓</button>
+      <button onClick={onCancel} className="text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400">✕</button>
     </div>
   );
 }
