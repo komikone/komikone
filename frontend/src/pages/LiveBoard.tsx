@@ -558,15 +558,14 @@ export default function LiveBoard() {
               const status = rowStatus(p);
               const naturalIdx = participants.indexOf(p);
               const isFlashing = flash[p.id];
-              const isComplete = status === 'complete';
               const isRowDragTarget = rowDragTarget === p.id;
               const evenRow = dispIdx % 2 === 0;
 
               const frozenBg = isFlashing
                 ? 'bg-blue-100 dark:bg-blue-900/30'
                 : evenRow
-                  ? 'bg-amber-50 dark:bg-gray-950'
-                  : 'bg-amber-100/50 dark:bg-gray-900/60';
+                  ? 'bg-white dark:bg-gray-950'
+                  : 'bg-gray-50 dark:bg-gray-900/40';
 
               const rowBg = isFlashing
                 ? 'bg-blue-100 dark:bg-blue-900/30'
@@ -597,9 +596,6 @@ export default function LiveBoard() {
                           'px-3 py-1.5 border-b border-gray-100 dark:border-gray-800/60 align-middle',
                           isFrozen ? frozenBg : '',
                           col === 'idx' ? statusAccentCls(status) : '',
-                          isComplete && (col === 'first' || col === 'last')
-                            ? 'text-gray-400 dark:text-gray-600 line-through'
-                            : '',
                           isRowDragTarget ? 'border-t-2 border-t-blue-400' : '',
                         ].join(' ')}
                       >
