@@ -234,6 +234,43 @@ app.patch('/api/events/:id/participants/:pid/purchased', async (c) => {
   return json({ ok: true });
 });
 
+// Update requested days (self-service)
+app.patch('/api/events/:id/participants/:pid/requested', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const pid = Number(c.req.param('pid'));
+  const token = c.req.query('token') || c.req.header('x-access-token');
+  const authHeader = c.req.header('authorization');
+  const isAdmin = authHeader === `Bearer ${c.env.ADMIN_SECRET}`;
+
+  const event = await getEvent(c.env.DB, eventId);
+  if (!event) return err('Event not found', 404);
+  if (!isAdmin && token !== event.access_token) return err('Invalid token', 401);
+
+  const body = await c.req.json<{
+    req_preview?: boolean;
+    req_thu?: boolean;
+    req_fri?: boolean;
+    req_sat?: boolean;
+    req_sun?: boolean;
+  }>();
+
+  await c.env.DB.prepare(`
+    UPDATE participants
+    SET req_preview = ?, req_thu = ?, req_fri = ?, req_sat = ?, req_sun = ?,
+        updated_at = datetime('now')
+    WHERE id = ? AND event_id = ?
+  `).bind(
+    body.req_preview ? 1 : 0,
+    body.req_thu ? 1 : 0,
+    body.req_fri ? 1 : 0,
+    body.req_sat ? 1 : 0,
+    body.req_sun ? 1 : 0,
+    pid, eventId,
+  ).run();
+
+  return json({ ok: true });
+});
+
 // Mark participant as paid (self-service)
 app.patch('/api/events/:id/participants/:pid/paid', async (c) => {
   const eventId = Number(c.req.param('id'));
