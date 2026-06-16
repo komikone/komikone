@@ -4,11 +4,14 @@ import { api, type EventDetail, type Participant, formatDollars, DAY_KEYS, type 
 import { useTheme } from '../lib/useTheme';
 
 const POLL_MS = 8000;
+const DAY_SHORT: Record<string, string> = { preview: 'PV', thu: 'Th', fri: 'Fr', sat: 'Sa', sun: 'Su' };
+const DAY_SLOT_W = 26;
+const DAY_GAP = 2;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type RowStatus = 'complete' | 'claiming' | 'partial' | 'none';
-type ColKey = 'idx' | 'first' | 'last' | 'sponsor' | 'member_id' | 'requested' | 'status' | 'purchased' | 'gaps' | 'total' | 'who';
+type ColKey = 'idx' | 'first' | 'last' | 'badge_type' | 'member_id' | 'requested' | 'purchased' | 'gaps' | 'status' | 'sponsor' | 'total' | 'who';
 type SortDir = 'asc' | 'desc';
 
 // ─── Column config ────────────────────────────────────────────────────────────
@@ -20,12 +23,24 @@ const FROZEN_LEFT: Record<string, number> = {
   first: FROZEN_PX.idx,
   last: FROZEN_PX.idx + FROZEN_PX.first,
 };
-const DEFAULT_MOVABLE: ColKey[] = ['sponsor', 'member_id', 'requested', 'status', 'purchased', 'gaps', 'total', 'who'];
+
+const DEFAULT_MOVABLE: ColKey[] = ['member_id', 'requested', 'purchased', 'gaps', 'badge_type', 'sponsor', 'status', 'total', 'who'];
+
 const COL_LABEL: Record<ColKey, string> = {
-  idx: '#', first: 'First', last: 'Last', sponsor: 'Sponsor',
+  idx: '#', first: 'First', last: 'Last', badge_type: 'Badge',
   member_id: 'Member ID', requested: 'Requested', status: 'Status',
   purchased: 'Purchased', gaps: 'Gaps', total: 'Total', who: 'Who Bought',
+  sponsor: 'Sponsor',
 };
+
+const DEFAULT_WIDTHS: Record<ColKey, number> = {
+  idx: 36, first: 90, last: 96,
+  badge_type: 88, member_id: 118,
+  requested: 168, purchased: 168, gaps: 168,
+  sponsor: 112, status: 112, total: 74, who: 118,
+};
+
+const DAY_COLS = new Set<ColKey>(['requested', 'purchased', 'gaps']);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,18 +53,19 @@ function rowStatus(p: Participant): RowStatus {
 
 function sortValue(p: Participant, col: ColKey, naturalIdx: number): string | number {
   switch (col) {
-    case 'idx':       return naturalIdx;
-    case 'first':     return p.first_name.toLowerCase();
-    case 'last':      return p.last_name.toLowerCase();
-    case 'sponsor':   return p.sponsor.toLowerCase();
-    case 'member_id': return p.member_id.toLowerCase();
-    case 'requested': return DAY_KEYS.filter((d) => p[`req_${d}` as keyof Participant]).length;
-    case 'status':    return ['none', 'partial', 'claiming', 'complete'].indexOf(rowStatus(p));
-    case 'purchased': return DAY_KEYS.filter((d) => p[`pur_${d}` as keyof Participant]).length;
-    case 'gaps':      return p.gaps.length;
-    case 'total':     return p.purchase_total;
-    case 'who':       return p.who_purchased.toLowerCase();
-    default:          return 0;
+    case 'idx':        return naturalIdx;
+    case 'first':      return p.first_name.toLowerCase();
+    case 'last':       return p.last_name.toLowerCase();
+    case 'sponsor':    return p.sponsor.toLowerCase();
+    case 'member_id':  return p.member_id.toLowerCase();
+    case 'badge_type': return p.badge_type;
+    case 'requested':  return DAY_KEYS.filter((d) => p[`req_${d}` as keyof Participant]).length;
+    case 'status':     return ['none', 'partial', 'claiming', 'complete'].indexOf(rowStatus(p));
+    case 'purchased':  return DAY_KEYS.filter((d) => p[`pur_${d}` as keyof Participant]).length;
+    case 'gaps':       return p.gaps.length;
+    case 'total':      return p.purchase_total;
+    case 'who':        return p.who_purchased.toLowerCase();
+    default:           return 0;
   }
 }
 
@@ -60,6 +76,12 @@ function statusAccentCls(status: RowStatus): string {
     case 'partial':  return 'border-l-4 border-l-blue-500';
     default:         return 'border-l-4 border-l-transparent';
   }
+}
+
+function wildcardToRegex(s: string): RegExp | null {
+  if (!s) return null;
+  const escaped = s.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  try { return new RegExp(escaped, 'i'); } catch { return null; }
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -100,10 +122,40 @@ export default function LiveBoard() {
   const [filterText, setFilterText] = useState('');
   const [filterStatus, setFilterStatus] = useState<RowStatus | 'all'>('all');
 
+  // Column widths (resizable, movable cols only)
+  const [colWidths, setColWidths] = useState<Partial<Record<ColKey, number>>>({});
+  const resizing = useRef<{ col: ColKey; startX: number; startW: number } | null>(null);
+  const isResizingClick = useRef(false);
+
+  // Row drag-to-reorder
+  const [customRowOrder, setCustomRowOrder] = useState<number[] | null>(null);
+  const [rowDragTarget, setRowDragTarget] = useState<number | null>(null);
+  const rowDragSrc = useRef<number | null>(null);
+
   // Column drag-to-reorder
-  const dragSrc = useRef<ColKey | null>(null);
-  const dragOver = useRef<ColKey | null>(null);
-  const [dragTarget, setDragTarget] = useState<ColKey | null>(null);
+  const colDragSrc = useRef<ColKey | null>(null);
+  const colDragOver = useRef<ColKey | null>(null);
+  const [colDragTarget, setColDragTarget] = useState<ColKey | null>(null);
+
+  // ─── Resize global listeners ────────────────────────────────────────────────
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!resizing.current) return;
+      const delta = e.clientX - resizing.current.startX;
+      const newW = Math.max(50, resizing.current.startW + delta);
+      setColWidths((prev) => ({ ...prev, [resizing.current!.col]: newW }));
+    };
+    const onMouseUp = () => {
+      resizing.current = null;
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
 
   // ─── Data fetching ──────────────────────────────────────────────────────────
 
@@ -128,6 +180,14 @@ export default function LiveBoard() {
       }
       prevIds.current = new Set(ps.map((p) => p.id));
       setParticipants(ps);
+      setCustomRowOrder((prev) => {
+        if (!prev) return null;
+        const pIdSet = new Set(ps.map((p) => p.id));
+        const cleaned = prev.filter((id) => pIdSet.has(id));
+        const newIds = ps.map((p) => p.id).filter((id) => !prev.includes(id));
+        if (newIds.length === 0 && cleaned.length === prev.length) return prev;
+        return [...cleaned, ...newIds];
+      });
       setLastUpdated(new Date());
       setError('');
     } catch (e) {
@@ -186,18 +246,18 @@ export default function LiveBoard() {
 
   // ─── Column reorder ──────────────────────────────────────────────────────────
 
-  const onColDragStart = (col: ColKey) => { dragSrc.current = col; };
+  const onColDragStart = (col: ColKey) => { colDragSrc.current = col; };
   const onColDragOver = (e: React.DragEvent, col: ColKey) => {
     e.preventDefault();
-    if (dragSrc.current && dragSrc.current !== col) {
-      dragOver.current = col;
-      setDragTarget(col);
+    if (colDragSrc.current && colDragSrc.current !== col) {
+      colDragOver.current = col;
+      setColDragTarget(col);
     }
   };
   const onColDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const src = dragSrc.current;
-    const tgt = dragOver.current;
+    const src = colDragSrc.current;
+    const tgt = colDragOver.current;
     if (src && tgt && src !== tgt) {
       const next = [...movableCols];
       const si = next.indexOf(src);
@@ -209,11 +269,42 @@ export default function LiveBoard() {
         localStorage.setItem('komikone_livecols', JSON.stringify(next));
       }
     }
-    dragSrc.current = null;
-    dragOver.current = null;
-    setDragTarget(null);
+    colDragSrc.current = null;
+    colDragOver.current = null;
+    setColDragTarget(null);
   };
-  const onColDragEnd = () => { dragSrc.current = null; dragOver.current = null; setDragTarget(null); };
+  const onColDragEnd = () => { colDragSrc.current = null; colDragOver.current = null; setColDragTarget(null); };
+
+  // ─── Row reorder ─────────────────────────────────────────────────────────────
+
+  const onRowDragStart = (e: React.DragEvent, pid: number) => {
+    e.stopPropagation();
+    rowDragSrc.current = pid;
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const onRowDragOver = (e: React.DragEvent, pid: number) => {
+    if (rowDragSrc.current === null || rowDragSrc.current === pid) return;
+    e.preventDefault();
+    setRowDragTarget(pid);
+  };
+  const onRowDrop = (e: React.DragEvent, targetPid: number) => {
+    e.preventDefault();
+    const srcPid = rowDragSrc.current;
+    if (srcPid === null || srcPid === targetPid) { rowDragSrc.current = null; setRowDragTarget(null); return; }
+    const currentOrder = customRowOrder ?? participants.map((p) => p.id);
+    const next = [...currentOrder];
+    const si = next.indexOf(srcPid);
+    const ti = next.indexOf(targetPid);
+    if (si !== -1 && ti !== -1) {
+      next.splice(si, 1);
+      next.splice(ti, 0, srcPid);
+      setCustomRowOrder(next);
+      setSortCol(null);
+    }
+    rowDragSrc.current = null;
+    setRowDragTarget(null);
+  };
+  const onRowDragEnd = () => { rowDragSrc.current = null; setRowDragTarget(null); };
 
   // ─── Sort ────────────────────────────────────────────────────────────────────
 
@@ -228,17 +319,19 @@ export default function LiveBoard() {
 
   // ─── Derived data ────────────────────────────────────────────────────────────
 
-  const filtered = participants.filter((p) => {
+  const getColWidth = (col: ColKey): number => colWidths[col] ?? DEFAULT_WIDTHS[col];
+
+  const orderedParticipants = customRowOrder
+    ? (customRowOrder.map((id) => participants.find((p) => p.id === id)).filter(Boolean) as Participant[])
+    : participants;
+
+  const filtered = orderedParticipants.filter((p) => {
     if (filterStatus !== 'all' && rowStatus(p) !== filterStatus) return false;
     if (!filterText) return true;
-    const q = filterText.toLowerCase();
-    return (
-      p.first_name.toLowerCase().includes(q) ||
-      p.last_name.toLowerCase().includes(q) ||
-      p.member_id.toLowerCase().includes(q) ||
-      p.sponsor.toLowerCase().includes(q) ||
-      p.purchasing_coordinator.toLowerCase().includes(q)
-    );
+    const q = filterText.includes('*') ? filterText : `*${filterText}*`;
+    const re = wildcardToRegex(q);
+    if (!re) return false;
+    return re.test(p.first_name) || re.test(p.last_name) || re.test(p.member_id) || re.test(p.sponsor) || re.test(p.purchasing_coordinator);
   });
 
   const displayRows = sortCol
@@ -277,8 +370,6 @@ export default function LiveBoard() {
     );
   }
 
-  const frozenBg = 'bg-amber-50 dark:bg-gray-950';
-
   return (
     <div className="min-h-screen bg-amber-50 dark:bg-gray-950 text-gray-950 dark:text-white flex flex-col">
 
@@ -310,7 +401,7 @@ export default function LiveBoard() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-red-200 dark:text-gray-500 text-xs">
-            {lastUpdated ? `${lastUpdated.toLocaleTimeString()}` : '…'}
+            {lastUpdated ? lastUpdated.toLocaleTimeString() : '…'}
           </span>
           <button onClick={toggle} className="text-red-100 dark:text-gray-400 hover:text-white dark:hover:text-yellow-400 text-xs border border-red-300 dark:border-gray-700 px-2 py-0.5 rounded transition-colors">
             {isDark ? '☀ Day' : '◑ Night'}
@@ -337,10 +428,10 @@ export default function LiveBoard() {
       <div className="border-b border-gray-200 dark:border-gray-800 px-4 py-2 flex items-center gap-3 flex-wrap shrink-0">
         <input
           type="search"
-          placeholder="Search name, ID, sponsor, coordinator…"
+          placeholder="Search… (* wildcard)"
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
-          className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-white w-56 focus:outline-none focus:border-blue-400 dark:focus:border-yellow-400"
+          className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-white w-52 focus:outline-none focus:border-blue-400 dark:focus:border-yellow-400"
         />
         <div className="flex gap-1.5 flex-wrap">
           {([
@@ -366,11 +457,24 @@ export default function LiveBoard() {
         {(filterText || filterStatus !== 'all') && (
           <span className="text-xs text-gray-400 dark:text-gray-600">{displayRows.length} of {participants.length}</span>
         )}
-        {sortCol && (
-          <button onClick={() => { setSortCol(null); setSortDir('asc'); }} className="text-xs text-gray-400 hover:text-red-500 dark:hover:text-red-400 ml-auto">
-            Clear sort ✕
-          </button>
-        )}
+        <div className="ml-auto flex gap-3">
+          {customRowOrder && (
+            <button
+              onClick={() => setCustomRowOrder(null)}
+              className="text-xs text-gray-400 hover:text-orange-500 dark:hover:text-orange-400"
+            >
+              Reset row order ✕
+            </button>
+          )}
+          {sortCol && (
+            <button
+              onClick={() => { setSortCol(null); setSortDir('asc'); }}
+              className="text-xs text-gray-400 hover:text-red-500 dark:hover:text-red-400"
+            >
+              Clear sort ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── Table ── */}
@@ -383,20 +487,28 @@ export default function LiveBoard() {
                 const isFrozen = (FROZEN as ColKey[]).includes(col);
                 const isMovable = !isFrozen;
                 const isSorted = sortCol === col;
-                const isDropTarget = dragTarget === col;
+                const isDropTarget = colDragTarget === col;
+                const isDayCol = DAY_COLS.has(col);
+                const w = isFrozen ? FROZEN_PX[col] : getColWidth(col);
+
                 return (
                   <th
                     key={col}
-                    onClick={() => handleSort(col)}
+                    onClick={() => {
+                      if (isResizingClick.current) { isResizingClick.current = false; return; }
+                      handleSort(col);
+                    }}
                     draggable={isMovable}
                     onDragStart={isMovable ? () => onColDragStart(col) : undefined}
                     onDragOver={isMovable ? (e) => onColDragOver(e, col) : undefined}
                     onDrop={isMovable ? onColDrop : undefined}
                     onDragEnd={isMovable ? onColDragEnd : undefined}
-                    style={isFrozen ? { position: 'sticky', left: FROZEN_LEFT[col], zIndex: 20, width: FROZEN_PX[col], minWidth: FROZEN_PX[col] } : undefined}
+                    style={isFrozen
+                      ? { position: 'sticky', top: 0, left: FROZEN_LEFT[col], zIndex: 20, width: w, minWidth: w }
+                      : { position: 'sticky', top: 0, zIndex: 15, width: w, minWidth: w }
+                    }
                     className={[
-                      'px-3 py-2 text-left text-xs uppercase tracking-wide select-none whitespace-nowrap',
-                      'sticky top-0',
+                      'px-3 py-2 text-left text-xs uppercase tracking-wide select-none align-top',
                       'bg-black dark:bg-gray-900 text-gray-400',
                       'border-b-2 border-gray-700',
                       isSorted ? 'text-yellow-400' : 'hover:text-white cursor-pointer',
@@ -404,11 +516,37 @@ export default function LiveBoard() {
                       isDropTarget ? 'bg-blue-900 text-white' : '',
                     ].join(' ')}
                   >
-                    <span className="flex items-center gap-1">
+                    <span className="flex items-center gap-1 whitespace-nowrap">
                       {isMovable && <span className="text-gray-600 text-[10px] mr-0.5">⠿</span>}
                       {COL_LABEL[col]}
                       {isSorted && <span className="text-yellow-400 ml-0.5">{sortDir === 'asc' ? '▲' : '▼'}</span>}
                     </span>
+                    {isDayCol && (
+                      <div style={{ display: 'flex', gap: DAY_GAP, marginTop: 3 }}>
+                        {DAY_KEYS.map((d) => (
+                          <div
+                            key={d}
+                            style={{ width: DAY_SLOT_W, textAlign: 'center' }}
+                            className="text-[9px] text-gray-500 font-normal tracking-normal normal-case"
+                          >
+                            {DAY_SHORT[d]}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Resize handle — movable cols only */}
+                    {isMovable && (
+                      <div
+                        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-500/50 z-10"
+                        style={{ position: 'absolute' }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          isResizingClick.current = true;
+                          resizing.current = { col, startX: e.clientX, startW: getColWidth(col) };
+                        }}
+                      />
+                    )}
                   </th>
                 );
               })}
@@ -421,43 +559,76 @@ export default function LiveBoard() {
               const naturalIdx = participants.indexOf(p);
               const isFlashing = flash[p.id];
               const isComplete = status === 'complete';
+              const isRowDragTarget = rowDragTarget === p.id;
+              const evenRow = dispIdx % 2 === 0;
+
+              const frozenBg = isFlashing
+                ? 'bg-blue-100 dark:bg-blue-900/30'
+                : evenRow
+                  ? 'bg-amber-50 dark:bg-gray-950'
+                  : 'bg-amber-100/50 dark:bg-gray-900/60';
+
+              const rowBg = isFlashing
+                ? 'bg-blue-100 dark:bg-blue-900/30'
+                : isRowDragTarget
+                  ? 'bg-blue-100 dark:bg-blue-900/20'
+                  : evenRow
+                    ? 'bg-white dark:bg-gray-950'
+                    : 'bg-gray-50 dark:bg-gray-900/40';
 
               return (
                 <tr
                   key={p.id}
-                  className={[
-                    'group transition-colors',
-                    isFlashing ? 'bg-blue-100 dark:bg-blue-900/30' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.03]',
-                  ].join(' ')}
+                  className={`group transition-colors ${rowBg}`}
+                  onDragOver={(e) => onRowDragOver(e, p.id)}
+                  onDrop={(e) => onRowDrop(e, p.id)}
                 >
                   {allCols.map((col) => {
                     const isFrozen = (FROZEN as ColKey[]).includes(col);
+                    const w = isFrozen ? FROZEN_PX[col] : getColWidth(col);
                     return (
                       <td
                         key={col}
-                        style={isFrozen ? { position: 'sticky', left: FROZEN_LEFT[col], zIndex: 10 } : undefined}
+                        style={isFrozen
+                          ? { position: 'sticky', left: FROZEN_LEFT[col], zIndex: 10, width: w, minWidth: w }
+                          : { width: w, minWidth: w }
+                        }
                         className={[
-                          'px-3 py-2 border-b border-gray-100 dark:border-gray-800/60 align-middle',
+                          'px-3 py-1.5 border-b border-gray-100 dark:border-gray-800/60 align-middle',
                           isFrozen ? frozenBg : '',
                           col === 'idx' ? statusAccentCls(status) : '',
                           isComplete && (col === 'first' || col === 'last')
                             ? 'text-gray-400 dark:text-gray-600 line-through'
                             : '',
+                          isRowDragTarget ? 'border-t-2 border-t-blue-400' : '',
                         ].join(' ')}
                       >
-                        <CellContent
-                          col={col}
-                          p={p}
-                          status={status}
-                          dispIdx={dispIdx}
-                          naturalIdx={naturalIdx}
-                          editingRow={editingRow}
-                          setEditingRow={setEditingRow}
-                          onClaim={handleClaim}
-                          onUnclaim={handleUnclaim}
-                          onPurchaseToggle={handlePurchaseToggle}
-                          onWhoChange={handleWhoChange}
-                        />
+                        {col === 'idx' ? (
+                          <div className="flex items-center gap-1">
+                            <span
+                              draggable
+                              onDragStart={(e) => onRowDragStart(e, p.id)}
+                              onDragEnd={onRowDragEnd}
+                              className="text-gray-300 dark:text-gray-700 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity text-xs leading-none select-none"
+                            >
+                              ⠿
+                            </span>
+                            <span className="text-gray-400 dark:text-gray-500 text-xs">{dispIdx + 1}</span>
+                          </div>
+                        ) : (
+                          <CellContent
+                            col={col}
+                            p={p}
+                            status={status}
+                            naturalIdx={naturalIdx}
+                            editingRow={editingRow}
+                            setEditingRow={setEditingRow}
+                            onClaim={handleClaim}
+                            onUnclaim={handleUnclaim}
+                            onPurchaseToggle={handlePurchaseToggle}
+                            onWhoChange={handleWhoChange}
+                          />
+                        )}
                       </td>
                     );
                   })}
@@ -482,13 +653,12 @@ export default function LiveBoard() {
 // ─── Cell renderer ────────────────────────────────────────────────────────────
 
 function CellContent({
-  col, p, status, dispIdx, editingRow, setEditingRow,
+  col, p, status, editingRow, setEditingRow,
   onClaim, onUnclaim, onPurchaseToggle, onWhoChange,
 }: {
   col: ColKey;
   p: Participant;
   status: RowStatus;
-  dispIdx: number;
   naturalIdx: number;
   editingRow: number | null;
   setEditingRow: (id: number | null) => void;
@@ -499,18 +669,19 @@ function CellContent({
 }) {
   switch (col) {
 
-    case 'idx':
-      return <span className="text-gray-400 dark:text-gray-500 text-xs">{dispIdx + 1}</span>;
+    case 'badge_type': {
+      const BADGE_STYLE: Record<string, string> = {
+        ADULT:    'bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600',
+        JUNIOR:   'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/60 dark:text-blue-300 dark:border-blue-700',
+        MILITARY: 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/60 dark:text-green-300 dark:border-green-700',
+        SENIOR:   'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/60 dark:text-amber-300 dark:border-amber-700',
+      };
+      const cls = BADGE_STYLE[p.badge_type] ?? BADGE_STYLE.ADULT;
+      return <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${cls}`}>{p.badge_type}</span>;
+    }
 
     case 'first':
-      return (
-        <div>
-          <div className="font-semibold">{p.first_name}</div>
-          {p.badge_type === 'JUNIOR' && (
-            <span className="text-[10px] px-1 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-300 dark:bg-blue-900/60 dark:text-blue-300 dark:border-blue-700">JR</span>
-          )}
-        </div>
-      );
+      return <div className="font-semibold">{p.first_name}</div>;
 
     case 'last':
       return (
@@ -529,11 +700,79 @@ function CellContent({
         </span>
       ) : <span className="text-gray-300 dark:text-gray-700 text-xs">—</span>;
 
-    case 'member_id':
-      return <span className="font-mono text-xs text-gray-700 dark:text-gray-300">{p.member_id || '—'}</span>;
+    case 'member_id': {
+      const s = (p.member_id || '').toUpperCase();
+      if (!s) return <span className="text-gray-300 dark:text-gray-700 text-xs font-mono">—</span>;
+      const parts = s.split(/(\d+)/);
+      return (
+        <span className="font-mono text-xs tracking-wide">
+          {parts.map((part, i) =>
+            /^\d+$/.test(part)
+              ? <span key={i} className="text-red-600 dark:text-red-400">{part}</span>
+              : <span key={i} className="text-gray-700 dark:text-gray-300">{part}</span>
+          )}
+        </span>
+      );
+    }
 
     case 'requested':
-      return <DayPips days={{ preview: p.req_preview, thu: p.req_thu, fri: p.req_fri, sat: p.req_sat, sun: p.req_sun }} />;
+      return (
+        <div style={{ display: 'flex', gap: DAY_GAP }}>
+          {DAY_KEYS.map((day) => {
+            const req = p[`req_${day}` as keyof Participant] as boolean;
+            return (
+              <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                {req && (
+                  <input
+                    type="checkbox"
+                    readOnly
+                    checked={false}
+                    className="w-3.5 h-3.5 cursor-default pointer-events-none opacity-50"
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+
+    case 'purchased':
+      return (
+        <div style={{ display: 'flex', gap: DAY_GAP }}>
+          {DAY_KEYS.map((day) => {
+            const req = p[`req_${day}` as keyof Participant] as boolean;
+            const bought = p[`pur_${day}` as keyof Participant] as boolean;
+            return (
+              <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                {req && (
+                  <input
+                    type="checkbox"
+                    checked={bought}
+                    onChange={(e) => onPurchaseToggle(p, day, e.target.checked)}
+                    className="w-3.5 h-3.5 cursor-pointer accent-green-600 dark:accent-green-500"
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+
+    case 'gaps':
+      return (
+        <div style={{ display: 'flex', gap: DAY_GAP }}>
+          {DAY_KEYS.map((day) => {
+            const isGap = p.gaps.includes(day);
+            return (
+              <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                {isGap && (
+                  <div className="w-3.5 h-3.5 rounded-sm bg-red-500/80 border border-red-600 dark:bg-red-600/70 dark:border-red-500" />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
 
     case 'status':
       if (status === 'complete') {
@@ -559,37 +798,6 @@ function CellContent({
           Claim
         </button>
       );
-
-    case 'purchased':
-      return (
-        <div className="flex gap-1 items-center">
-          {DAY_KEYS.map((day) => {
-            const requested = p[`req_${day}` as keyof Participant] as boolean;
-            const bought = p[`pur_${day}` as keyof Participant] as boolean;
-            if (!requested) return <span key={day} className="w-6" />;
-            return (
-              <label key={day} className="flex flex-col items-center cursor-pointer">
-                <span className="text-[10px] text-gray-500 leading-none mb-0.5">
-                  {day === 'preview' ? 'PV' : day.charAt(0).toUpperCase() + day.slice(1, 3)}
-                </span>
-                <input
-                  type="checkbox"
-                  checked={bought}
-                  onChange={(e) => onPurchaseToggle(p, day, e.target.checked)}
-                  className="w-4 h-4 rounded accent-green-600 dark:accent-green-500 cursor-pointer"
-                />
-              </label>
-            );
-          })}
-        </div>
-      );
-
-    case 'gaps':
-      if (p.gaps.length > 0)
-        return <span className="text-xs font-bold text-red-700 dark:text-red-400">{p.gaps.join(', ')}</span>;
-      if (p.any_purchased)
-        return <span className="text-xs text-green-600 dark:text-green-500">—</span>;
-      return <span className="text-xs text-gray-300 dark:text-gray-700">—</span>;
 
     case 'total':
       return (
@@ -620,25 +828,6 @@ function CellContent({
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-function DayPips({ days }: { days: Record<string, boolean> }) {
-  const labels: [string, string][] = [
-    ['preview', 'PV'], ['thu', 'Th'], ['fri', 'Fr'], ['sat', 'Sa'], ['sun', 'Su'],
-  ];
-  return (
-    <div className="flex gap-0.5 justify-center">
-      {labels.map(([key, label]) =>
-        days[key] ? (
-          <span key={key} className="bg-gray-700 dark:bg-gray-400 text-white text-[10px] rounded px-1 leading-4">
-            {label}
-          </span>
-        ) : (
-          <span key={key} className="w-5" />
-        )
-      )}
-    </div>
-  );
-}
 
 function WhoInput({ initial, onSave, onCancel }: { initial: string; onSave: (v: string) => void; onCancel: () => void }) {
   const [val, setVal] = useState(initial);
