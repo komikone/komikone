@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   api,
   type EventDetail,
   type Participant,
   type Coordinator,
+  type YearMeta,
   formatDollars,
   DAY_KEYS,
   dayLabel,
@@ -14,18 +15,16 @@ const STATUS_OPTIONS: EventDetail['status'][] = ['setup', 'registration', 'purch
 
 // ─── Auth gate ────────────────────────────────────────────────────────────────
 
-function useAdminSecret(): [string, (s: string) => void, boolean] {
+function useAdminSecret(): [string, (s: string) => void] {
   const [secret, setSecretState] = useState(() => sessionStorage.getItem('admin_secret') ?? '');
-  const [verified, setVerified] = useState(false);
-
   const setSecret = (s: string) => {
     sessionStorage.setItem('admin_secret', s);
     setSecretState(s);
-    setVerified(false);
   };
-
-  return [secret, setSecret, verified || Boolean(secret)];
+  return [secret, setSecret];
 }
+
+// ─── Admin ────────────────────────────────────────────────────────────────────
 
 export default function Admin() {
   const [secret, setSecret] = useAdminSecret();
@@ -34,67 +33,111 @@ export default function Admin() {
   const [authed, setAuthed] = useState(Boolean(sessionStorage.getItem('admin_secret')));
 
   const [events, setEvents] = useState<EventDetail[]>([]);
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
-  const [participants, setParticipants] = useState<Participant[]>([]);
-  const [coordinators, setCoordinators] = useState<Coordinator[]>([]);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [activeRegType, setActiveRegType] = useState<'return' | 'open'>('return');
+
+  // Per-event data — always store both so Overview can show both
+  const [returnParticipants, setReturnParticipants] = useState<Participant[]>([]);
+  const [openParticipants, setOpenParticipants] = useState<Participant[]>([]);
+  const [returnCoordinators, setReturnCoordinators] = useState<Coordinator[]>([]);
+  const [openCoordinators, setOpenCoordinators] = useState<Coordinator[]>([]);
+  const [yearMeta, setYearMeta] = useState<YearMeta | null>(null);
+
   const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState<'overview' | 'participants' | 'coordinators' | 'prices' | 'dates'>('overview');
 
-  // Tabs
-  const [tab, setTab] = useState<'overview' | 'participants' | 'coordinators' | 'prices'>('overview');
+  // Derived
+  const years = useMemo(
+    () => [...new Set(events.map((e) => e.year))].sort((a, b) => b - a),
+    [events]
+  );
+  const yearEvents = events.filter((e) => e.year === selectedYear);
+  const returnEvent = yearEvents.find((e) => e.reg_type === 'return') ?? null;
+  const openEvent = yearEvents.find((e) => e.reg_type === 'open') ?? null;
+  const activeEvent = yearEvents.find((e) => e.reg_type === activeRegType) ?? yearEvents[0] ?? null;
+  const participants = activeRegType === 'return' ? returnParticipants : openParticipants;
+  const coordinators = activeRegType === 'return' ? returnCoordinators : openCoordinators;
 
-  const selectedEvent = events.find((e) => e.id === selectedEventId) ?? null;
-
-  const loadEvents = useCallback(async () => {
-    if (!secret) return;
+  const loadEvents = useCallback(async (): Promise<EventDetail[]> => {
+    if (!secret) return [];
     setLoading(true);
     try {
       const summaries = await api.events.list();
-      const detailed = await Promise.all(
-        summaries.map((s) => api.admin.events.getWithToken(secret, s.id))
-      );
+      const detailed = await Promise.all(summaries.map((s) => api.admin.events.getWithToken(secret, s.id)));
       setEvents(detailed);
-      if (!selectedEventId && detailed.length > 0) setSelectedEventId(detailed[0].id);
+      return detailed;
     } catch (e) {
       console.error(e);
+      return [];
     } finally {
       setLoading(false);
     }
-  }, [secret, selectedEventId]);
+  }, [secret]);
 
-  const loadEventDetail = useCallback(async (id: number) => {
-    if (!secret) return;
+  const loadYearData = useCallback(async (year: number, evts: EventDetail[]) => {
+    const retEvt = evts.find((e) => e.year === year && e.reg_type === 'return');
+    const openEvt = evts.find((e) => e.year === year && e.reg_type === 'open');
+
+    const [retPs, openPs, retCs, openCs, meta] = await Promise.all([
+      retEvt ? api.participants.list(retEvt.id, retEvt.access_token).catch(() => []) : Promise.resolve([]),
+      openEvt ? api.participants.list(openEvt.id, openEvt.access_token).catch(() => []) : Promise.resolve([]),
+      retEvt ? api.coordinators.list(retEvt.id, retEvt.access_token).catch(() => []) : Promise.resolve([]),
+      openEvt ? api.coordinators.list(openEvt.id, openEvt.access_token).catch(() => []) : Promise.resolve([]),
+      api.admin.yearMeta.get(secret, year).catch(() => null),
+    ]);
+    setReturnParticipants(retPs);
+    setOpenParticipants(openPs);
+    setReturnCoordinators(retCs);
+    setOpenCoordinators(openCs);
+    setYearMeta(meta);
+  }, [secret]);
+
+  const reloadAll = useCallback(async (year?: number) => {
+    const fresh = await loadEvents();
+    const yr = year ?? selectedYear;
+    if (yr !== null) loadYearData(yr, fresh);
+  }, [loadEvents, loadYearData, selectedYear]);
+
+  const reloadEventData = useCallback(async (regType: 'return' | 'open', evts: EventDetail[], year: number) => {
+    const evt = evts.find((e) => e.year === year && e.reg_type === regType);
+    if (!evt) return;
     const [ps, cs] = await Promise.all([
-      api.participants.list(id, undefined),
-      api.coordinators.list(id, undefined),
-    ]).catch(() =>
-      Promise.all([
-        api.participants.list(id, selectedEvent?.access_token),
-        api.coordinators.list(id, selectedEvent?.access_token),
-      ])
-    );
-    setParticipants(ps);
-    setCoordinators(cs);
-  }, [secret, selectedEvent?.access_token]);
+      api.participants.list(evt.id, evt.access_token).catch(() => []),
+      api.coordinators.list(evt.id, evt.access_token).catch(() => []),
+    ]);
+    if (regType === 'return') { setReturnParticipants(ps); setReturnCoordinators(cs); }
+    else { setOpenParticipants(ps); setOpenCoordinators(cs); }
+  }, []);
 
   useEffect(() => {
     if (authed) loadEvents();
   }, [authed]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-select latest year when events first load
   useEffect(() => {
-    if (authed && selectedEventId) loadEventDetail(selectedEventId);
-  }, [selectedEventId, authed]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (events.length > 0 && selectedYear === null) {
+      const latest = Math.max(...events.map((e) => e.year));
+      setSelectedYear(latest);
+      loadYearData(latest, events);
+    }
+  }, [events.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleYearSelect = (year: number) => {
+    setSelectedYear(year);
+    setActiveRegType('return');
+    setTab('overview');
+    loadYearData(year, events);
+  };
+
+  const handleRegTypeSwitch = (type: 'return' | 'open') => {
+    const targetEvt = yearEvents.find((e) => e.reg_type === type);
+    if (!targetEvt) return;
+    setActiveRegType(type);
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
-    try {
-      // Verify by trying to list events with this secret
-      await api.events.list();
-      setSecret(inputSecret);
-      setAuthed(true);
-    } catch {
-      setAuthError('Invalid secret');
-    }
     setSecret(inputSecret);
     setAuthed(true);
   };
@@ -128,33 +171,45 @@ export default function Admin() {
   return (
     <div className="min-h-screen bg-gray-950 text-white flex">
       {/* Sidebar */}
-      <aside className="w-56 bg-gray-900 border-r border-gray-800 flex flex-col">
+      <aside className="w-52 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
         <div className="px-4 py-4 border-b border-gray-800">
           <Link to="/" className="text-gray-500 hover:text-yellow-400 text-xs uppercase tracking-wider">← Public site</Link>
           <h1 className="font-bangers text-yellow-400 text-xl tracking-wide mt-1">komikone</h1>
         </div>
 
-        <div className="px-3 py-3 border-b border-gray-800">
-          <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Events</div>
-          {events.map((e) => (
-            <button
-              key={e.id}
-              onClick={() => setSelectedEventId(e.id)}
-              className={`w-full text-left px-2 py-1.5 rounded text-sm mb-0.5 transition-colors ${
-                selectedEventId === e.id ? 'bg-blue-700 text-white' : 'text-gray-300 hover:bg-gray-800'
-              }`}
-            >
-              {e.name}
-              <div className="text-xs text-gray-400">{e.reg_type} / {e.status}</div>
-            </button>
-          ))}
-          <CreateEventButton secret={secret} onCreated={loadEvents} />
+        {/* Year list */}
+        <div className="px-3 py-3 border-b border-gray-800 overflow-y-auto">
+          <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Years</div>
+          {loading && years.length === 0 && (
+            <div className="text-gray-500 text-xs px-2">Loading…</div>
+          )}
+          {years.map((year) => {
+            const yEvts = events.filter((e) => e.year === year);
+            const hasReturn = yEvts.some((e) => e.reg_type === 'return');
+            const hasOpen = yEvts.some((e) => e.reg_type === 'open');
+            return (
+              <button
+                key={year}
+                onClick={() => handleYearSelect(year)}
+                className={`w-full text-left px-2 py-2 rounded mb-0.5 transition-colors ${
+                  selectedYear === year ? 'bg-blue-700 text-white' : 'text-gray-300 hover:bg-gray-800'
+                }`}
+              >
+                <div className="font-bold text-sm">{year}</div>
+                <div className="text-xs text-gray-400">
+                  {[hasReturn && 'Return', hasOpen && 'Open'].filter(Boolean).join(' · ')}
+                </div>
+              </button>
+            );
+          })}
+          <InitializeYearButton secret={secret} onCreated={loadEvents} />
         </div>
 
-        {selectedEvent && (
+        {/* Views */}
+        {selectedYear !== null && (
           <div className="px-3 py-3">
             <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Views</div>
-            {(['overview', 'participants', 'coordinators', 'prices'] as const).map((t) => (
+            {(['overview', 'participants', 'coordinators', 'prices', 'dates'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -171,67 +226,95 @@ export default function Admin() {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto">
-        {!selectedEvent ? (
+        {selectedYear === null ? (
           <div className="flex items-center justify-center h-full text-gray-500">
-            {loading ? 'Loading...' : 'Select or create an event'}
+            {loading ? 'Loading…' : 'Select or initialize a year'}
           </div>
         ) : (
-          <div key={selectedEvent.id} className="p-6">
+          <div className="p-6">
+            {/* Year header */}
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="text-xl font-bold text-white">{selectedEvent.name}</h2>
+                <h2 className="text-2xl font-bold text-white">SDCC {selectedYear}</h2>
                 <p className="text-sm text-gray-400">
-                  {selectedEvent.reg_type === 'return' ? 'Return Reg' : 'Open Reg'} — {selectedEvent.status}
+                  {[returnEvent && 'Return Reg', openEvent && 'Open Reg'].filter(Boolean).join(' + ')}
                 </p>
               </div>
-              <div className="flex gap-2 flex-wrap">
-                <a
-                  href={api.admin.exportUrl(selectedEvent.id, secret)}
-                  className="text-sm bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded transition-colors"
-                  download
-                >
-                  Export CSV
-                </a>
-                <Link
-                  to={`/live/${selectedEvent.id}?token=${selectedEvent.access_token}`}
-                  target="_blank"
-                  className="text-sm bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1.5 rounded transition-colors"
-                >
-                  Live Board ↗
-                </Link>
+              <div className="flex gap-2">
+                {activeEvent && (
+                  <>
+                    <a
+                      href={api.admin.exportUrl(activeEvent.id, secret)}
+                      className="text-sm bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded transition-colors"
+                      download
+                    >
+                      Export CSV
+                    </a>
+                    <Link
+                      to={`/live/${activeEvent.id}?token=${activeEvent.access_token}`}
+                      target="_blank"
+                      className="text-sm bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1.5 rounded transition-colors"
+                    >
+                      Live Board ↗
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
 
             {tab === 'overview' && (
               <OverviewTab
-                event={selectedEvent}
+                returnEvent={returnEvent}
+                openEvent={openEvent}
                 secret={secret}
-                participants={participants}
-                onUpdate={() => { loadEvents(); if (selectedEventId) loadEventDetail(selectedEventId); }}
+                returnParticipants={returnParticipants}
+                openParticipants={openParticipants}
+                allEvents={events}
+                onUpdate={() => reloadAll()}
               />
             )}
             {tab === 'participants' && (
               <ParticipantsTab
-                event={selectedEvent}
+                event={activeEvent}
+                activeRegType={activeRegType}
+                returnEvent={returnEvent}
+                openEvent={openEvent}
+                onRegTypeChange={handleRegTypeSwitch}
                 secret={secret}
                 participants={participants}
                 allEvents={events}
-                onUpdate={() => selectedEventId && loadEventDetail(selectedEventId)}
+                onUpdate={() => { if (selectedYear) reloadEventData(activeRegType, events, selectedYear); }}
               />
             )}
             {tab === 'coordinators' && (
               <CoordinatorsTab
-                event={selectedEvent}
+                event={activeEvent}
+                activeRegType={activeRegType}
+                returnEvent={returnEvent}
+                openEvent={openEvent}
+                onRegTypeChange={handleRegTypeSwitch}
                 secret={secret}
                 coordinators={coordinators}
-                onUpdate={() => selectedEventId && loadEventDetail(selectedEventId)}
+                onUpdate={() => { if (selectedYear) reloadEventData(activeRegType, events, selectedYear); }}
               />
             )}
             {tab === 'prices' && (
               <PricesTab
-                event={selectedEvent}
+                event={activeEvent}
+                activeRegType={activeRegType}
+                returnEvent={returnEvent}
+                openEvent={openEvent}
+                onRegTypeChange={handleRegTypeSwitch}
                 secret={secret}
                 onUpdate={loadEvents}
+              />
+            )}
+            {tab === 'dates' && selectedYear !== null && (
+              <DatesTab
+                year={selectedYear}
+                secret={secret}
+                meta={yearMeta}
+                onUpdate={() => selectedYear !== null && api.admin.yearMeta.get(secret, selectedYear).then(setYearMeta).catch(() => {})}
               />
             )}
           </div>
@@ -241,22 +324,56 @@ export default function Admin() {
   );
 }
 
-// ─── Create Event ─────────────────────────────────────────────────────────────
+// ─── Initialize Year ──────────────────────────────────────────────────────────
 
-function CreateEventButton({ secret, onCreated }: { secret: string; onCreated: () => void }) {
+const SDCC_DEFAULTS = {
+  price_preview_adult: 6400, price_thu_adult: 8500, price_fri_adult: 8500,
+  price_sat_adult: 8500, price_sun_adult: 6400,
+  price_preview_junior: 3200, price_thu_junior: 4300, price_fri_junior: 4300,
+  price_sat_junior: 4300, price_sun_junior: 3200,
+};
+
+const PRICE_ROWS: { day: string; adultKey: keyof typeof SDCC_DEFAULTS; juniorKey: keyof typeof SDCC_DEFAULTS }[] = [
+  { day: 'Preview', adultKey: 'price_preview_adult', juniorKey: 'price_preview_junior' },
+  { day: 'Thursday', adultKey: 'price_thu_adult', juniorKey: 'price_thu_junior' },
+  { day: 'Friday', adultKey: 'price_fri_adult', juniorKey: 'price_fri_junior' },
+  { day: 'Saturday', adultKey: 'price_sat_adult', juniorKey: 'price_sat_junior' },
+  { day: 'Sunday', adultKey: 'price_sun_adult', juniorKey: 'price_sun_junior' },
+];
+
+function InitializeYearButton({ secret, onCreated }: { secret: string; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<{ year: number; name: string; reg_type: 'return' | 'open' }>({
-    year: new Date().getFullYear() + 1, name: '', reg_type: 'open',
-  });
+  const [year, setYear] = useState(new Date().getFullYear() + 1);
+  const [prices, setPrices] = useState<Record<string, string>>(
+    Object.fromEntries(Object.entries(SDCC_DEFAULTS).map(([k, v]) => [k, (v / 100).toFixed(2)]))
+  );
+  const [loading, setLoading] = useState(false);
 
-  const handleCreate = async () => {
-    if (!form.name.trim()) return;
+  const setPrice = (key: string, val: string) => setPrices((p) => ({ ...p, [key]: val }));
+  const centsOf = (key: string) => Math.round(parseFloat(prices[key] || '0') * 100);
+
+  const handleInit = async () => {
+    setLoading(true);
     try {
-      await api.admin.events.create(secret, { ...form, status: 'setup' });
+      await api.admin.initializeYear(secret, {
+        year,
+        price_preview_adult: centsOf('price_preview_adult'),
+        price_thu_adult: centsOf('price_thu_adult'),
+        price_fri_adult: centsOf('price_fri_adult'),
+        price_sat_adult: centsOf('price_sat_adult'),
+        price_sun_adult: centsOf('price_sun_adult'),
+        price_preview_junior: centsOf('price_preview_junior'),
+        price_thu_junior: centsOf('price_thu_junior'),
+        price_fri_junior: centsOf('price_fri_junior'),
+        price_sat_junior: centsOf('price_sat_junior'),
+        price_sun_junior: centsOf('price_sun_junior'),
+      });
       setOpen(false);
       onCreated();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -266,42 +383,112 @@ function CreateEventButton({ secret, onCreated }: { secret: string; onCreated: (
         onClick={() => setOpen(true)}
         className="w-full text-left px-2 py-1.5 rounded text-sm text-blue-400 hover:bg-gray-800 mt-1"
       >
-        + New event
+        + Initialize Year
       </button>
     );
   }
 
   return (
-    <div className="bg-gray-800 rounded p-3 mt-2 space-y-2">
-      <input
-        type="text"
-        placeholder="Event name (e.g. SDCC 2027)"
-        value={form.name}
-        onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none"
-      />
-      <div className="flex gap-2">
-        <input
-          type="number"
-          value={form.year}
-          onChange={(e) => setForm((f) => ({ ...f, year: Number(e.target.value) }))}
-          className="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none"
-        />
-        <select
-          value={form.reg_type}
-          onChange={(e) => setForm((f) => ({ ...f, reg_type: e.target.value as 'return' | 'open' }))}
-          className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none"
-        >
-          <option value="return">Return Reg</option>
-          <option value="open">Open Reg</option>
-        </select>
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-sm">
+        <div className="flex justify-between items-center mb-5">
+          <h3 className="font-bold text-white">Initialize Year</h3>
+          <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-white">✕</button>
+        </div>
+
+        <p className="text-gray-400 text-xs mb-4">
+          Creates <span className="text-white font-medium">Return Reg</span> and{' '}
+          <span className="text-white font-medium">Open Reg</span> events for the year, both in setup status.
+        </p>
+
+        <div className="mb-5">
+          <label className="block text-xs text-gray-400 mb-1">Year</label>
+          <input
+            type="number"
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value))}
+            className="w-28 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+          />
+        </div>
+
+        <div className="mb-5">
+          <div className="grid grid-cols-3 gap-1 mb-2 text-xs text-gray-400 text-center">
+            <div className="text-left">Day</div>
+            <div>Adult</div>
+            <div>Jr / Mil / Sr</div>
+          </div>
+          {PRICE_ROWS.map(({ day, adultKey, juniorKey }) => (
+            <div key={day} className="grid grid-cols-3 gap-1 mb-1.5 items-center">
+              <div className="text-xs text-gray-300">{day}</div>
+              <div className="relative">
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={prices[adultKey]}
+                  onChange={(e) => setPrice(adultKey, e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-600 rounded pl-5 pr-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div className="relative">
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={prices[juniorKey]}
+                  onChange={(e) => setPrice(juniorKey, e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-600 rounded pl-5 pr-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleInit}
+            disabled={loading}
+            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2 rounded text-sm font-medium transition-colors"
+          >
+            {loading ? 'Creating…' : `Initialize ${year}`}
+          </button>
+          <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-white px-4 text-sm">Cancel</button>
+        </div>
       </div>
-      <div className="flex gap-2">
-        <button onClick={handleCreate} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-xs py-1 rounded">
-          Create
-        </button>
-        <button onClick={() => setOpen(false)} className="text-gray-400 text-xs hover:text-white">Cancel</button>
-      </div>
+    </div>
+  );
+}
+
+// ─── Event Toggle ─────────────────────────────────────────────────────────────
+
+function EventToggle({
+  returnEvent, openEvent, active, onChange,
+}: {
+  returnEvent: EventDetail | null;
+  openEvent: EventDetail | null;
+  active: 'return' | 'open';
+  onChange: (t: 'return' | 'open') => void;
+}) {
+  if (!returnEvent && !openEvent) return null;
+  return (
+    <div className="flex gap-1 mb-5">
+      {(['return', 'open'] as const).map((t) => {
+        const exists = t === 'return' ? !!returnEvent : !!openEvent;
+        return (
+          <button
+            key={t}
+            onClick={() => exists && onChange(t)}
+            disabled={!exists}
+            className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              active === t
+                ? 'bg-blue-600 text-white'
+                : exists
+                ? 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700'
+                : 'bg-gray-900 text-gray-600 cursor-not-allowed'
+            }`}
+          >
+            {t === 'return' ? 'Return Reg' : 'Open Reg'}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -309,129 +496,204 @@ function CreateEventButton({ secret, onCreated }: { secret: string; onCreated: (
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 
 function OverviewTab({
-  event,
-  secret,
-  participants,
-  onUpdate,
+  returnEvent, openEvent, secret,
+  returnParticipants, openParticipants,
+  allEvents, onUpdate,
+}: {
+  returnEvent: EventDetail | null;
+  openEvent: EventDetail | null;
+  secret: string;
+  returnParticipants: Participant[];
+  openParticipants: Participant[];
+  allEvents: EventDetail[];
+  onUpdate: () => void;
+}) {
+  return (
+    <div className="space-y-6">
+      {/* Event cards side-by-side */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+        {returnEvent && (
+          <EventCard
+            event={returnEvent}
+            secret={secret}
+            participants={returnParticipants}
+            allEvents={allEvents}
+            onUpdate={onUpdate}
+          />
+        )}
+        {openEvent && (
+          <EventCard
+            event={openEvent}
+            secret={secret}
+            participants={openParticipants}
+            allEvents={allEvents}
+            onUpdate={onUpdate}
+          />
+        )}
+        {!returnEvent && (
+          <div className="bg-gray-900/50 border border-dashed border-gray-700 rounded-xl p-8 flex items-center justify-center text-gray-600 text-sm">
+            No Return Reg event
+          </div>
+        )}
+        {!openEvent && (
+          <div className="bg-gray-900/50 border border-dashed border-gray-700 rounded-xl p-8 flex items-center justify-center text-gray-600 text-sm">
+            No Open Reg event
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EventCard({
+  event, secret, participants, allEvents, onUpdate,
 }: {
   event: EventDetail;
   secret: string;
   participants: Participant[];
+  allEvents: EventDetail[];
   onUpdate: () => void;
 }) {
   const [status, setStatus] = useState(event.status);
-  const [details, setDetails] = useState({ name: event.name, year: event.year, reg_type: event.reg_type });
-  const [detailSaved, setDetailSaved] = useState(false);
-
-  const handleStatusChange = async (newStatus: EventDetail['status']) => {
-    try {
-      await api.admin.events.update(secret, event.id, { status: newStatus });
-      setStatus(newStatus);
-      onUpdate();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed');
-    }
-  };
-
-  const handleDetailSave = async () => {
-    try {
-      await api.admin.events.update(secret, event.id, details);
-      setDetailSaved(true);
-      setTimeout(() => setDetailSaved(false), 2000);
-      onUpdate();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed');
-    }
-  };
+  const [name, setName] = useState(event.name);
+  const [nameSaved, setNameSaved] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
 
   const complete = participants.filter((p) => p.all_purchased).length;
-  const inProgress = participants.filter((p) => !p.all_purchased && p.claim_active).length;
-  const remaining = participants.filter((p) => !p.all_purchased && !p.claim_active).length;
   const paid = participants.filter((p) => p.paid).length;
+  const remaining = participants.filter((p) => !p.all_purchased).length;
+
+  const handleStatusChange = async (s: EventDetail['status']) => {
+    try {
+      await api.admin.events.update(secret, event.id, { status: s });
+      setStatus(s);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const handleNameSave = async () => {
+    try {
+      await api.admin.events.update(secret, event.id, { name });
+      setNameSaved(true);
+      setTimeout(() => setNameSaved(false), 2000);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const label = event.reg_type === 'return' ? 'Return Reg' : 'Open Reg';
+  const origin = window.location.origin;
 
   return (
-    <div className="space-y-6">
-      {/* Event Details */}
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
-        <h3 className="font-semibold text-gray-200 mb-3">Event Details</h3>
-        <div className="flex flex-wrap gap-3 items-end">
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Name</label>
-            <input
-              type="text"
-              value={details.name}
-              onChange={(e) => setDetails((d) => ({ ...d, name: e.target.value }))}
-              className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm w-64 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Year</label>
-            <input
-              type="number"
-              value={details.year}
-              onChange={(e) => setDetails((d) => ({ ...d, year: Number(e.target.value) }))}
-              className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm w-24 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Type</label>
-            <select
-              value={details.reg_type}
-              onChange={(e) => setDetails((d) => ({ ...d, reg_type: e.target.value as 'return' | 'open' }))}
-              className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
-            >
-              <option value="return">Return Reg</option>
-              <option value="open">Open Reg</option>
-            </select>
-          </div>
-          <button
-            onClick={handleDetailSave}
-            className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-1.5 rounded transition-colors"
+    <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <span className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
+          event.reg_type === 'return' ? 'bg-purple-900 text-purple-300' : 'bg-teal-900 text-teal-300'
+        }`}>
+          {label}
+        </span>
+        <div className="flex gap-1.5">
+          <a
+            href={api.admin.exportUrl(event.id, secret)}
+            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded transition-colors"
+            download
           >
-            {detailSaved ? 'Saved ✓' : 'Save'}
+            CSV
+          </a>
+          <Link
+            to={`/live/${event.id}?token=${event.access_token}`}
+            target="_blank"
+            className="text-xs bg-yellow-700 hover:bg-yellow-600 text-white px-2 py-1 rounded transition-colors"
+          >
+            Live ↗
+          </Link>
+          <button
+            onClick={() => setCopyOpen(true)}
+            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded transition-colors"
+          >
+            Copy →
           </button>
         </div>
       </div>
 
-      {/* Status */}
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
-        <h3 className="font-semibold text-gray-200 mb-3">Event Status</h3>
-        <div className="flex flex-wrap gap-2">
-          {STATUS_OPTIONS.map((s) => (
-            <button
-              key={s}
-              onClick={() => handleStatusChange(s)}
-              className={`px-4 py-2 rounded text-sm font-medium transition-colors capitalize ${
-                status === s
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
+      {/* Name */}
+      <div className="flex gap-2 items-center">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+        />
+        <button
+          onClick={handleNameSave}
+          className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded transition-colors whitespace-nowrap"
+        >
+          {nameSaved ? 'Saved ✓' : 'Save'}
+        </button>
       </div>
 
-      {/* Access token */}
-      <AccessTokenSection event={event} secret={secret} onUpdate={onUpdate} />
+      {/* Status */}
+      <div className="flex flex-wrap gap-1">
+        {STATUS_OPTIONS.map((s) => (
+          <button
+            key={s}
+            onClick={() => handleStatusChange(s)}
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors capitalize ${
+              status === s ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+            }`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-3 gap-2 text-center">
         {[
           { label: 'Total', value: participants.length, color: 'text-white' },
           { label: 'Complete', value: complete, color: 'text-green-400' },
-          { label: 'In Progress', value: inProgress, color: 'text-yellow-400' },
-          { label: 'Remaining', value: remaining, color: 'text-gray-300' },
+          { label: 'Remaining', value: remaining, color: 'text-yellow-400' },
           { label: 'Paid', value: paid, color: 'text-green-400' },
           { label: 'Unpaid', value: participants.length - paid, color: 'text-red-400' },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="bg-gray-900 border border-gray-700 rounded-lg p-4 text-center">
-            <div className={`text-3xl font-bold font-mono ${color}`}>{value}</div>
-            <div className="text-gray-400 text-sm">{label}</div>
+        ].map(({ label: lbl, value, color }) => (
+          <div key={lbl} className="bg-gray-800 rounded-lg p-2">
+            <div className={`text-xl font-bold font-mono ${color}`}>{value}</div>
+            <div className="text-gray-500 text-xs">{lbl}</div>
           </div>
         ))}
       </div>
+
+      {/* Access token */}
+      <AccessTokenSection event={event} secret={secret} onUpdate={onUpdate} compact />
+
+      {/* Links */}
+      <div className="space-y-1.5">
+        <div className="flex gap-2 items-center">
+          <code className="bg-gray-800 text-green-400 text-xs px-2 py-1.5 rounded flex-1 break-all">
+            {origin}/register/{event.id}?token={event.access_token}
+          </code>
+          <button
+            onClick={() => navigator.clipboard.writeText(`${origin}/register/${event.id}?token=${event.access_token}`)}
+            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1.5 rounded shrink-0"
+          >
+            Copy
+          </button>
+        </div>
+      </div>
+
+      {copyOpen && (
+        <CopyParticipantsModal
+          event={event}
+          secret={secret}
+          allEvents={allEvents}
+          onDone={() => { setCopyOpen(false); onUpdate(); }}
+          onClose={() => setCopyOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -439,13 +701,14 @@ function OverviewTab({
 // ─── Participants Tab ─────────────────────────────────────────────────────────
 
 function ParticipantsTab({
-  event,
-  secret,
-  participants,
-  allEvents,
-  onUpdate,
+  event, activeRegType, returnEvent, openEvent, onRegTypeChange,
+  secret, participants, allEvents, onUpdate,
 }: {
-  event: EventDetail;
+  event: EventDetail | null;
+  activeRegType: 'return' | 'open';
+  returnEvent: EventDetail | null;
+  openEvent: EventDetail | null;
+  onRegTypeChange: (t: 'return' | 'open') => void;
   secret: string;
   participants: Participant[];
   allEvents: EventDetail[];
@@ -454,9 +717,9 @@ function ParticipantsTab({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
-  const [newParticipant, setNewParticipant] = useState<Partial<Participant>>({
-    badge_type: 'ADULT',
-  });
+  const [newParticipant, setNewParticipant] = useState<Partial<Participant>>({ badge_type: 'ADULT' });
+
+  if (!event) return <div className="text-gray-500">No event for this registration type.</div>;
 
   const handleDelete = async (p: Participant) => {
     if (!confirm(`Delete ${p.first_name} ${p.last_name}?`)) return;
@@ -509,6 +772,8 @@ function ParticipantsTab({
 
   return (
     <div>
+      <EventToggle returnEvent={returnEvent} openEvent={openEvent} active={activeRegType} onChange={onRegTypeChange} />
+
       <div className="flex justify-between items-center mb-4">
         <h3 className="font-semibold text-gray-200">{participants.length} participants</h3>
         <div className="flex gap-2">
@@ -527,15 +792,10 @@ function ParticipantsTab({
         </div>
       </div>
 
-      {/* Add form */}
       {addOpen && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-4">
           <h4 className="font-medium text-gray-200 mb-3">New Participant</h4>
-          <ParticipantForm
-            value={newParticipant}
-            onChange={setNewParticipant}
-            coordinatorNames={[]} // TODO: pull from coordinators
-          />
+          <ParticipantForm value={newParticipant} onChange={setNewParticipant} coordinatorNames={[]} />
           <div className="flex gap-2 mt-3">
             <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-1.5 rounded">
               Add
@@ -631,7 +891,6 @@ function ParticipantsTab({
         </table>
       </div>
 
-      {/* Copy/Transfer modal */}
       {copyOpen && (
         <CopyParticipantsModal
           event={event}
@@ -642,7 +901,6 @@ function ParticipantsTab({
         />
       )}
 
-      {/* Edit modal */}
       {editingId !== null && (
         <EditParticipantModal
           participant={participants.find((p) => p.id === editingId)!}
@@ -735,61 +993,33 @@ function ParticipantForm({
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2">
         <Field label="First Name">
-          <input
-            type="text"
-            value={value.first_name ?? ''}
-            onChange={(e) => set('first_name', e.target.value)}
-            className={inputCls}
-          />
+          <input type="text" value={value.first_name ?? ''} onChange={(e) => set('first_name', e.target.value)} className={inputCls} />
         </Field>
         <Field label="Last Name">
-          <input
-            type="text"
-            value={value.last_name ?? ''}
-            onChange={(e) => set('last_name', e.target.value)}
-            className={inputCls}
-          />
+          <input type="text" value={value.last_name ?? ''} onChange={(e) => set('last_name', e.target.value)} className={inputCls} />
         </Field>
       </div>
-
       <div className="grid grid-cols-2 gap-2">
         <Field label="Member ID">
-          <input
-            type="text"
-            value={value.member_id ?? ''}
-            onChange={(e) => set('member_id', e.target.value)}
-            className={inputCls}
-          />
+          <input type="text" value={value.member_id ?? ''} onChange={(e) => set('member_id', e.target.value)} className={inputCls} />
         </Field>
         <Field label="Badge Type">
-          <select
-            value={value.badge_type ?? 'ADULT'}
-            onChange={(e) => set('badge_type', e.target.value)}
-            className={inputCls}
-          >
+          <select value={value.badge_type ?? 'ADULT'} onChange={(e) => set('badge_type', e.target.value)} className={inputCls}>
             <option value="ADULT">Adult</option>
             <option value="JUNIOR">Junior / Military / Senior</option>
           </select>
         </Field>
       </div>
-
       <div className="grid grid-cols-2 gap-2">
         <Field label="Sponsor">
-          <input
-            type="text"
-            value={value.sponsor ?? ''}
-            onChange={(e) => set('sponsor', e.target.value)}
-            className={inputCls}
-          />
+          <input type="text" value={value.sponsor ?? ''} onChange={(e) => set('sponsor', e.target.value)} className={inputCls} />
         </Field>
         {showAdminFields && (
           <Field label="Coordinator">
             <input
-              type="text"
-              value={value.purchasing_coordinator ?? ''}
+              type="text" value={value.purchasing_coordinator ?? ''}
               onChange={(e) => set('purchasing_coordinator', e.target.value)}
-              list="coord-names"
-              className={inputCls}
+              list="coord-names" className={inputCls}
             />
             <datalist id="coord-names">
               {coordinatorNames.map((n) => <option key={n} value={n} />)}
@@ -797,7 +1027,6 @@ function ParticipantForm({
           </Field>
         )}
       </div>
-
       <Field label="Requested Days">
         <div className="flex flex-wrap gap-3">
           {DAY_KEYS.map((day) => (
@@ -813,28 +1042,17 @@ function ParticipantForm({
           ))}
         </div>
       </Field>
-
       {showAdminFields && (
         <>
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
-              <input
-                type="checkbox"
-                checked={Boolean(value.return_eligible)}
-                onChange={(e) => set('return_eligible', e.target.checked)}
-                className="accent-green-500"
-              />
-              Return Eligible
-            </label>
-          </div>
-
-          <Field label="Notes">
+          <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
             <input
-              type="text"
-              value={value.notes ?? ''}
-              onChange={(e) => set('notes', e.target.value)}
-              className={inputCls}
+              type="checkbox" checked={Boolean(value.return_eligible)}
+              onChange={(e) => set('return_eligible', e.target.checked)} className="accent-green-500"
             />
+            Return Eligible
+          </label>
+          <Field label="Notes">
+            <input type="text" value={value.notes ?? ''} onChange={(e) => set('notes', e.target.value)} className={inputCls} />
           </Field>
         </>
       )}
@@ -845,14 +1063,21 @@ function ParticipantForm({
 // ─── Coordinators Tab ─────────────────────────────────────────────────────────
 
 function CoordinatorsTab({
-  event, secret, coordinators, onUpdate,
+  event, activeRegType, returnEvent, openEvent, onRegTypeChange,
+  secret, coordinators, onUpdate,
 }: {
-  event: EventDetail;
+  event: EventDetail | null;
+  activeRegType: 'return' | 'open';
+  returnEvent: EventDetail | null;
+  openEvent: EventDetail | null;
+  onRegTypeChange: (t: 'return' | 'open') => void;
   secret: string;
   coordinators: Coordinator[];
   onUpdate: () => void;
 }) {
   const [newName, setNewName] = useState('');
+
+  if (!event) return <div className="text-gray-500">No event for this registration type.</div>;
 
   const handleAdd = async () => {
     if (!newName.trim()) return;
@@ -877,26 +1102,29 @@ function CoordinatorsTab({
 
   return (
     <div>
-      <div className="flex gap-2 mb-4">
-        <input
-          type="text"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder="Coordinator name"
-          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-          className="bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-        />
-        <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded">
-          Add
-        </button>
+      <EventToggle returnEvent={returnEvent} openEvent={openEvent} active={activeRegType} onChange={onRegTypeChange} />
+
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 mb-5">
+        <h3 className="font-semibold text-gray-200 mb-3">Add Coordinator</h3>
+        <div className="flex gap-2">
+          <input
+            type="text" placeholder="Name" value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+            className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+          />
+          <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded transition-colors">
+            Add
+          </button>
+        </div>
       </div>
 
       <div className="space-y-2">
         {coordinators.map((c) => (
-          <div key={c.id} className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 flex items-center justify-between">
+          <div key={c.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4 flex items-center justify-between">
             <div>
-              <span className="font-medium text-white">{c.name}</span>
-              <div className="text-xs text-gray-400 mt-0.5 flex flex-wrap gap-3">
+              <div className="text-white font-medium">{c.name}</div>
+              <div className="flex gap-3 mt-1 text-xs text-gray-400">
                 {c.venmo && <span>Venmo: {c.venmo}</span>}
                 {c.zelle && <span>Zelle: {c.zelle}</span>}
                 {c.paypal && <span>PayPal: {c.paypal}</span>}
@@ -906,10 +1134,7 @@ function CoordinatorsTab({
                 )}
               </div>
             </div>
-            <button
-              onClick={() => handleDelete(c)}
-              className="text-gray-500 hover:text-red-400 text-sm ml-4"
-            >
+            <button onClick={() => handleDelete(c)} className="text-gray-500 hover:text-red-400 text-sm ml-4">
               Remove
             </button>
           </div>
@@ -925,37 +1150,49 @@ function CoordinatorsTab({
 // ─── Prices Tab ───────────────────────────────────────────────────────────────
 
 function PricesTab({
-  event, secret, onUpdate,
+  event, activeRegType, returnEvent, openEvent, onRegTypeChange,
+  secret, onUpdate,
 }: {
-  event: EventDetail;
+  event: EventDetail | null;
+  activeRegType: 'return' | 'open';
+  returnEvent: EventDetail | null;
+  openEvent: EventDetail | null;
+  onRegTypeChange: (t: 'return' | 'open') => void;
   secret: string;
   onUpdate: () => void;
 }) {
-  const centsToDollars = (c: number) => (c / 100).toFixed(2);
-  const dollarsToCents = (d: string) => Math.round(parseFloat(d || '0') * 100);
-
   const priceFields = [
     { key: 'price_preview_adult', label: 'Preview Night — Adult' },
     { key: 'price_thu_adult', label: 'Thursday — Adult' },
     { key: 'price_fri_adult', label: 'Friday — Adult' },
     { key: 'price_sat_adult', label: 'Saturday — Adult' },
     { key: 'price_sun_adult', label: 'Sunday — Adult' },
-    { key: 'price_preview_junior', label: 'Preview Night — Junior' },
-    { key: 'price_thu_junior', label: 'Thursday — Junior' },
-    { key: 'price_fri_junior', label: 'Friday — Junior' },
-    { key: 'price_sat_junior', label: 'Saturday — Junior' },
-    { key: 'price_sun_junior', label: 'Sunday — Junior' },
+    { key: 'price_preview_junior', label: 'Preview Night — Junior / Military / Senior' },
+    { key: 'price_thu_junior', label: 'Thursday — Junior / Military / Senior' },
+    { key: 'price_fri_junior', label: 'Friday — Junior / Military / Senior' },
+    { key: 'price_sat_junior', label: 'Saturday — Junior / Military / Senior' },
+    { key: 'price_sun_junior', label: 'Sunday — Junior / Military / Senior' },
   ] as const;
 
+  const centsToDollars = (c: number) => (c / 100).toFixed(2);
+  const dollarsToCents = (d: string) => Math.round(parseFloat(d || '0') * 100);
+
   const [values, setValues] = useState<Record<string, string>>(
-    Object.fromEntries(priceFields.map(({ key }) => [key, centsToDollars(event[key] as number)]))
+    event
+      ? Object.fromEntries(priceFields.map(({ key }) => [key, centsToDollars(event[key] as number)]))
+      : {}
   );
   const [saved, setSaved] = useState(false);
 
+  // Reset when event changes
+  useEffect(() => {
+    if (event) setValues(Object.fromEntries(priceFields.map(({ key }) => [key, centsToDollars(event[key] as number)])));
+  }, [event?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!event) return <div className="text-gray-500">No event for this registration type.</div>;
+
   const handleSave = async () => {
-    const patch = Object.fromEntries(
-      priceFields.map(({ key }) => [key, dollarsToCents(values[key])])
-    );
+    const patch = Object.fromEntries(priceFields.map(({ key }) => [key, dollarsToCents(values[key])]));
     try {
       await api.admin.events.update(secret, event.id, patch);
       setSaved(true);
@@ -967,31 +1204,155 @@ function PricesTab({
   };
 
   return (
-    <div className="max-w-sm">
-      <h3 className="font-semibold text-gray-200 mb-4">Badge Prices</h3>
-      <div className="space-y-3">
-        {priceFields.map(({ key, label }) => (
-          <div key={key} className="flex items-center gap-3">
-            <label className="text-sm text-gray-300 flex-1">{label}</label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={values[key]}
-                onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
-                className="bg-gray-800 border border-gray-600 rounded pl-7 pr-3 py-1.5 text-white text-sm w-28 focus:outline-none focus:border-blue-500"
-              />
+    <div>
+      <EventToggle returnEvent={returnEvent} openEvent={openEvent} active={activeRegType} onChange={onRegTypeChange} />
+      <div className="max-w-sm">
+        <h3 className="font-semibold text-gray-200 mb-4">Badge Prices</h3>
+        <div className="space-y-3">
+          {priceFields.map(({ key, label }) => (
+            <div key={key} className="flex items-center gap-3">
+              <label className="text-sm text-gray-300 flex-1">{label}</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={values[key] ?? ''}
+                  onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
+                  className="bg-gray-800 border border-gray-600 rounded pl-7 pr-3 py-1.5 text-white text-sm w-28 focus:outline-none focus:border-blue-500"
+                />
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
+        <button
+          onClick={handleSave}
+          className="mt-5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-6 py-2 rounded transition-colors"
+        >
+          {saved ? 'Saved ✓' : 'Save Prices'}
+        </button>
       </div>
+    </div>
+  );
+}
+
+// ─── Dates Tab ────────────────────────────────────────────────────────────────
+
+type DateFields = Omit<YearMeta, 'year' | 'created_at' | 'updated_at'>;
+
+const EMPTY_DATES: DateFields = {
+  return_reg_start: '', return_reg_end: '',
+  open_reg_start: '', open_reg_end: '',
+  address_deadline: '', hotel_deadline: '',
+  preview_date: '', thu_date: '', fri_date: '', sat_date: '', sun_date: '',
+  notes: '',
+};
+
+function DatesTab({
+  year, secret, meta, onUpdate,
+}: {
+  year: number;
+  secret: string;
+  meta: YearMeta | null;
+  onUpdate: () => void;
+}) {
+  const [form, setForm] = useState<DateFields>(meta ? { ...EMPTY_DATES, ...meta } : EMPTY_DATES);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setForm(meta ? { ...EMPTY_DATES, ...meta } : EMPTY_DATES);
+  }, [meta]);
+
+  const set = (k: keyof DateFields, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    try {
+      await api.admin.yearMeta.upsert(secret, year, form);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const DateInput = ({ label, field }: { label: string; field: keyof DateFields }) => (
+    <div className="flex items-center gap-3">
+      <label className="text-sm text-gray-300 w-52 shrink-0">{label}</label>
+      <input
+        type="date"
+        value={form[field]}
+        onChange={(e) => set(field, e.target.value)}
+        className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+      />
+    </div>
+  );
+
+  const DateRange = ({ label, startField, endField }: { label: string; startField: keyof DateFields; endField: keyof DateFields }) => (
+    <div className="flex items-center gap-3">
+      <label className="text-sm text-gray-300 w-52 shrink-0">{label}</label>
+      <input
+        type="date" value={form[startField]}
+        onChange={(e) => set(startField, e.target.value)}
+        className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+      />
+      <span className="text-gray-500 text-sm">to</span>
+      <input
+        type="date" value={form[endField]}
+        onChange={(e) => set(endField, e.target.value)}
+        className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+      />
+    </div>
+  );
+
+  return (
+    <div className="max-w-2xl space-y-8">
+      {/* Registration windows */}
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+        <h3 className="font-semibold text-gray-200 mb-4">Registration Windows</h3>
+        <div className="space-y-3">
+          <DateRange label="Return Registration" startField="return_reg_start" endField="return_reg_end" />
+          <DateRange label="Open Registration" startField="open_reg_start" endField="open_reg_end" />
+        </div>
+      </div>
+
+      {/* Deadlines */}
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+        <h3 className="font-semibold text-gray-200 mb-4">Deadlines</h3>
+        <div className="space-y-3">
+          <DateInput label="Address Deadline" field="address_deadline" />
+          <DateInput label="Hotel Deadline" field="hotel_deadline" />
+        </div>
+      </div>
+
+      {/* Event schedule */}
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+        <h3 className="font-semibold text-gray-200 mb-4">Event Schedule</h3>
+        <div className="space-y-3">
+          <DateInput label="Preview Night" field="preview_date" />
+          <DateInput label="Thursday" field="thu_date" />
+          <DateInput label="Friday" field="fri_date" />
+          <DateInput label="Saturday" field="sat_date" />
+          <DateInput label="Sunday" field="sun_date" />
+        </div>
+      </div>
+
+      {/* Notes */}
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+        <h3 className="font-semibold text-gray-200 mb-3">Notes</h3>
+        <textarea
+          value={form.notes}
+          onChange={(e) => set('notes', e.target.value)}
+          rows={3}
+          placeholder="Any notes for this year…"
+          className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 resize-none"
+        />
+      </div>
+
       <button
         onClick={handleSave}
-        className="mt-5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-6 py-2 rounded transition-colors"
+        className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-8 py-2.5 rounded transition-colors"
       >
-        {saved ? 'Saved ✓' : 'Save Prices'}
+        {saved ? 'Saved ✓' : 'Save Dates'}
       </button>
     </div>
   );
@@ -1000,8 +1361,8 @@ function PricesTab({
 // ─── Access Token Section ─────────────────────────────────────────────────────
 
 function AccessTokenSection({
-  event, secret, onUpdate,
-}: { event: EventDetail; secret: string; onUpdate: () => void }) {
+  event, secret, onUpdate, compact = false,
+}: { event: EventDetail; secret: string; onUpdate: () => void; compact?: boolean }) {
   const [token, setToken] = useState(event.access_token ?? '');
   const [regenerating, setRegenerating] = useState(false);
 
@@ -1019,40 +1380,47 @@ function AccessTokenSection({
     }
   };
 
-  const origin = window.location.origin;
-  const registerUrl = `${origin}/register/${event.id}?token=${token}`;
-  const liveUrl = `${origin}/live/${event.id}?token=${token}`;
-
   return (
-    <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="font-semibold text-gray-200">Access Token</h3>
-        <button
-          onClick={handleRegenerate}
-          disabled={regenerating}
-          className="text-xs text-gray-500 hover:text-red-400 disabled:opacity-50 transition-colors"
-        >
-          {regenerating ? 'Regenerating…' : 'Regenerate'}
-        </button>
-      </div>
-      {!token && (
-        <p className="text-yellow-400 text-xs mb-2">⚠ No token set — links won't work. Click Regenerate.</p>
+    <div className={compact ? '' : 'bg-gray-900 border border-gray-700 rounded-xl p-5'}>
+      {!compact && (
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-gray-200">Access Token</h3>
+          <button
+            onClick={handleRegenerate}
+            disabled={regenerating}
+            className="text-xs text-gray-500 hover:text-red-400 disabled:opacity-50 transition-colors"
+          >
+            {regenerating ? 'Regenerating…' : 'Regenerate'}
+          </button>
+        </div>
       )}
-      <p className="text-gray-400 text-sm mb-3">Share these links with participants:</p>
-      <div className="flex gap-2 items-center">
-        <code className="bg-gray-800 text-green-400 text-xs px-3 py-2 rounded flex-1 break-all">{registerUrl}</code>
-        <button
-          onClick={() => navigator.clipboard.writeText(registerUrl)}
-          className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded"
-        >Copy</button>
-      </div>
-      <div className="mt-2 flex gap-2 items-center">
-        <code className="bg-gray-800 text-yellow-400 text-xs px-3 py-2 rounded flex-1 break-all">{liveUrl}</code>
-        <button
-          onClick={() => navigator.clipboard.writeText(liveUrl)}
-          className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded"
-        >Copy</button>
-      </div>
+      {!token && (
+        <p className="text-yellow-400 text-xs mb-2">⚠ No token — click Regenerate.</p>
+      )}
+      {compact ? (
+        <div className="flex gap-1.5 items-center">
+          <code className="bg-gray-800 text-gray-400 text-xs px-2 py-1 rounded flex-1 truncate">
+            {token ? `…${token.slice(-8)}` : 'no token'}
+          </code>
+          <button
+            onClick={handleRegenerate}
+            disabled={regenerating}
+            className="text-xs text-gray-500 hover:text-red-400 shrink-0"
+          >
+            ↻
+          </button>
+        </div>
+      ) : (
+        <div className="flex gap-2 items-center">
+          <code className="bg-gray-800 text-green-400 text-xs px-3 py-2 rounded flex-1 break-all">{token}</code>
+          <button
+            onClick={() => navigator.clipboard.writeText(token)}
+            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded"
+          >
+            Copy
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1072,6 +1440,7 @@ function CopyParticipantsModal({
   const [targetId, setTargetId] = useState<number>(otherEvents[0]?.id ?? 0);
   const [mode, setMode] = useState<'copy' | 'transfer'>('copy');
   const [resetPurchasing, setResetPurchasing] = useState(true);
+  const [carryover, setCarryover] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState('');
 
@@ -1086,6 +1455,7 @@ function CopyParticipantsModal({
         target_event_id: targetId,
         reset_purchasing: resetPurchasing,
         transfer: mode === 'transfer',
+        carryover,
       });
       setResult(`✓ ${action === 'transfer' ? 'Transferred' : 'Copied'} ${res.copied} participants`);
       setTimeout(onDone, 1500);
@@ -1129,10 +1499,7 @@ function CopyParticipantsModal({
               {(['copy', 'transfer'] as const).map((m) => (
                 <label key={m} className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
                   <input
-                    type="radio"
-                    name="mode"
-                    value={m}
-                    checked={mode === m}
+                    type="radio" name="mode" value={m} checked={mode === m}
                     onChange={() => { setMode(m); setResetPurchasing(m === 'copy'); }}
                     className="accent-blue-500"
                   />
@@ -1147,12 +1514,25 @@ function CopyParticipantsModal({
 
           <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
             <input
-              type="checkbox"
-              checked={resetPurchasing}
+              type="checkbox" checked={resetPurchasing}
               onChange={(e) => setResetPurchasing(e.target.checked)}
               className="accent-blue-500"
             />
             Reset purchasing history (coordinator, purchased days, payment)
+          </label>
+
+          <label className="flex items-start gap-2 cursor-pointer text-sm text-gray-300">
+            <input
+              type="checkbox" checked={carryover}
+              onChange={(e) => setCarryover(e.target.checked)}
+              className="accent-blue-500 mt-0.5"
+            />
+            <span>
+              Carry gap days only
+              <span className="block text-xs text-gray-500 mt-0.5">
+                Sets requested days to only the unfulfilled gaps from source (for Return → Open Reg handoff)
+              </span>
+            </span>
           </label>
 
           {result && <p className="text-green-400 text-sm">{result}</p>}

@@ -61,6 +61,24 @@ export type Coordinator = {
   updated_at: string;
 };
 
+export type YearMeta = {
+  year: number;
+  return_reg_start: string;
+  return_reg_end: string;
+  open_reg_start: string;
+  open_reg_end: string;
+  address_deadline: string;
+  hotel_deadline: string;
+  preview_date: string;
+  thu_date: string;
+  fri_date: string;
+  sat_date: string;
+  sun_date: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
 // Claim expires after 10 minutes
 export const CLAIM_TIMEOUT_MINUTES = 10;
 

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type Event, type Participant, type Coordinator, enrichParticipant, isClaimExpired } from './db';
+import { type Event, type Participant, type Coordinator, type YearMeta, enrichParticipant, isClaimExpired } from './db';
 
 type Bindings = {
   DB: D1Database;
@@ -523,6 +523,50 @@ admin.patch('/events/:id/participants/sort', async (c) => {
   return json({ ok: true });
 });
 
+// Initialize a new year — atomically creates Return Reg + Open Reg events
+admin.post('/initialize-year', async (c) => {
+  const body = await c.req.json<{
+    year: number;
+    price_preview_adult: number; price_thu_adult: number; price_fri_adult: number;
+    price_sat_adult: number; price_sun_adult: number;
+    price_preview_junior: number; price_thu_junior: number; price_fri_junior: number;
+    price_sat_junior: number; price_sun_junior: number;
+  }>();
+
+  if (!body.year) return err('year required');
+
+  const returnToken = crypto.randomUUID();
+  const openToken = crypto.randomUUID();
+
+  const insertSQL = `
+    INSERT INTO events (year, name, reg_type, status,
+      price_preview_adult, price_thu_adult, price_fri_adult, price_sat_adult, price_sun_adult,
+      price_preview_junior, price_thu_junior, price_fri_junior, price_sat_junior, price_sun_junior,
+      access_token)
+    VALUES (?, ?, ?, 'setup', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  const priceBinds = [
+    body.price_preview_adult ?? 0,
+    body.price_thu_adult ?? 0,
+    body.price_fri_adult ?? 0,
+    body.price_sat_adult ?? 0,
+    body.price_sun_adult ?? 0,
+    body.price_preview_junior ?? 0,
+    body.price_thu_junior ?? 0,
+    body.price_fri_junior ?? 0,
+    body.price_sat_junior ?? 0,
+    body.price_sun_junior ?? 0,
+  ];
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(insertSQL).bind(body.year, `SDCC ${body.year} Return Reg`, 'return', ...priceBinds, returnToken),
+    c.env.DB.prepare(insertSQL).bind(body.year, `SDCC ${body.year} Open Reg`, 'open', ...priceBinds, openToken),
+  ]);
+
+  return json({ ok: true }, 201);
+});
+
 // Copy or transfer participants to another event
 admin.post('/events/:id/participants/copy', async (c) => {
   const sourceEventId = Number(c.req.param('id'));
@@ -531,6 +575,7 @@ admin.post('/events/:id/participants/copy', async (c) => {
     participant_ids?: number[];
     reset_purchasing?: boolean;
     transfer?: boolean;
+    carryover?: boolean;
   }>();
 
   if (!body.target_event_id) return err('target_event_id required');
@@ -559,7 +604,9 @@ admin.post('/events/:id/participants/copy', async (c) => {
 
   if (participants.length === 0) return err('No participants found', 400);
 
-  const reset = body.reset_purchasing ?? true;
+  const carryover = body.carryover ?? false;
+  // carryover implies reset (target event starts fresh, only gap days as requests)
+  const reset = carryover ? true : (body.reset_purchasing ?? true);
 
   const insertStmts = participants.map((p, idx) =>
     c.env.DB.prepare(`
@@ -574,7 +621,11 @@ admin.post('/events/:id/participants/copy', async (c) => {
       p.first_name, p.last_name, p.member_id,
       p.badge_type, p.return_eligible ? 1 : 0,
       p.sponsor, p.notes,
-      p.req_preview ? 1 : 0, p.req_thu ? 1 : 0, p.req_fri ? 1 : 0, p.req_sat ? 1 : 0, p.req_sun ? 1 : 0,
+      carryover ? (p.req_preview && !p.pur_preview ? 1 : 0) : (p.req_preview ? 1 : 0),
+      carryover ? (p.req_thu && !p.pur_thu ? 1 : 0) : (p.req_thu ? 1 : 0),
+      carryover ? (p.req_fri && !p.pur_fri ? 1 : 0) : (p.req_fri ? 1 : 0),
+      carryover ? (p.req_sat && !p.pur_sat ? 1 : 0) : (p.req_sat ? 1 : 0),
+      carryover ? (p.req_sun && !p.pur_sun ? 1 : 0) : (p.req_sun ? 1 : 0),
       idx + 1,
       reset ? '' : p.purchasing_coordinator,
       reset ? '' : p.purchasing_claimed_by,
@@ -678,6 +729,46 @@ admin.get('/events/:id/export.csv', async (c) => {
       'Content-Disposition': `attachment; filename="komikone-${event.year}-${event.reg_type}.csv"`,
     },
   });
+});
+
+// Get year meta
+admin.get('/year-meta/:year', async (c) => {
+  const year = Number(c.req.param('year'));
+  const row = await c.env.DB.prepare('SELECT * FROM year_meta WHERE year = ?').bind(year).first<YearMeta>();
+  return json(row ?? {
+    year, return_reg_start: '', return_reg_end: '',
+    open_reg_start: '', open_reg_end: '',
+    address_deadline: '', hotel_deadline: '',
+    preview_date: '', thu_date: '', fri_date: '', sat_date: '', sun_date: '',
+    notes: '', created_at: '', updated_at: '',
+  });
+});
+
+// Upsert year meta
+admin.put('/year-meta/:year', async (c) => {
+  const year = Number(c.req.param('year'));
+  const body = await c.req.json<Partial<YearMeta>>();
+  await c.env.DB.prepare(`
+    INSERT INTO year_meta (year, return_reg_start, return_reg_end, open_reg_start, open_reg_end,
+      address_deadline, hotel_deadline, preview_date, thu_date, fri_date, sat_date, sun_date, notes, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(year) DO UPDATE SET
+      return_reg_start = excluded.return_reg_start, return_reg_end = excluded.return_reg_end,
+      open_reg_start = excluded.open_reg_start, open_reg_end = excluded.open_reg_end,
+      address_deadline = excluded.address_deadline, hotel_deadline = excluded.hotel_deadline,
+      preview_date = excluded.preview_date, thu_date = excluded.thu_date,
+      fri_date = excluded.fri_date, sat_date = excluded.sat_date,
+      sun_date = excluded.sun_date, notes = excluded.notes, updated_at = datetime('now')
+  `).bind(
+    year,
+    body.return_reg_start ?? '', body.return_reg_end ?? '',
+    body.open_reg_start ?? '', body.open_reg_end ?? '',
+    body.address_deadline ?? '', body.hotel_deadline ?? '',
+    body.preview_date ?? '', body.thu_date ?? '',
+    body.fri_date ?? '', body.sat_date ?? '',
+    body.sun_date ?? '', body.notes ?? '',
+  ).run();
+  return json({ ok: true });
 });
 
 app.route('/api/admin', admin);
