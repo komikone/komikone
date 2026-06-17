@@ -826,15 +826,15 @@ function CellContent({
             <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1 14l-4-4 1.414-1.414L11 13.172l5.586-5.586L18 9l-7 7z"/>
           </svg>
         </div>
-      ) : <span className="text-gray-300 dark:text-gray-700 text-xs flex justify-center">—</span>;
+      ) : <span className="text-gray-400 dark:text-gray-600 text-xs flex justify-center">—</span>;
 
     case 'sponsor':
       return p.sponsor_name && p.sponsor_id !== 1 ? (
         <span className="flex items-center gap-1 text-xs">
           <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sponsorColor(p.sponsor_id) }} />
-          <span className="text-gray-200 dark:text-gray-300">{p.sponsor_name}</span>
+          <span className="text-gray-800 dark:text-gray-200">{p.sponsor_name}</span>
         </span>
-      ) : <span className="text-gray-300 dark:text-gray-700 text-xs">—</span>;
+      ) : <span className="text-gray-400 dark:text-gray-600 text-xs">—</span>;
 
     case 'group':
       return p.group_name ? (
@@ -844,11 +844,11 @@ function CellContent({
         >
           {p.group_name}
         </span>
-      ) : <span className="text-gray-300 dark:text-gray-700 text-xs">—</span>;
+      ) : <span className="text-gray-400 dark:text-gray-600 text-xs">—</span>;
 
     case 'member_id': {
       const s = (p.member_id || '').toUpperCase();
-      if (!s) return <span className="text-gray-300 dark:text-gray-700 text-xs font-mono">—</span>;
+      if (!s) return <span className="text-gray-400 dark:text-gray-600 text-xs font-mono">—</span>;
       const parts = s.split(/(\d+)/);
       return (
         <CopyCell value={s}>
@@ -984,7 +984,7 @@ function CellContent({
           onClick={() => setEditingRow(p.id)}
           className="text-xs text-left text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
         >
-          {p.who_purchased || <span className="italic text-gray-300 dark:text-gray-600">tap to set</span>}
+          {p.who_purchased || <span className="italic text-gray-400 dark:text-gray-600">tap to set</span>}
         </button>
       );
 
