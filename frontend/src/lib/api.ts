@@ -69,12 +69,25 @@ export type Participant = {
   pur_sun: boolean;
   who_purchased: string;
   paid: boolean;
+  group_id: number | null;
+  group_name: string | null;
+  group_color: string | null;
   // Computed by server
   claim_active: boolean;
   purchase_total: number; // cents
   gaps: string[];
   all_purchased: boolean;
   any_purchased: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Group = {
+  id: number;
+  event_id: number;
+  name: string;
+  color: string;
+  sort_order: number;
   created_at: string;
   updated_at: string;
 };
@@ -182,6 +195,13 @@ export const api = {
       ),
   },
 
+  groups: {
+    list: (eventId: number, token?: string) =>
+      req<Group[]>(`/api/events/${eventId}/groups${token ? `?token=${token}` : ''}`, {
+        headers: headers(token),
+      }),
+  },
+
   coordinators: {
     list: (eventId: number, token?: string) =>
       req<Coordinator[]>(`/api/events/${eventId}/coordinators${token ? `?token=${token}` : ''}`, {
@@ -270,6 +290,24 @@ export const api = {
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/coordinators/${cid}`, {
           method: 'DELETE',
           headers: headers(undefined, secret),
+        }),
+    },
+    groups: {
+      create: (secret: string, eventId: number, data: { name: string; color?: string }) =>
+        req<{ id: number }>(`/api/admin/events/${eventId}/groups`, {
+          method: 'POST', headers: headers(undefined, secret), body: JSON.stringify(data),
+        }),
+      update: (secret: string, eventId: number, gid: number, data: { name?: string; color?: string }) =>
+        req<{ ok: boolean }>(`/api/admin/events/${eventId}/groups/${gid}`, {
+          method: 'PATCH', headers: headers(undefined, secret), body: JSON.stringify(data),
+        }),
+      delete: (secret: string, eventId: number, gid: number) =>
+        req<{ ok: boolean }>(`/api/admin/events/${eventId}/groups/${gid}`, {
+          method: 'DELETE', headers: headers(undefined, secret),
+        }),
+      reorder: (secret: string, eventId: number, order: number[]) =>
+        req<{ ok: boolean }>(`/api/admin/events/${eventId}/groups/reorder`, {
+          method: 'PATCH', headers: headers(undefined, secret), body: JSON.stringify({ order }),
         }),
     },
     yearMeta: {

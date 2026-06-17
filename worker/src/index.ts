@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type Event, type Participant, type Coordinator, type YearMeta, enrichParticipant, isClaimExpired } from './db';
+import { type Event, type Participant, type Coordinator, type YearMeta, type Group, enrichParticipant, isClaimExpired } from './db';
 
 type Bindings = {
   DB: D1Database;
@@ -82,7 +82,11 @@ app.get('/api/events/:id/participants', async (c) => {
   if (!isAdmin && token !== event.access_token) return err('Invalid token', 401);
 
   const rows = await c.env.DB.prepare(
-    'SELECT * FROM participants WHERE event_id = ? ORDER BY sort_order ASC, id ASC'
+    `SELECT p.*, g.name AS group_name, g.color AS group_color
+     FROM participants p
+     LEFT JOIN groups g ON g.id = p.group_id
+     WHERE p.event_id = ?
+     ORDER BY p.sort_order ASC, p.id ASC`
   ).bind(id).all<Participant>();
 
   const enriched = rows.results.map((p) => enrichParticipant(p, event));
@@ -381,6 +385,21 @@ app.patch('/api/events/:id/participants/:pid/profile', async (c) => {
   return json({ ok: true });
 });
 
+// Get groups for an event (public, token-gated)
+app.get('/api/events/:id/groups', async (c) => {
+  const id = Number(c.req.param('id'));
+  const token = c.req.query('token') || c.req.header('x-access-token');
+  const authHeader = c.req.header('authorization');
+  const isAdmin = authHeader === `Bearer ${c.env.ADMIN_SECRET}`;
+  const event = await getEvent(c.env.DB, id);
+  if (!event) return err('Event not found', 404);
+  if (!isAdmin && token !== event.access_token) return err('Invalid token', 401);
+  const rows = await c.env.DB.prepare(
+    'SELECT * FROM groups WHERE event_id = ? ORDER BY sort_order ASC, id ASC'
+  ).bind(id).all<Group>();
+  return json(rows.results);
+});
+
 // ── Admin-only routes ─────────────────────────────────────────────────────────
 
 const admin = new Hono<{ Bindings: Bindings }>();
@@ -525,7 +544,13 @@ admin.patch('/events/:id/participants/:pid', async (c) => {
   ] as const;
 
   const fields: string[] = [];
-  const values: (string | number)[] = [];
+  const values: (string | number | null)[] = [];
+
+  // Handle group_id specially since it can be null
+  if ('group_id' in body) {
+    fields.push('group_id = ?');
+    values.push((body as Partial<Participant & { group_id: number | null }>).group_id === null ? null : Number((body as Partial<Participant & { group_id: number | null }>).group_id));
+  }
 
   for (const key of allowed) {
     if (key in body) {
@@ -630,12 +655,20 @@ admin.post('/events/:id/participants/copy', async (c) => {
   if (body.participant_ids?.length) {
     const placeholders = body.participant_ids.map(() => '?').join(',');
     const rows = await c.env.DB.prepare(
-      `SELECT * FROM participants WHERE event_id = ? AND id IN (${placeholders}) ORDER BY sort_order ASC, id ASC`
+      `SELECT p.*, g.name AS group_name, g.color AS group_color
+       FROM participants p
+       LEFT JOIN groups g ON g.id = p.group_id
+       WHERE p.event_id = ? AND p.id IN (${placeholders})
+       ORDER BY p.sort_order ASC, p.id ASC`
     ).bind(sourceEventId, ...body.participant_ids).all<Participant>();
     participants = rows.results;
   } else {
     const rows = await c.env.DB.prepare(
-      'SELECT * FROM participants WHERE event_id = ? ORDER BY sort_order ASC, id ASC'
+      `SELECT p.*, g.name AS group_name, g.color AS group_color
+       FROM participants p
+       LEFT JOIN groups g ON g.id = p.group_id
+       WHERE p.event_id = ?
+       ORDER BY p.sort_order ASC, p.id ASC`
     ).bind(sourceEventId).all<Participant>();
     participants = rows.results;
   }
@@ -723,6 +756,57 @@ admin.delete('/events/:id/coordinators/:cid', async (c) => {
   return json({ ok: true });
 });
 
+// Reorder groups (must be before :gid routes to avoid conflict)
+admin.patch('/events/:id/groups/reorder', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const body = await c.req.json<{ order: number[] }>();
+  const stmts = body.order.map((gid, idx) =>
+    c.env.DB.prepare("UPDATE groups SET sort_order = ?, updated_at = datetime('now') WHERE id = ? AND event_id = ?")
+      .bind(idx + 1, gid, eventId)
+  );
+  await c.env.DB.batch(stmts);
+  return json({ ok: true });
+});
+
+// Create group
+admin.post('/events/:id/groups', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const body = await c.req.json<{ name: string; color?: string }>();
+  if (!body.name?.trim()) return err('name required');
+  const count = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM groups WHERE event_id = ?').bind(eventId).first<{ n: number }>();
+  const result = await c.env.DB.prepare(
+    'INSERT INTO groups (event_id, name, color, sort_order) VALUES (?, ?, ?, ?)'
+  ).bind(eventId, body.name.trim(), body.color ?? '#6366f1', (count?.n ?? 0) + 1).run();
+  return json({ id: result.meta.last_row_id }, 201);
+});
+
+// Update group
+admin.patch('/events/:id/groups/:gid', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const gid = Number(c.req.param('gid'));
+  const body = await c.req.json<{ name?: string; color?: string }>();
+  const fields: string[] = [];
+  const values: (string | number)[] = [];
+  if (body.name !== undefined) { fields.push('name = ?'); values.push(body.name.trim()); }
+  if (body.color !== undefined) { fields.push('color = ?'); values.push(body.color); }
+  if (fields.length === 0) return err('No fields to update');
+  fields.push("updated_at = datetime('now')");
+  values.push(gid, eventId);
+  await c.env.DB.prepare(`UPDATE groups SET ${fields.join(', ')} WHERE id = ? AND event_id = ?`).bind(...values).run();
+  return json({ ok: true });
+});
+
+// Delete group (unsets group_id on participants)
+admin.delete('/events/:id/groups/:gid', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const gid = Number(c.req.param('gid'));
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE participants SET group_id = NULL WHERE group_id = ? AND event_id = ?').bind(gid, eventId),
+    c.env.DB.prepare('DELETE FROM groups WHERE id = ? AND event_id = ?').bind(gid, eventId),
+  ]);
+  return json({ ok: true });
+});
+
 // CSV export
 admin.get('/events/:id/export.csv', async (c) => {
   const eventId = Number(c.req.param('id'));
@@ -730,7 +814,11 @@ admin.get('/events/:id/export.csv', async (c) => {
   if (!event) return err('Not found', 404);
 
   const rows = await c.env.DB.prepare(
-    'SELECT * FROM participants WHERE event_id = ? ORDER BY sort_order ASC, id ASC'
+    `SELECT p.*, g.name AS group_name, g.color AS group_color
+     FROM participants p
+     LEFT JOIN groups g ON g.id = p.group_id
+     WHERE p.event_id = ?
+     ORDER BY p.sort_order ASC, p.id ASC`
   ).bind(eventId).all<Participant>();
 
   const headers = [

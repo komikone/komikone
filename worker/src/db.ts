@@ -1,3 +1,13 @@
+export type Group = {
+  id: number;
+  event_id: number;
+  name: string;
+  color: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Event = {
   id: number;
   year: number;
@@ -45,6 +55,10 @@ export type Participant = {
   pur_sun: number;
   who_purchased: string;
   paid: number;
+  group_id: number | null;
+  // Joined from groups table:
+  group_name: string | null;
+  group_color: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -123,6 +137,9 @@ export function enrichParticipant(p: Participant, event: Event) {
 
   return {
     ...p,
+    group_id: p.group_id ?? null,
+    group_name: p.group_name ?? null,
+    group_color: p.group_color ?? null,
     return_eligible: Boolean(p.return_eligible),
     req_preview: Boolean(p.req_preview),
     req_thu: Boolean(p.req_thu),
