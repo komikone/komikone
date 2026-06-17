@@ -11,30 +11,31 @@ const DAY_GAP = 2;
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type RowStatus = 'complete' | 'claiming' | 'partial' | 'none';
-type ColKey = 'idx' | 'first' | 'last' | 'badge_type' | 'member_id' | 'requested' | 'purchased' | 'gaps' | 'status' | 'sponsor' | 'total' | 'who' | 'group';
+type ColKey = 'idx' | 'first' | 'last' | 'actions' | 'badge_type' | 'member_id' | 'requested' | 'purchased' | 'gaps' | 'status' | 'sponsor' | 'total' | 'who' | 'group';
 type SortDir = 'asc' | 'desc';
 
 // ─── Column config ────────────────────────────────────────────────────────────
 
-const FROZEN: ColKey[] = ['idx', 'first', 'last'];
-const FROZEN_PX: Record<string, number> = { idx: 36, first: 90, last: 96 };
+const FROZEN: ColKey[] = ['idx', 'first', 'last', 'actions'];
+const FROZEN_PX: Record<string, number> = { idx: 36, first: 90, last: 96, actions: 36 };
 const FROZEN_LEFT: Record<string, number> = {
   idx: 0,
   first: FROZEN_PX.idx,
   last: FROZEN_PX.idx + FROZEN_PX.first,
+  actions: FROZEN_PX.idx + FROZEN_PX.first + FROZEN_PX.last,
 };
 
 const DEFAULT_MOVABLE: ColKey[] = ['member_id', 'requested', 'purchased', 'gaps', 'badge_type', 'group', 'sponsor', 'status', 'total', 'who'];
 
 const COL_LABEL: Record<ColKey, string> = {
-  idx: '#', first: 'First', last: 'Last', badge_type: 'Badge',
+  idx: '#', first: 'First', last: 'Last', actions: '', badge_type: 'Badge',
   member_id: 'Member ID', requested: 'Requested', status: 'Status',
   purchased: 'Purchased', gaps: 'Gaps', total: 'Total', who: 'Who Bought',
   sponsor: 'Sponsor', group: 'Group',
 };
 
 const DEFAULT_WIDTHS: Record<ColKey, number> = {
-  idx: 36, first: 90, last: 96,
+  idx: 36, first: 90, last: 96, actions: 36,
   badge_type: 88, member_id: 118,
   requested: 168, purchased: 168, gaps: 168,
   sponsor: 112, status: 112, total: 74, who: 118, group: 110,
@@ -422,7 +423,7 @@ export default function LiveBoard() {
   }
 
   return (
-    <div className="min-h-screen bg-amber-50 dark:bg-gray-950 text-gray-950 dark:text-white flex flex-col">
+    <div className="h-screen bg-amber-50 dark:bg-gray-950 text-gray-950 dark:text-white flex flex-col overflow-hidden">
 
       {/* ── Top bar ── */}
       <div className="bg-red-600 border-b-4 border-black dark:bg-black dark:border-yellow-400 px-4 py-2 flex items-center gap-4 flex-wrap shrink-0">
@@ -442,16 +443,7 @@ export default function LiveBoard() {
         </div>
         <div className="flex items-center gap-2">
           {me ? (
-            <>
-              <span className="text-red-100 dark:text-gray-400 text-xs">You:</span>
-              <span className="text-white dark:text-yellow-300 text-xs font-semibold">{myDisplayName}</span>
-              <button
-                onClick={() => setShowWhoModal(true)}
-                className="text-red-300 dark:text-gray-500 hover:text-white dark:hover:text-gray-300 text-xs underline"
-              >
-                change
-              </button>
-            </>
+            <IdentityAvatar me={me} myDisplayName={myDisplayName} onChangeIdentity={() => setShowWhoModal(true)} />
           ) : (
             <button
               onClick={() => setShowWhoModal(true)}
@@ -735,6 +727,42 @@ export default function LiveBoard() {
 
 // ─── Cell renderer ────────────────────────────────────────────────────────────
 
+function CopyCell({ value, children }: { value: string; children?: React.ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <span
+      className="inline-flex items-center gap-1"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {children ?? <span>{value}</span>}
+      <button
+        onClick={handleCopy}
+        className={`transition-opacity text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 ${hovered || copied ? 'opacity-100' : 'opacity-0'}`}
+        title="Copy"
+      >
+        {copied ? (
+          <svg className="w-3 h-3 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        ) : (
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+          </svg>
+        )}
+      </button>
+    </span>
+  );
+}
+
 function CellContent({
   col, p, status, editingRow, setEditingRow,
   onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
@@ -766,15 +794,17 @@ function CellContent({
     }
 
     case 'first':
+      return <span className="font-semibold">{p.first_name}</span>;
+
+    case 'actions':
       return (
-        <div className="flex items-center gap-1">
-          <span className="font-semibold">{p.first_name}</span>
+        <div className="flex items-center justify-center">
           <button
             onClick={() => onEditParticipant(p)}
-            className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-blue-400"
+            className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-400"
             title="Edit participant"
           >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
           </button>
@@ -783,10 +813,14 @@ function CellContent({
 
     case 'last':
       return (
-        <div>
-          <div className="font-semibold">{p.last_name}</div>
+        <div className="flex items-center gap-1 flex-wrap">
+          <CopyCell value={p.last_name}>
+            <span className="font-semibold">{p.last_name}</span>
+          </CopyCell>
           {p.return_eligible && (
-            <span className="text-[10px] font-semibold text-green-700 dark:font-normal dark:text-green-400">✓ Return</span>
+            <span className="text-[10px] px-1 py-0.5 rounded font-medium bg-green-100 text-green-800 border border-green-300 dark:bg-green-900/60 dark:text-green-300 dark:border-green-700">
+              Return
+            </span>
           )}
         </div>
       );
@@ -813,13 +847,15 @@ function CellContent({
       if (!s) return <span className="text-gray-300 dark:text-gray-700 text-xs font-mono">—</span>;
       const parts = s.split(/(\d+)/);
       return (
-        <span className="font-mono text-xs tracking-wide">
-          {parts.map((part, i) =>
-            /^\d+$/.test(part)
-              ? <span key={i} className="text-red-600 dark:text-red-400">{part}</span>
-              : <span key={i} className="text-gray-700 dark:text-gray-300">{part}</span>
-          )}
-        </span>
+        <CopyCell value={s}>
+          <span className="font-mono text-xs tracking-wide">
+            {parts.map((part, i) =>
+              /^\d+$/.test(part)
+                ? <span key={i} className="text-red-600 dark:text-red-400">{part}</span>
+                : <span key={i} className="text-gray-700 dark:text-gray-300">{part}</span>
+            )}
+          </span>
+        </CopyCell>
       );
     }
 
@@ -951,6 +987,55 @@ function CellContent({
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function IdentityAvatar({
+  me, myDisplayName, onChangeIdentity,
+}: {
+  me: Participant;
+  myDisplayName: string;
+  onChangeIdentity: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const initials = `${me.first_name[0] ?? ''}${me.last_name[0] ?? ''}`.toUpperCase();
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-7 h-7 rounded-full bg-yellow-400 dark:bg-yellow-500 text-black font-bold text-[11px] flex items-center justify-center border-2 border-black dark:border-yellow-300 hover:bg-yellow-300 dark:hover:bg-yellow-400 transition-colors"
+        title={myDisplayName}
+      >
+        {initials}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-9 z-50 bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-4 min-w-[180px]">
+            <div className="text-white font-semibold text-sm">{myDisplayName}</div>
+            {me.member_id && (
+              <div className="text-gray-400 text-xs font-mono mt-0.5">{me.member_id}</div>
+            )}
+            {me.group_name && (
+              <div className="mt-1.5">
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white"
+                  style={{ backgroundColor: me.group_color ?? '#6366f1' }}
+                >
+                  {me.group_name}
+                </span>
+              </div>
+            )}
+            <button
+              onClick={() => { setOpen(false); onChangeIdentity(); }}
+              className="mt-3 text-xs text-gray-400 hover:text-white underline block"
+            >
+              Change identity
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function WhoAreYouModal({
   participants, onSelect, onDismiss, registerUrl,
