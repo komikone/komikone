@@ -834,7 +834,7 @@ function ParticipantsTab({
                 </td>
                 <td className="px-2 py-2">
                   <div className="text-white font-medium flex items-center gap-1.5 flex-wrap">
-                    {p.first_name} <CopyCell value={p.last_name} />
+                    {p.first_name} {p.last_name}
                     {p.group_name && (
                       <span
                         className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white"
@@ -848,7 +848,7 @@ function ParticipantsTab({
                   {p.notes && <div className="text-xs text-gray-500 italic">{p.notes}</div>}
                 </td>
                 <td className="px-2 py-2 font-mono text-xs text-gray-300">
-                  <CopyCell value={p.member_id} />
+                  {p.member_id || '—'}
                 </td>
                 <td className="px-2 py-2 text-center text-xs">
                   <span className={p.badge_type === 'JUNIOR' ? 'text-blue-400' : 'text-gray-300'}>
@@ -1658,42 +1658,6 @@ function CopyParticipantsModal({
 
 const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500';
 
-function CopyCell({ value, className = '' }: { value: string; className?: string }) {
-  const [copied, setCopied] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  if (!value) return <span className="text-gray-600">—</span>;
-  const handleCopy = () => {
-    navigator.clipboard.writeText(value).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-  return (
-    <span
-      className={`inline-flex items-center gap-1 ${className}`}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <span>{value}</span>
-      <button
-        onClick={handleCopy}
-        className={`transition-opacity text-gray-500 hover:text-white ${hovered || copied ? 'opacity-100' : 'opacity-0'}`}
-        title="Copy"
-      >
-        {copied ? (
-          <svg className="w-3 h-3 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-        ) : (
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-          </svg>
-        )}
-      </button>
-    </span>
-  );
-}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
