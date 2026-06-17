@@ -529,6 +529,21 @@ admin.post('/events/:id/participants', async (c) => {
   return json({ id: result.meta.last_row_id }, 201);
 });
 
+// Bulk update sort order (must be before /:pid to avoid "sort" being captured as a param)
+admin.patch('/events/:id/participants/sort', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const body = await c.req.json<{ order: number[] }>(); // array of participant IDs in desired order
+
+  const stmts = body.order.map((pid, idx) =>
+    c.env.DB.prepare(
+      "UPDATE participants SET sort_order = ?, updated_at = datetime('now') WHERE id = ? AND event_id = ?"
+    ).bind(idx + 1, pid, eventId)
+  );
+
+  await c.env.DB.batch(stmts);
+  return json({ ok: true });
+});
+
 // Update participant (admin — full edit)
 admin.patch('/events/:id/participants/:pid', async (c) => {
   const eventId = Number(c.req.param('id'));
@@ -568,21 +583,6 @@ admin.patch('/events/:id/participants/:pid', async (c) => {
     `UPDATE participants SET ${fields.join(', ')} WHERE id = ? AND event_id = ?`
   ).bind(...values).run();
 
-  return json({ ok: true });
-});
-
-// Bulk update sort order
-admin.patch('/events/:id/participants/sort', async (c) => {
-  const eventId = Number(c.req.param('id'));
-  const body = await c.req.json<{ order: number[] }>(); // array of participant IDs in desired order
-
-  const stmts = body.order.map((pid, idx) =>
-    c.env.DB.prepare(
-      "UPDATE participants SET sort_order = ?, updated_at = datetime('now') WHERE id = ? AND event_id = ?"
-    ).bind(idx + 1, pid, eventId)
-  );
-
-  await c.env.DB.batch(stmts);
   return json({ ok: true });
 });
 
