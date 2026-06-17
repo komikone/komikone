@@ -427,20 +427,20 @@ export default function LiveBoard() {
     <div className="h-screen bg-amber-50 dark:bg-gray-950 text-gray-950 dark:text-white flex flex-col overflow-hidden">
 
       {/* ── Top bar ── */}
-      <div className="bg-zinc-950 border-b-[5px] border-yellow-400 px-4 py-2.5 flex items-center gap-3 shrink-0">
+      <div className="bg-zinc-950 dark:bg-zinc-900 border-b-[5px] border-yellow-400 dark:border-yellow-500 px-4 py-2.5 flex items-center gap-3 shrink-0">
         <span className="font-bangers text-yellow-400 text-xl tracking-wide shrink-0">komikone</span>
-        <span className="text-zinc-600 shrink-0 text-base">·</span>
+        <span className="text-zinc-600 dark:text-zinc-500 shrink-0 text-base">·</span>
         <div className="flex-1 min-w-0">
           <div className="font-bangers text-white text-lg tracking-wide leading-tight">{event?.name}</div>
-          <div className="text-yellow-600 text-[10px] uppercase tracking-widest leading-tight">
+          <div className="text-yellow-600 dark:text-yellow-500 text-[10px] uppercase tracking-widest leading-tight">
             {event?.reg_type === 'return' ? 'Return Reg' : 'Open Reg'} · Live Board
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <span className="text-zinc-500 text-xs hidden sm:block">
+          <span className="text-zinc-500 dark:text-zinc-400 text-xs hidden sm:block">
             {lastUpdated ? lastUpdated.toLocaleTimeString() : '…'}
           </span>
-          <button onClick={toggle} className="text-zinc-400 hover:text-yellow-400 text-xs border border-zinc-700 px-2 py-0.5 rounded transition-colors">
+          <button onClick={toggle} className="text-zinc-400 dark:text-zinc-300 hover:text-yellow-400 text-xs border border-zinc-700 dark:border-zinc-600 px-2 py-0.5 rounded transition-colors">
             {isDark ? '☀ Day' : '◑ Night'}
           </button>
           {me ? (
@@ -457,11 +457,11 @@ export default function LiveBoard() {
       </div>
 
       {/* ── Stats bar ── */}
-      <div className="bg-black border-b-2 border-zinc-800 px-4 py-1 flex items-center gap-5 shrink-0">
-        <span className="text-green-400 text-xs font-mono">{purchased} <span className="text-zinc-600">done</span></span>
-        <span className="text-yellow-400 text-xs font-mono">{inProgress} <span className="text-zinc-600">claiming</span></span>
-        <span className="text-zinc-300 text-xs font-mono">{remaining} <span className="text-zinc-600">left</span></span>
-        {withGaps > 0 && <span className="text-red-400 text-xs font-mono font-bold">{withGaps} gaps</span>}
+      <div className="bg-black dark:bg-zinc-950 border-b-2 border-zinc-800 dark:border-yellow-950 px-4 py-1 flex items-center gap-5 shrink-0">
+        <span className="text-green-400 dark:text-green-300 text-xs font-mono">{purchased} <span className="text-zinc-600 dark:text-zinc-500">done</span></span>
+        <span className="text-yellow-400 dark:text-yellow-300 text-xs font-mono">{inProgress} <span className="text-zinc-600 dark:text-zinc-500">claiming</span></span>
+        <span className="text-zinc-300 dark:text-zinc-400 text-xs font-mono">{remaining} <span className="text-zinc-600 dark:text-zinc-500">left</span></span>
+        {withGaps > 0 && <span className="text-red-400 dark:text-red-300 text-xs font-mono font-bold">{withGaps} gaps</span>}
       </div>
 
       {/* ── Priority queue bar ── */}
@@ -484,13 +484,13 @@ export default function LiveBoard() {
       )}
 
       {/* ── Filter bar ── */}
-      <div className="border-b-2 border-yellow-200 dark:border-zinc-800 bg-amber-50 dark:bg-zinc-950 px-4 py-2 flex items-center gap-3 flex-wrap shrink-0">
+      <div className="border-b-2 border-yellow-200 dark:border-zinc-700 bg-amber-50 dark:bg-zinc-900 px-4 py-2 flex items-center gap-3 flex-wrap shrink-0">
         <input
           type="search"
           placeholder="Search… (* wildcard)"
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
-          className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-white w-52 focus:outline-none focus:border-blue-400 dark:focus:border-yellow-400"
+          className="bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-zinc-100 w-52 focus:outline-none focus:border-yellow-400 dark:focus:border-yellow-400 placeholder:text-gray-400 dark:placeholder:text-zinc-500"
         />
         <div className="flex gap-1.5 flex-wrap">
           {([
@@ -505,8 +505,8 @@ export default function LiveBoard() {
               onClick={() => setFilterStatus(s)}
               className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
                 filterStatus === s
-                  ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-transparent'
-                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-400'
+                  ? 'bg-zinc-900 dark:bg-yellow-400 text-white dark:text-black border-transparent'
+                  : 'bg-white dark:bg-zinc-800 text-gray-600 dark:text-zinc-300 border-gray-300 dark:border-zinc-600 hover:border-gray-400 dark:hover:border-zinc-400'
               }`}
             >
               {label}
@@ -587,15 +587,15 @@ export default function LiveBoard() {
                     }
                     className={[
                       'px-3 py-2 text-left text-xs uppercase tracking-wide select-none align-top',
-                      'bg-zinc-950 text-yellow-500/70',
-                      'border-b-2 border-yellow-900',
-                      isSorted ? 'text-yellow-400' : 'hover:text-white cursor-pointer',
+                      'bg-zinc-950 dark:bg-zinc-900 text-yellow-500/70 dark:text-yellow-400/60',
+                      'border-b-2 border-yellow-900 dark:border-zinc-700',
+                      isSorted ? 'text-yellow-400 dark:text-yellow-300' : 'hover:text-white dark:hover:text-yellow-200 cursor-pointer',
                       isMovable ? 'cursor-grab' : '',
                       isDropTarget ? 'bg-blue-900 text-white' : '',
                     ].join(' ')}
                   >
                     <span className="flex items-center gap-1 whitespace-nowrap">
-                      {isMovable && <span className="text-gray-600 text-[10px] mr-0.5">⠿</span>}
+                      {isMovable && <span className="text-gray-500 dark:text-zinc-500 text-[10px] mr-0.5">⠿</span>}
                       {COL_LABEL[col]}
                       {isSorted && <span className="text-yellow-400 ml-0.5">{sortDir === 'asc' ? '▲' : '▼'}</span>}
                     </span>
@@ -642,16 +642,16 @@ export default function LiveBoard() {
               const frozenBg = isFlashing
                 ? 'bg-blue-100 dark:bg-blue-900/30'
                 : evenRow
-                  ? 'bg-white dark:bg-gray-950'
-                  : 'bg-gray-50 dark:bg-gray-900/40';
+                  ? 'bg-white dark:bg-zinc-950'
+                  : 'bg-gray-50 dark:bg-zinc-900/60';
 
               const rowBg = isFlashing
                 ? 'bg-blue-100 dark:bg-blue-900/30'
                 : isRowDragTarget
                   ? 'bg-blue-100 dark:bg-blue-900/20'
                   : evenRow
-                    ? 'bg-white dark:bg-gray-950'
-                    : 'bg-gray-50 dark:bg-gray-900/40';
+                    ? 'bg-white dark:bg-zinc-950'
+                    : 'bg-gray-50 dark:bg-zinc-900/60';
 
               return (
                 <tr
@@ -671,7 +671,7 @@ export default function LiveBoard() {
                           : { width: w, minWidth: w }
                         }
                         className={[
-                          'px-3 py-1.5 border-b border-gray-100 dark:border-gray-800/60 align-middle',
+                          'px-3 py-1.5 border-b border-gray-100 dark:border-zinc-800/70 align-middle',
                           isFrozen ? frozenBg : '',
                           col === 'idx' ? statusAccentCls(status) : '',
                           isRowDragTarget ? 'border-t-2 border-t-blue-400' : '',
