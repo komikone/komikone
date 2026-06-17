@@ -43,6 +43,24 @@ export type EventDetail = EventSummary & {
   updated_at: string;
 };
 
+export type Sponsor = {
+  id: number;
+  name: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
+const SPONSOR_PALETTE = [
+  '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6',
+  '#8b5cf6', '#ef4444', '#14b8a6', '#f97316', '#84cc16',
+];
+
+export function sponsorColor(id: number): string {
+  if (id <= 1) return '#9ca3af'; // Unassigned → gray
+  return SPONSOR_PALETTE[(id - 2) % SPONSOR_PALETTE.length];
+}
+
 export type Participant = {
   id: number;
   event_id: number;
@@ -51,7 +69,8 @@ export type Participant = {
   member_id: string;
   badge_type: 'ADULT' | 'JUNIOR';
   return_eligible: boolean;
-  sponsor: string;
+  sponsor_id: number;
+  sponsor_name: string | null;
   notes: string;
   req_preview: boolean;
   req_thu: boolean;
@@ -123,6 +142,10 @@ export type Coordinator = {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export const api = {
+  sponsors: {
+    list: () => req<Sponsor[]>('/api/sponsors'),
+  },
+
   events: {
     list: () => req<EventSummary[]>('/api/events'),
     get: (id: number, token?: string) =>
@@ -187,7 +210,7 @@ export const api = {
       eventId: number,
       pid: number,
       token: string,
-      data: { first_name?: string; last_name?: string; member_id?: string; badge_type?: string; sponsor?: string; notes?: string }
+      data: { first_name?: string; last_name?: string; member_id?: string; badge_type?: string; notes?: string }
     ) =>
       req<{ ok: boolean }>(
         `/api/events/${eventId}/participants/${pid}/profile?token=${token}`,
@@ -308,6 +331,22 @@ export const api = {
       reorder: (secret: string, eventId: number, order: number[]) =>
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/groups/reorder`, {
           method: 'PATCH', headers: headers(undefined, secret), body: JSON.stringify({ order }),
+        }),
+    },
+    sponsors: {
+      list: (secret: string) =>
+        req<Sponsor[]>('/api/admin/sponsors', { headers: headers(undefined, secret) }),
+      create: (secret: string, data: { name: string; notes?: string }) =>
+        req<{ id: number }>('/api/admin/sponsors', {
+          method: 'POST', headers: headers(undefined, secret), body: JSON.stringify(data),
+        }),
+      update: (secret: string, id: number, data: { name?: string; notes?: string }) =>
+        req<{ ok: boolean }>(`/api/admin/sponsors/${id}`, {
+          method: 'PATCH', headers: headers(undefined, secret), body: JSON.stringify(data),
+        }),
+      delete: (secret: string, id: number) =>
+        req<{ ok: boolean }>(`/api/admin/sponsors/${id}`, {
+          method: 'DELETE', headers: headers(undefined, secret),
         }),
     },
     yearMeta: {

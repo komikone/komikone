@@ -1,3 +1,11 @@
+export type Sponsor = {
+  id: number;
+  name: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Group = {
   id: number;
   event_id: number;
@@ -37,7 +45,8 @@ export type Participant = {
   member_id: string;
   badge_type: 'ADULT' | 'JUNIOR';
   return_eligible: number;
-  sponsor: string;
+  sponsor: string; // legacy text column — use sponsor_name for display
+  sponsor_id: number;
   notes: string;
   req_preview: number;
   req_thu: number;
@@ -59,6 +68,8 @@ export type Participant = {
   // Joined from groups table:
   group_name: string | null;
   group_color: string | null;
+  // Joined from sponsors table:
+  sponsor_name: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -140,6 +151,7 @@ export function enrichParticipant(p: Participant, event: Event) {
     group_id: p.group_id ?? null,
     group_name: p.group_name ?? null,
     group_color: p.group_color ?? null,
+    sponsor_name: p.sponsor_name ?? null,
     return_eligible: Boolean(p.return_eligible),
     req_preview: Boolean(p.req_preview),
     req_thu: Boolean(p.req_thu),

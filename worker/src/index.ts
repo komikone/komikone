@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type Event, type Participant, type Coordinator, type YearMeta, type Group, enrichParticipant, isClaimExpired } from './db';
+import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type Sponsor, enrichParticipant, isClaimExpired } from './db';
 
 type Bindings = {
   DB: D1Database;
@@ -42,6 +42,14 @@ async function getEvent(db: D1Database, id: number): Promise<Event | null> {
 
 // ── Public routes ─────────────────────────────────────────────────────────────
 
+// List sponsors (public — needed for registration dropdown)
+app.get('/api/sponsors', async (c) => {
+  const rows = await c.env.DB.prepare(
+    'SELECT * FROM sponsors ORDER BY name ASC'
+  ).all<Sponsor>();
+  return json(rows.results);
+});
+
 // List events (public — only id, year, name, status, reg_type; no prices/tokens)
 app.get('/api/events', async (c) => {
   const rows = await c.env.DB.prepare(
@@ -82,9 +90,10 @@ app.get('/api/events/:id/participants', async (c) => {
   if (!isAdmin && token !== event.access_token) return err('Invalid token', 401);
 
   const rows = await c.env.DB.prepare(
-    `SELECT p.*, g.name AS group_name, g.color AS group_color
+    `SELECT p.*, g.name AS group_name, g.color AS group_color, s.name AS sponsor_name
      FROM participants p
      LEFT JOIN groups g ON g.id = p.group_id
+     LEFT JOIN sponsors s ON s.id = p.sponsor_id
      WHERE p.event_id = ?
      ORDER BY p.sort_order ASC, p.id ASC`
   ).bind(id).all<Participant>();
@@ -108,7 +117,7 @@ app.post('/api/events/:id/register', async (c) => {
     last_name: string;
     member_id?: string;
     badge_type?: string;
-    sponsor?: string;
+    sponsor_id: number;
     req_preview?: boolean;
     req_thu?: boolean;
     req_fri?: boolean;
@@ -119,27 +128,34 @@ app.post('/api/events/:id/register', async (c) => {
   if (!body.first_name?.trim() || !body.last_name?.trim()) {
     return err('First and last name required');
   }
+  if (!body.sponsor_id) return err('Sponsor is required');
 
   const badgeType = body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT';
 
-  const result = await c.env.DB.prepare(`
-    INSERT INTO participants
-      (event_id, first_name, last_name, member_id, badge_type, sponsor,
-       req_preview, req_thu, req_fri, req_sat, req_sun, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 9999)
-  `).bind(
-    id,
-    body.first_name.trim(),
-    body.last_name.trim(),
-    body.member_id?.trim() ?? '',
-    badgeType,
-    body.sponsor?.trim() ?? '',
-    body.req_preview ? 1 : 0,
-    body.req_thu ? 1 : 0,
-    body.req_fri ? 1 : 0,
-    body.req_sat ? 1 : 0,
-    body.req_sun ? 1 : 0,
-  ).run();
+  let result;
+  try {
+    result = await c.env.DB.prepare(`
+      INSERT INTO participants
+        (event_id, first_name, last_name, member_id, badge_type, sponsor_id,
+         req_preview, req_thu, req_fri, req_sat, req_sun, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 9999)
+    `).bind(
+      id,
+      body.first_name.trim(),
+      body.last_name.trim(),
+      body.member_id?.trim() ?? '',
+      badgeType,
+      body.sponsor_id,
+      body.req_preview ? 1 : 0,
+      body.req_thu ? 1 : 0,
+      body.req_fri ? 1 : 0,
+      body.req_sat ? 1 : 0,
+      body.req_sun ? 1 : 0,
+    ).run();
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('UNIQUE')) return err('Member ID is already registered for this event', 409);
+    throw e;
+  }
 
   return json({ ok: true, id: result.meta.last_row_id }, 201);
 });
@@ -347,7 +363,7 @@ app.put('/api/events/:id/coordinators/:name', async (c) => {
   return json({ ok: true });
 });
 
-// Update participant profile (name, member_id, badge_type, sponsor, notes) — token-gated
+// Update participant profile (name, member_id, badge_type, notes) — token-gated
 app.patch('/api/events/:id/participants/:pid/profile', async (c) => {
   const eventId = Number(c.req.param('id'));
   const pid = Number(c.req.param('pid'));
@@ -361,7 +377,7 @@ app.patch('/api/events/:id/participants/:pid/profile', async (c) => {
 
   const body = await c.req.json<{
     first_name?: string; last_name?: string; member_id?: string;
-    badge_type?: string; sponsor?: string; notes?: string;
+    badge_type?: string; notes?: string;
   }>();
 
   const fields: string[] = [];
@@ -371,16 +387,20 @@ app.patch('/api/events/:id/participants/:pid/profile', async (c) => {
   if (body.last_name !== undefined) { fields.push('last_name = ?'); values.push(body.last_name.trim()); }
   if (body.member_id !== undefined) { fields.push('member_id = ?'); values.push(body.member_id.trim().toUpperCase()); }
   if (body.badge_type !== undefined) { fields.push('badge_type = ?'); values.push(body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT'); }
-  if (body.sponsor !== undefined) { fields.push('sponsor = ?'); values.push(body.sponsor.trim()); }
   if (body.notes !== undefined) { fields.push('notes = ?'); values.push(body.notes.trim()); }
 
   if (fields.length === 0) return err('No fields to update');
   fields.push("updated_at = datetime('now')");
   values.push(pid, eventId);
 
-  await c.env.DB.prepare(
-    `UPDATE participants SET ${fields.join(', ')} WHERE id = ? AND event_id = ?`
-  ).bind(...values).run();
+  try {
+    await c.env.DB.prepare(
+      `UPDATE participants SET ${fields.join(', ')} WHERE id = ? AND event_id = ?`
+    ).bind(...values).run();
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('UNIQUE')) return err('Member ID is already used by another participant in this event', 409);
+    throw e;
+  }
 
   return json({ ok: true });
 });
@@ -503,28 +523,34 @@ admin.post('/events/:id/participants', async (c) => {
     return err('first_name and last_name required');
   }
 
-  const result = await c.env.DB.prepare(`
-    INSERT INTO participants
-      (event_id, first_name, last_name, member_id, badge_type, return_eligible, sponsor, notes,
-       req_preview, req_thu, req_fri, req_sat, req_sun, sort_order, purchasing_coordinator)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    eventId,
-    body.first_name.trim(),
-    body.last_name.trim(),
-    body.member_id?.trim() ?? '',
-    body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT',
-    body.return_eligible ? 1 : 0,
-    body.sponsor?.trim() ?? '',
-    body.notes?.trim() ?? '',
-    body.req_preview ? 1 : 0,
-    body.req_thu ? 1 : 0,
-    body.req_fri ? 1 : 0,
-    body.req_sat ? 1 : 0,
-    body.req_sun ? 1 : 0,
-    body.sort_order ?? 9999,
-    body.purchasing_coordinator?.trim() ?? '',
-  ).run();
+  let result;
+  try {
+    result = await c.env.DB.prepare(`
+      INSERT INTO participants
+        (event_id, first_name, last_name, member_id, badge_type, return_eligible, sponsor_id, notes,
+         req_preview, req_thu, req_fri, req_sat, req_sun, sort_order, purchasing_coordinator)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      eventId,
+      body.first_name.trim(),
+      body.last_name.trim(),
+      body.member_id?.trim() ?? '',
+      body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT',
+      body.return_eligible ? 1 : 0,
+      body.sponsor_id ?? 1,
+      body.notes?.trim() ?? '',
+      body.req_preview ? 1 : 0,
+      body.req_thu ? 1 : 0,
+      body.req_fri ? 1 : 0,
+      body.req_sat ? 1 : 0,
+      body.req_sun ? 1 : 0,
+      body.sort_order ?? 9999,
+      body.purchasing_coordinator?.trim() ?? '',
+    ).run();
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('UNIQUE')) return err('Member ID is already used by another participant in this event', 409);
+    throw e;
+  }
 
   return json({ id: result.meta.last_row_id }, 201);
 });
@@ -551,7 +577,7 @@ admin.patch('/events/:id/participants/:pid', async (c) => {
   const body = await c.req.json<Partial<Participant>>();
 
   const allowed = [
-    'first_name', 'last_name', 'member_id', 'badge_type', 'return_eligible', 'sponsor', 'notes',
+    'first_name', 'last_name', 'member_id', 'badge_type', 'return_eligible', 'sponsor_id', 'notes',
     'req_preview', 'req_thu', 'req_fri', 'req_sat', 'req_sun',
     'sort_order', 'purchasing_coordinator',
     'pur_preview', 'pur_thu', 'pur_fri', 'pur_sat', 'pur_sun', 'who_purchased',
@@ -579,9 +605,14 @@ admin.patch('/events/:id/participants/:pid', async (c) => {
   fields.push("updated_at = datetime('now')");
   values.push(pid, eventId);
 
-  await c.env.DB.prepare(
-    `UPDATE participants SET ${fields.join(', ')} WHERE id = ? AND event_id = ?`
-  ).bind(...values).run();
+  try {
+    await c.env.DB.prepare(
+      `UPDATE participants SET ${fields.join(', ')} WHERE id = ? AND event_id = ?`
+    ).bind(...values).run();
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('UNIQUE')) return err('Member ID is already used by another participant in this event', 409);
+    throw e;
+  }
 
   return json({ ok: true });
 });
@@ -682,7 +713,7 @@ admin.post('/events/:id/participants/copy', async (c) => {
   const insertStmts = participants.map((p, idx) =>
     c.env.DB.prepare(`
       INSERT INTO participants
-        (event_id, first_name, last_name, member_id, badge_type, return_eligible, sponsor, notes,
+        (event_id, first_name, last_name, member_id, badge_type, return_eligible, sponsor_id, notes,
          req_preview, req_thu, req_fri, req_sat, req_sun, sort_order,
          purchasing_coordinator, purchasing_claimed_by,
          pur_preview, pur_thu, pur_fri, pur_sat, pur_sun, who_purchased, paid)
@@ -691,7 +722,7 @@ admin.post('/events/:id/participants/copy', async (c) => {
       body.target_event_id,
       p.first_name, p.last_name, p.member_id,
       p.badge_type, p.return_eligible ? 1 : 0,
-      p.sponsor, p.notes,
+      p.sponsor_id ?? 1, p.notes,
       carryover ? (p.req_preview && !p.pur_preview ? 1 : 0) : (p.req_preview ? 1 : 0),
       carryover ? (p.req_thu && !p.pur_thu ? 1 : 0) : (p.req_thu ? 1 : 0),
       carryover ? (p.req_fri && !p.pur_fri ? 1 : 0) : (p.req_fri ? 1 : 0),
@@ -814,9 +845,10 @@ admin.get('/events/:id/export.csv', async (c) => {
   if (!event) return err('Not found', 404);
 
   const rows = await c.env.DB.prepare(
-    `SELECT p.*, g.name AS group_name, g.color AS group_color
+    `SELECT p.*, g.name AS group_name, g.color AS group_color, s.name AS sponsor_name
      FROM participants p
      LEFT JOIN groups g ON g.id = p.group_id
+     LEFT JOIN sponsors s ON s.id = p.sponsor_id
      WHERE p.event_id = ?
      ORDER BY p.sort_order ASC, p.id ASC`
   ).bind(eventId).all<Participant>();
@@ -833,7 +865,7 @@ admin.get('/events/:id/export.csv', async (c) => {
     const enriched = enrichParticipant(p, event);
     return [
       p.sort_order, p.last_name, p.first_name, p.member_id, p.badge_type,
-      enriched.return_eligible ? 'Yes' : 'No', p.sponsor,
+      enriched.return_eligible ? 'Yes' : 'No', p.sponsor_name ?? '',
       enriched.req_preview ? 'Y' : '', enriched.req_thu ? 'Y' : '',
       enriched.req_fri ? 'Y' : '', enriched.req_sat ? 'Y' : '', enriched.req_sun ? 'Y' : '',
       p.purchasing_coordinator, p.purchasing_claimed_by,
@@ -894,6 +926,58 @@ admin.put('/year-meta/:year', async (c) => {
     body.fri_date ?? '', body.sat_date ?? '',
     body.sun_date ?? '', body.notes ?? '',
   ).run();
+  return json({ ok: true });
+});
+
+// ── Admin sponsor CRUD ────────────────────────────────────────────────────────
+
+admin.get('/sponsors', async (c) => {
+  const rows = await c.env.DB.prepare('SELECT * FROM sponsors ORDER BY name ASC').all<Sponsor>();
+  return json(rows.results);
+});
+
+admin.post('/sponsors', async (c) => {
+  const body = await c.req.json<{ name: string; notes?: string }>();
+  if (!body.name?.trim()) return err('name required');
+  try {
+    const result = await c.env.DB.prepare(
+      "INSERT INTO sponsors (name, notes) VALUES (?, ?)"
+    ).bind(body.name.trim(), body.notes?.trim() ?? '').run();
+    return json({ id: result.meta.last_row_id }, 201);
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('UNIQUE')) return err('A sponsor with that name already exists', 409);
+    throw e;
+  }
+});
+
+admin.patch('/sponsors/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  if (id === 1) return err('Cannot modify the Unassigned sentinel', 403);
+  const body = await c.req.json<{ name?: string; notes?: string }>();
+  const fields: string[] = [];
+  const values: (string | number)[] = [];
+  if (body.name !== undefined) { fields.push('name = ?'); values.push(body.name.trim()); }
+  if (body.notes !== undefined) { fields.push('notes = ?'); values.push(body.notes.trim()); }
+  if (fields.length === 0) return err('No fields to update');
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+  try {
+    await c.env.DB.prepare(`UPDATE sponsors SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('UNIQUE')) return err('A sponsor with that name already exists', 409);
+    throw e;
+  }
+  return json({ ok: true });
+});
+
+admin.delete('/sponsors/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  if (id === 1) return err('Cannot delete the Unassigned sentinel', 403);
+  // Reassign participants to Unassigned before deleting
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE participants SET sponsor_id = 1 WHERE sponsor_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM sponsors WHERE id = ?').bind(id),
+  ]);
   return json({ ok: true });
 });
 

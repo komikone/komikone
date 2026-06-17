@@ -6,6 +6,8 @@ import {
   type Participant,
   type YearMeta,
   type Group,
+  type Sponsor,
+  sponsorColor,
   formatDollars,
   DAY_KEYS,
   dayLabel,
@@ -33,6 +35,7 @@ export default function Admin() {
   const [authed, setAuthed] = useState(Boolean(sessionStorage.getItem('admin_secret')));
 
   const [events, setEvents] = useState<EventDetail[]>([]);
+  const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [activeRegType, setActiveRegType] = useState<'return' | 'open'>('return');
 
@@ -99,8 +102,18 @@ export default function Admin() {
     else setOpenParticipants(ps);
   }, []);
 
+  const loadSponsors = useCallback(async () => {
+    if (!secret) return;
+    try {
+      const list = await api.admin.sponsors.list(secret);
+      setSponsors(list);
+    } catch {
+      setSponsors([]);
+    }
+  }, [secret]);
+
   useEffect(() => {
-    if (authed) loadEvents();
+    if (authed) { loadEvents(); loadSponsors(); }
   }, [authed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-select latest year when events first load
@@ -167,31 +180,35 @@ export default function Admin() {
           <h1 className="font-bangers text-yellow-400 text-xl tracking-wide mt-1">komikone</h1>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-3 py-3">
-          <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Years</div>
-          {loading && years.length === 0 && (
-            <div className="text-gray-500 text-xs px-2">Loading…</div>
-          )}
-          {years.map((year) => {
-            const yEvts = events.filter((e) => e.year === year);
-            const hasReturn = yEvts.some((e) => e.reg_type === 'return');
-            const hasOpen = yEvts.some((e) => e.reg_type === 'open');
-            return (
-              <button
-                key={year}
-                onClick={() => handleYearSelect(year)}
-                className={`w-full text-left px-2 py-2 rounded mb-0.5 transition-colors ${
-                  selectedYear === year ? 'bg-blue-700 text-white' : 'text-gray-300 hover:bg-gray-800'
-                }`}
-              >
-                <div className="font-bold text-sm">{year}</div>
-                <div className="text-xs text-gray-400">
-                  {[hasReturn && 'Return', hasOpen && 'Open'].filter(Boolean).join(' · ')}
-                </div>
-              </button>
-            );
-          })}
-          <InitializeYearButton secret={secret} onCreated={loadEvents} />
+        <div className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-4">
+          <div>
+            <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Years</div>
+            {loading && years.length === 0 && (
+              <div className="text-gray-500 text-xs px-2">Loading…</div>
+            )}
+            {years.map((year) => {
+              const yEvts = events.filter((e) => e.year === year);
+              const hasReturn = yEvts.some((e) => e.reg_type === 'return');
+              const hasOpen = yEvts.some((e) => e.reg_type === 'open');
+              return (
+                <button
+                  key={year}
+                  onClick={() => handleYearSelect(year)}
+                  className={`w-full text-left px-2 py-2 rounded mb-0.5 transition-colors ${
+                    selectedYear === year ? 'bg-blue-700 text-white' : 'text-gray-300 hover:bg-gray-800'
+                  }`}
+                >
+                  <div className="font-bold text-sm">{year}</div>
+                  <div className="text-xs text-gray-400">
+                    {[hasReturn && 'Return', hasOpen && 'Open'].filter(Boolean).join(' · ')}
+                  </div>
+                </button>
+              );
+            })}
+            <InitializeYearButton secret={secret} onCreated={loadEvents} />
+          </div>
+
+          <SponsorsPanel secret={secret} sponsors={sponsors} onUpdate={loadSponsors} />
         </div>
       </aside>
 
@@ -272,6 +289,7 @@ export default function Admin() {
                 secret={secret}
                 participants={participants}
                 allEvents={events}
+                sponsors={sponsors}
                 onUpdate={() => { if (selectedYear) reloadEventData(activeRegType, events, selectedYear); }}
               />
             )}
@@ -680,7 +698,7 @@ function EventCard({
 
 function ParticipantsTab({
   event, activeRegType, returnEvent, openEvent, onRegTypeChange,
-  secret, participants, allEvents, onUpdate,
+  secret, participants, allEvents, sponsors, onUpdate,
 }: {
   event: EventDetail | null;
   activeRegType: 'return' | 'open';
@@ -690,6 +708,7 @@ function ParticipantsTab({
   secret: string;
   participants: Participant[];
   allEvents: EventDetail[];
+  sponsors: Sponsor[];
   onUpdate: () => void;
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -811,7 +830,7 @@ function ParticipantsTab({
       {addOpen && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-4">
           <h4 className="font-medium text-gray-200 mb-3">New Participant</h4>
-          <ParticipantForm value={newParticipant} onChange={setNewParticipant} groups={groups} />
+          <ParticipantForm value={newParticipant} onChange={setNewParticipant} groups={groups} sponsors={sponsors} />
           <div className="flex gap-2 mt-3">
             <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-1.5 rounded">
               Add
@@ -870,7 +889,12 @@ function ParticipantsTab({
                       </span>
                     )}
                   </div>
-                  {p.sponsor && <div className="text-xs text-gray-500">via {p.sponsor}</div>}
+                  {p.sponsor_name && p.sponsor_id !== 1 && (
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: sponsorColor(p.sponsor_id) }} />
+                      <span className="text-xs text-gray-400">via {p.sponsor_name}</span>
+                    </div>
+                  )}
                   {p.notes && <div className="text-xs text-gray-500 italic">{p.notes}</div>}
                 </td>
                 <td className="px-2 py-2 font-mono text-xs text-gray-300">
@@ -944,10 +968,123 @@ function ParticipantsTab({
           secret={secret}
           eventId={event.id}
           groups={groups}
+          sponsors={sponsors}
           onSave={() => { setEditingId(null); onUpdate(); }}
           onClose={() => setEditingId(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Sponsors Panel ───────────────────────────────────────────────────────────
+
+function SponsorsPanel({
+  secret, sponsors, onUpdate,
+}: {
+  secret: string;
+  sponsors: Sponsor[];
+  onUpdate: () => void;
+}) {
+  const [addOpen, setAddOpen] = useState(false);
+  const [addName, setAddName] = useState('');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleAdd = async () => {
+    if (!addName.trim()) return;
+    setSaving(true);
+    try {
+      await api.admin.sponsors.create(secret, { name: addName.trim() });
+      setAddName('');
+      setAddOpen(false);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEditSave = async (id: number) => {
+    try {
+      await api.admin.sponsors.update(secret, id, { name: editName.trim() });
+      setEditingId(null);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const handleDelete = async (s: Sponsor) => {
+    if (!confirm(`Delete sponsor "${s.name}"? Participants will be set to Unassigned.`)) return;
+    try {
+      await api.admin.sponsors.delete(secret, s.id);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const displaySponsors = sponsors.filter((s) => s.id !== 1);
+
+  return (
+    <div className="border-t border-gray-800 pt-3">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs text-gray-500 uppercase tracking-wide font-medium">Sponsors</span>
+        <button
+          onClick={() => setAddOpen(!addOpen)}
+          className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-1.5 py-0.5 rounded"
+        >
+          +
+        </button>
+      </div>
+
+      {addOpen && (
+        <div className="flex items-center gap-1 mb-2">
+          <input
+            autoFocus
+            type="text"
+            value={addName}
+            onChange={(e) => setAddName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') setAddOpen(false); }}
+            placeholder="Name"
+            className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-white text-xs focus:outline-none focus:border-blue-500"
+          />
+          <button onClick={handleAdd} disabled={saving} className="text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-2 py-0.5 rounded">Add</button>
+          <button onClick={() => setAddOpen(false)} className="text-xs text-gray-400 hover:text-white">✕</button>
+        </div>
+      )}
+
+      <div className="space-y-0.5">
+        {displaySponsors.map((s) => (
+          editingId === s.id ? (
+            <div key={s.id} className="flex items-center gap-1">
+              <input
+                autoFocus
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleEditSave(s.id); if (e.key === 'Escape') setEditingId(null); }}
+                className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-white text-xs focus:outline-none focus:border-blue-500"
+              />
+              <button onClick={() => handleEditSave(s.id)} className="text-xs text-green-400 hover:text-green-300">✓</button>
+              <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-white">✕</button>
+            </div>
+          ) : (
+            <div key={s.id} className="flex items-center gap-1.5 group px-1 py-0.5 rounded hover:bg-gray-800">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sponsorColor(s.id) }} />
+              <span className="text-xs text-gray-300 flex-1 truncate">{s.name}</span>
+              <button onClick={() => { setEditingId(s.id); setEditName(s.name); }} className="text-gray-600 hover:text-white text-xs opacity-0 group-hover:opacity-100">✎</button>
+              <button onClick={() => handleDelete(s)} className="text-gray-600 hover:text-red-400 text-xs opacity-0 group-hover:opacity-100">✕</button>
+            </div>
+          )
+        ))}
+        {displaySponsors.length === 0 && !addOpen && (
+          <p className="text-xs text-gray-600 italic px-1">None yet</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -1171,12 +1308,13 @@ function ReturnToggle({
 }
 
 function EditParticipantModal({
-  participant, secret, eventId, groups, onSave, onClose,
+  participant, secret, eventId, groups, sponsors, onSave, onClose,
 }: {
   participant: Participant;
   secret: string;
   eventId: number;
   groups: Group[];
+  sponsors: Sponsor[];
   onSave: () => void;
   onClose: () => void;
 }) {
@@ -1198,7 +1336,7 @@ function EditParticipantModal({
           <h3 className="font-bold text-white">Edit Participant</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
         </div>
-        <ParticipantForm value={form} onChange={setForm} showAdminFields groups={groups} />
+        <ParticipantForm value={form} onChange={setForm} showAdminFields groups={groups} sponsors={sponsors} />
         <div className="flex gap-2 mt-4">
           <button onClick={handleSave} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded">
             Save
@@ -1211,12 +1349,13 @@ function EditParticipantModal({
 }
 
 function ParticipantForm({
-  value, onChange, showAdminFields = false, groups = [],
+  value, onChange, showAdminFields = false, groups = [], sponsors = [],
 }: {
   value: Partial<Participant>;
   onChange: (v: Partial<Participant>) => void;
   showAdminFields?: boolean;
   groups?: Group[];
+  sponsors?: Sponsor[];
 }) {
   const set = (key: keyof Participant, val: unknown) => onChange({ ...value, [key]: val });
 
@@ -1242,7 +1381,16 @@ function ParticipantForm({
         </Field>
       </div>
       <Field label="Sponsor">
-        <input type="text" value={value.sponsor ?? ''} onChange={(e) => set('sponsor', e.target.value)} className={inputCls} />
+        <select
+          value={value.sponsor_id ?? 1}
+          onChange={(e) => set('sponsor_id', Number(e.target.value))}
+          className={inputCls}
+        >
+          {sponsors.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+          {sponsors.length === 0 && <option value={1}>Unassigned</option>}
+        </select>
       </Field>
       {groups.length > 0 && (
         <Field label="Group">

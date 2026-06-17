@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
-import { api, type EventDetail, type Participant, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
+import { api, type EventDetail, type Participant, sponsorColor, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
 import { useTheme } from '../lib/useTheme';
 
 const POLL_MS = 8000;
@@ -57,7 +57,7 @@ function sortValue(p: Participant, col: ColKey, naturalIdx: number): string | nu
     case 'idx':        return naturalIdx;
     case 'first':      return p.first_name.toLowerCase();
     case 'last':       return p.last_name.toLowerCase();
-    case 'sponsor':    return p.sponsor.toLowerCase();
+    case 'sponsor':    return (p.sponsor_name ?? '').toLowerCase();
     case 'member_id':  return p.member_id.toLowerCase();
     case 'badge_type': return p.badge_type;
     case 'requested':  return DAY_KEYS.filter((d) => p[`req_${d}` as keyof Participant]).length;
@@ -348,7 +348,7 @@ export default function LiveBoard() {
     const q = filterText.includes('*') ? filterText : `*${filterText}*`;
     const re = wildcardToRegex(q);
     if (!re) return false;
-    return re.test(p.first_name) || re.test(p.last_name) || re.test(p.member_id) || re.test(p.sponsor) || re.test(p.purchasing_coordinator);
+    return re.test(p.first_name) || re.test(p.last_name) || re.test(p.member_id) || re.test(p.sponsor_name ?? '') || re.test(p.purchasing_coordinator);
   });
 
   const displayRows = sortCol
@@ -829,9 +829,10 @@ function CellContent({
       ) : <span className="text-gray-300 dark:text-gray-700 text-xs flex justify-center">—</span>;
 
     case 'sponsor':
-      return p.sponsor ? (
-        <span className="text-xs px-1.5 py-0.5 rounded-sm font-medium bg-purple-100 text-purple-800 border border-purple-300 dark:bg-purple-900/60 dark:text-purple-300 dark:border-purple-700">
-          {p.sponsor}
+      return p.sponsor_name && p.sponsor_id !== 1 ? (
+        <span className="flex items-center gap-1 text-xs">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sponsorColor(p.sponsor_id) }} />
+          <span className="text-gray-200 dark:text-gray-300">{p.sponsor_name}</span>
         </span>
       ) : <span className="text-gray-300 dark:text-gray-700 text-xs">—</span>;
 
@@ -1080,8 +1081,8 @@ function WhoAreYouModal({
               className="w-full text-left px-5 py-2.5 hover:bg-gray-800 transition-colors"
             >
               <span className="text-white font-medium text-sm">{p.first_name} {p.last_name}</span>
-              {p.sponsor && (
-                <span className="ml-2 text-xs text-gray-500">via {p.sponsor}</span>
+              {p.sponsor_name && p.sponsor_id !== 1 && (
+                <span className="ml-2 text-xs text-gray-500">via {p.sponsor_name}</span>
               )}
             </button>
           ))}
@@ -1120,7 +1121,6 @@ function EditParticipantModal({
     last_name: participant.last_name,
     member_id: participant.member_id,
     badge_type: participant.badge_type as 'ADULT' | 'JUNIOR',
-    sponsor: participant.sponsor,
     notes: participant.notes,
   });
   const [saving, setSaving] = useState(false);
@@ -1167,7 +1167,6 @@ function EditParticipantModal({
               <option value="JUNIOR">Junior</option>
             </select>
           </div>
-          {field('Sponsor', 'sponsor')}
           {field('Notes', 'notes')}
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-1.5 text-sm text-gray-400 hover:text-white">

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
-import { api, type EventDetail, DAY_KEYS, dayLabel } from '../lib/api';
+import { api, type EventDetail, type Sponsor, DAY_KEYS, dayLabel } from '../lib/api';
 
 export default function Registration() {
   const { eventId } = useParams<{ eventId: string }>();
@@ -8,6 +8,7 @@ export default function Registration() {
   const token = params.get('token') ?? '';
 
   const [event, setEvent] = useState<EventDetail | null>(null);
+  const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
@@ -16,7 +17,7 @@ export default function Registration() {
     last_name: '',
     member_id: '',
     badge_type: 'ADULT' as 'ADULT' | 'JUNIOR',
-    sponsor: '',
+    sponsor_id: 0,
     req_preview: false,
     req_thu: false,
     req_fri: false,
@@ -27,6 +28,10 @@ export default function Registration() {
   useEffect(() => {
     if (!eventId) return;
     api.events.get(Number(eventId), token).then(setEvent).catch((e) => setError(e.message));
+    api.sponsors.list().then((list) => {
+      // Exclude the Unassigned sentinel (id=1) from the dropdown
+      setSponsors(list.filter((s) => s.id !== 1));
+    }).catch(() => {});
   }, [eventId, token]);
 
   const setDay = (day: string, val: boolean) =>
@@ -36,6 +41,10 @@ export default function Registration() {
     e.preventDefault();
     if (!form.first_name.trim() || !form.last_name.trim()) {
       setError('First and last name are required.');
+      return;
+    }
+    if (!form.sponsor_id) {
+      setError('Please select a sponsor.');
       return;
     }
     try {
@@ -174,15 +183,19 @@ export default function Registration() {
           {/* Sponsor */}
           <div>
             <label className="block text-sm text-gray-300 mb-1">
-              Sponsor (if you're a guest of a group member)
+              Sponsor <span className="text-red-400">*</span>
             </label>
-            <input
-              type="text"
-              value={form.sponsor}
-              onChange={(e) => setForm((f) => ({ ...f, sponsor: e.target.value }))}
-              placeholder="Name of the group member who invited you"
-              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-            />
+            <select
+              required
+              value={form.sponsor_id || ''}
+              onChange={(e) => setForm((f) => ({ ...f, sponsor_id: Number(e.target.value) }))}
+              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+            >
+              <option value="">— Select the group member who invited you —</option>
+              {sponsors.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
           </div>
 
           <button
