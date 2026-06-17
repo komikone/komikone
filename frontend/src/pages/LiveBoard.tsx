@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { api, type EventDetail, type Participant, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
 import { useTheme } from '../lib/useTheme';
 
@@ -102,6 +102,7 @@ export default function LiveBoard() {
   });
   const [showWhoModal, setShowWhoModal] = useState(false);
   const [editingRow, setEditingRow] = useState<number | null>(null);
+  const [editParticipant, setEditParticipant] = useState<Participant | null>(null);
   const [flash, setFlash] = useState<Record<number, boolean>>({});
   const prevIds = useRef<Set<number>>(new Set());
 
@@ -395,6 +396,14 @@ export default function LiveBoard() {
     setShowWhoModal(false);
   };
 
+  const handleEditSave = async (data: Partial<Participant>) => {
+    if (!editParticipant) return;
+    await api.participants.updateProfile(Number(eventId), editParticipant.id, token, data)
+      .catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
+    setEditParticipant(null);
+    await fetchAll();
+  };
+
   // ─── Loading / error ─────────────────────────────────────────────────────────
 
   if (!event && !error) {
@@ -540,6 +549,16 @@ export default function LiveBoard() {
           participants={participants}
           onSelect={handleSetIdentity}
           onDismiss={() => setShowWhoModal(false)}
+          registerUrl={`/register/${eventId}?token=${token}`}
+        />
+      )}
+
+      {/* ── Edit participant modal ── */}
+      {editParticipant && (
+        <EditParticipantModal
+          participant={editParticipant}
+          onSave={handleEditSave}
+          onClose={() => setEditParticipant(null)}
         />
       )}
 
@@ -690,6 +709,7 @@ export default function LiveBoard() {
                             onRequestedToggle={handleRequestedToggle}
                             onPurchaseToggle={handlePurchaseToggle}
                             onWhoChange={handleWhoChange}
+                            onEditParticipant={setEditParticipant}
                           />
                         )}
                       </td>
@@ -717,7 +737,7 @@ export default function LiveBoard() {
 
 function CellContent({
   col, p, status, editingRow, setEditingRow,
-  onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange,
+  onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
 }: {
   col: ColKey;
   p: Participant;
@@ -730,6 +750,7 @@ function CellContent({
   onRequestedToggle: (p: Participant, day: DayKey, checked: boolean) => void;
   onPurchaseToggle: (p: Participant, day: DayKey, checked: boolean) => void;
   onWhoChange: (p: Participant, who: string) => void;
+  onEditParticipant: (p: Participant) => void;
 }) {
   switch (col) {
 
@@ -745,7 +766,20 @@ function CellContent({
     }
 
     case 'first':
-      return <div className="font-semibold">{p.first_name}</div>;
+      return (
+        <div className="flex items-center gap-1">
+          <span className="font-semibold">{p.first_name}</span>
+          <button
+            onClick={() => onEditParticipant(p)}
+            className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-blue-400"
+            title="Edit participant"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </button>
+        </div>
+      );
 
     case 'last':
       return (
@@ -909,11 +943,12 @@ function CellContent({
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function WhoAreYouModal({
-  participants, onSelect, onDismiss,
+  participants, onSelect, onDismiss, registerUrl,
 }: {
   participants: Participant[];
   onSelect: (id: number) => void;
   onDismiss: () => void;
+  registerUrl: string;
 }) {
   const [search, setSearch] = useState('');
   const filtered = participants.filter((p) => {
@@ -953,14 +988,99 @@ function WhoAreYouModal({
             <p className="text-gray-500 text-sm px-5 py-4 text-center">No match</p>
           )}
         </div>
-        <div className="px-5 py-3 border-t border-gray-800">
+        <div className="px-5 py-3 border-t border-gray-800 flex items-center justify-between">
+          <Link
+            to={registerUrl}
+            className="text-gray-500 hover:text-gray-300 text-sm underline"
+          >
+            I'm not on the list — click here to register
+          </Link>
           <button
             onClick={onDismiss}
-            className="text-gray-500 hover:text-gray-300 text-sm"
+            className="text-gray-600 hover:text-gray-400 text-xs"
           >
-            I'm not on the list — continue as observer
+            Dismiss
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function EditParticipantModal({
+  participant, onSave, onClose,
+}: {
+  participant: Participant;
+  onSave: (data: Partial<Participant>) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState({
+    first_name: participant.first_name,
+    last_name: participant.last_name,
+    member_id: participant.member_id,
+    badge_type: participant.badge_type as 'ADULT' | 'JUNIOR',
+    sponsor: participant.sponsor,
+    notes: participant.notes,
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    await onSave(form);
+    setSaving(false);
+  };
+
+  const field = (label: string, key: keyof typeof form, mono = false) => (
+    <div>
+      <label className="text-gray-400 text-xs">{label}</label>
+      <input
+        value={form[key] as string}
+        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+        className={`w-full mt-1 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 ${mono ? 'font-mono' : ''}`}
+      />
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-sm shadow-2xl">
+        <div className="px-5 pt-5 pb-3 border-b border-gray-800">
+          <h2 className="text-white font-bold text-lg">Edit Participant</h2>
+          <p className="text-gray-500 text-xs mt-0.5">{participant.first_name} {participant.last_name}</p>
+        </div>
+        <form onSubmit={handleSubmit} className="px-5 py-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            {field('First Name', 'first_name')}
+            {field('Last Name', 'last_name')}
+          </div>
+          {field('Member ID', 'member_id', true)}
+          <div>
+            <label className="text-gray-400 text-xs">Badge Type</label>
+            <select
+              value={form.badge_type}
+              onChange={(e) => setForm((f) => ({ ...f, badge_type: e.target.value as 'ADULT' | 'JUNIOR' }))}
+              className="w-full mt-1 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+            >
+              <option value="ADULT">Adult</option>
+              <option value="JUNIOR">Junior</option>
+            </select>
+          </div>
+          {field('Sponsor', 'sponsor')}
+          {field('Notes', 'notes')}
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-1.5 text-sm text-gray-400 hover:text-white">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-1.5 text-sm font-bold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
