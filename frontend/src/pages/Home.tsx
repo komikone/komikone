@@ -39,6 +39,13 @@ export default function Home() {
             </p>
           </div>
           <div className="flex items-center gap-4">
+            {/* SDCC official logo */}
+            <img
+              src="/sdcc-logo.svg"
+              alt="San Diego Comic-Con"
+              className="h-14 w-auto select-none"
+              draggable={false}
+            />
             <button
               onClick={toggle}
               className="text-xs text-red-200 dark:text-gray-500 hover:text-white dark:hover:text-yellow-400 border border-red-400 dark:border-gray-700 px-2 py-1 rounded transition-colors uppercase tracking-widest"

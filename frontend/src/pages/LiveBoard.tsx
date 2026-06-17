@@ -11,31 +11,31 @@ const DAY_GAP = 2;
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type RowStatus = 'complete' | 'claiming' | 'partial' | 'none';
-type ColKey = 'idx' | 'first' | 'last' | 'actions' | 'badge_type' | 'member_id' | 'requested' | 'purchased' | 'gaps' | 'status' | 'sponsor' | 'total' | 'who' | 'group';
+type ColKey = 'idx' | 'first' | 'last' | 'actions' | 'return_eligible' | 'badge_type' | 'member_id' | 'requested' | 'purchased' | 'gaps' | 'status' | 'sponsor' | 'total' | 'who' | 'group';
 type SortDir = 'asc' | 'desc';
 
 // ─── Column config ────────────────────────────────────────────────────────────
 
-const FROZEN: ColKey[] = ['idx', 'first', 'last', 'actions'];
-const FROZEN_PX: Record<string, number> = { idx: 36, first: 90, last: 96, actions: 36 };
+const FROZEN: ColKey[] = ['actions', 'idx', 'first', 'last'];
+const FROZEN_PX: Record<string, number> = { actions: 28, idx: 36, first: 90, last: 96 };
 const FROZEN_LEFT: Record<string, number> = {
-  idx: 0,
-  first: FROZEN_PX.idx,
-  last: FROZEN_PX.idx + FROZEN_PX.first,
-  actions: FROZEN_PX.idx + FROZEN_PX.first + FROZEN_PX.last,
+  actions: 0,
+  idx: FROZEN_PX.actions,
+  first: FROZEN_PX.actions + FROZEN_PX.idx,
+  last: FROZEN_PX.actions + FROZEN_PX.idx + FROZEN_PX.first,
 };
 
-const DEFAULT_MOVABLE: ColKey[] = ['member_id', 'requested', 'purchased', 'gaps', 'badge_type', 'group', 'sponsor', 'status', 'total', 'who'];
+const DEFAULT_MOVABLE: ColKey[] = ['return_eligible', 'member_id', 'requested', 'purchased', 'gaps', 'badge_type', 'group', 'sponsor', 'status', 'total', 'who'];
 
 const COL_LABEL: Record<ColKey, string> = {
-  idx: '#', first: 'First', last: 'Last', actions: '', badge_type: 'Badge',
+  idx: '#', first: 'First', last: 'Last', actions: '', return_eligible: 'Return', badge_type: 'Badge',
   member_id: 'Member ID', requested: 'Requested', status: 'Status',
   purchased: 'Purchased', gaps: 'Gaps', total: 'Total', who: 'Who Bought',
   sponsor: 'Sponsor', group: 'Group',
 };
 
 const DEFAULT_WIDTHS: Record<ColKey, number> = {
-  idx: 36, first: 90, last: 96, actions: 36,
+  idx: 36, first: 90, last: 96, actions: 28, return_eligible: 52,
   badge_type: 88, member_id: 118,
   requested: 168, purchased: 168, gaps: 168,
   sponsor: 112, status: 112, total: 74, who: 118, group: 110,
@@ -63,10 +63,11 @@ function sortValue(p: Participant, col: ColKey, naturalIdx: number): string | nu
     case 'requested':  return DAY_KEYS.filter((d) => p[`req_${d}` as keyof Participant]).length;
     case 'status':     return ['none', 'partial', 'claiming', 'complete'].indexOf(rowStatus(p));
     case 'purchased':  return DAY_KEYS.filter((d) => p[`pur_${d}` as keyof Participant]).length;
-    case 'gaps':       return p.gaps.length;
-    case 'total':      return p.purchase_total;
-    case 'who':        return p.who_purchased.toLowerCase();
-    default:           return 0;
+    case 'gaps':            return p.gaps.length;
+    case 'total':           return p.purchase_total;
+    case 'who':             return p.who_purchased.toLowerCase();
+    case 'return_eligible': return p.return_eligible ? 1 : 0;
+    default:                return 0;
   }
 }
 
@@ -426,41 +427,41 @@ export default function LiveBoard() {
     <div className="h-screen bg-amber-50 dark:bg-gray-950 text-gray-950 dark:text-white flex flex-col overflow-hidden">
 
       {/* ── Top bar ── */}
-      <div className="bg-red-600 border-b-4 border-black dark:bg-black dark:border-yellow-400 px-4 py-2 flex items-center gap-4 flex-wrap shrink-0">
-        <span className="font-bangers text-white dark:text-yellow-400 text-xl tracking-wide shrink-0">komikone</span>
-        <span className="text-red-300 dark:text-gray-700 shrink-0">|</span>
+      <div className="bg-zinc-950 border-b-[5px] border-yellow-400 px-4 py-2.5 flex items-center gap-3 shrink-0">
+        <span className="font-bangers text-yellow-400 text-xl tracking-wide shrink-0">komikone</span>
+        <span className="text-zinc-600 shrink-0 text-base">·</span>
         <div className="flex-1 min-w-0">
-          <span className="font-bangers text-white text-lg tracking-wide">{event?.name}</span>
-          <span className="ml-2 text-red-200 dark:text-gray-500 text-xs uppercase tracking-widest">
+          <div className="font-bangers text-white text-lg tracking-wide leading-tight">{event?.name}</div>
+          <div className="text-yellow-600 text-[10px] uppercase tracking-widest leading-tight">
             {event?.reg_type === 'return' ? 'Return Reg' : 'Open Reg'} · Live Board
+          </div>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <span className="text-zinc-500 text-xs hidden sm:block">
+            {lastUpdated ? lastUpdated.toLocaleTimeString() : '…'}
           </span>
-        </div>
-        <div className="flex gap-4 text-sm font-mono">
-          <span className="text-green-200 dark:text-green-400">{purchased} done</span>
-          <span className="text-yellow-200 dark:text-yellow-400">{inProgress} claiming</span>
-          <span className="text-white dark:text-gray-300">{remaining} left</span>
-          {withGaps > 0 && <span className="text-red-200 dark:text-red-400 font-bold">{withGaps} gaps</span>}
-        </div>
-        <div className="flex items-center gap-2">
+          <button onClick={toggle} className="text-zinc-400 hover:text-yellow-400 text-xs border border-zinc-700 px-2 py-0.5 rounded transition-colors">
+            {isDark ? '☀ Day' : '◑ Night'}
+          </button>
           {me ? (
             <IdentityAvatar me={me} myDisplayName={myDisplayName} onChangeIdentity={() => setShowWhoModal(true)} />
           ) : (
             <button
               onClick={() => setShowWhoModal(true)}
-              className="text-xs font-bold px-3 py-1 rounded bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-black"
+              className="text-xs font-bold px-3 py-1 rounded bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-yellow-300"
             >
               Who are you? →
             </button>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-red-200 dark:text-gray-500 text-xs">
-            {lastUpdated ? lastUpdated.toLocaleTimeString() : '…'}
-          </span>
-          <button onClick={toggle} className="text-red-100 dark:text-gray-400 hover:text-white dark:hover:text-yellow-400 text-xs border border-red-300 dark:border-gray-700 px-2 py-0.5 rounded transition-colors">
-            {isDark ? '☀ Day' : '◑ Night'}
-          </button>
-        </div>
+      </div>
+
+      {/* ── Stats bar ── */}
+      <div className="bg-black border-b-2 border-zinc-800 px-4 py-1 flex items-center gap-5 shrink-0">
+        <span className="text-green-400 text-xs font-mono">{purchased} <span className="text-zinc-600">done</span></span>
+        <span className="text-yellow-400 text-xs font-mono">{inProgress} <span className="text-zinc-600">claiming</span></span>
+        <span className="text-zinc-300 text-xs font-mono">{remaining} <span className="text-zinc-600">left</span></span>
+        {withGaps > 0 && <span className="text-red-400 text-xs font-mono font-bold">{withGaps} gaps</span>}
       </div>
 
       {/* ── Priority queue bar ── */}
@@ -483,7 +484,7 @@ export default function LiveBoard() {
       )}
 
       {/* ── Filter bar ── */}
-      <div className="border-b border-gray-200 dark:border-gray-800 px-4 py-2 flex items-center gap-3 flex-wrap shrink-0">
+      <div className="border-b-2 border-yellow-200 dark:border-zinc-800 bg-amber-50 dark:bg-zinc-950 px-4 py-2 flex items-center gap-3 flex-wrap shrink-0">
         <input
           type="search"
           placeholder="Search… (* wildcard)"
@@ -586,8 +587,8 @@ export default function LiveBoard() {
                     }
                     className={[
                       'px-3 py-2 text-left text-xs uppercase tracking-wide select-none align-top',
-                      'bg-black dark:bg-gray-900 text-gray-400',
-                      'border-b-2 border-gray-700',
+                      'bg-zinc-950 text-yellow-500/70',
+                      'border-b-2 border-yellow-900',
                       isSorted ? 'text-yellow-400' : 'hover:text-white cursor-pointer',
                       isMovable ? 'cursor-grab' : '',
                       isDropTarget ? 'bg-blue-900 text-white' : '',
@@ -813,17 +814,19 @@ function CellContent({
 
     case 'last':
       return (
-        <div className="flex items-center gap-1 flex-wrap">
-          <CopyCell value={p.last_name}>
-            <span className="font-semibold">{p.last_name}</span>
-          </CopyCell>
-          {p.return_eligible && (
-            <span className="text-[10px] px-1 py-0.5 rounded font-medium bg-green-100 text-green-800 border border-green-300 dark:bg-green-900/60 dark:text-green-300 dark:border-green-700">
-              Return
-            </span>
-          )}
-        </div>
+        <CopyCell value={p.last_name}>
+          <span className="font-semibold">{p.last_name}</span>
+        </CopyCell>
       );
+
+    case 'return_eligible':
+      return p.return_eligible ? (
+        <div className="flex items-center justify-center" title="Return Eligible">
+          <svg className="w-4 h-4 text-green-500 dark:text-green-400" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1 14l-4-4 1.414-1.414L11 13.172l5.586-5.586L18 9l-7 7z"/>
+          </svg>
+        </div>
+      ) : <span className="text-gray-300 dark:text-gray-700 text-xs flex justify-center">—</span>;
 
     case 'sponsor':
       return p.sponsor ? (
@@ -866,7 +869,7 @@ function CellContent({
             const req = p[`req_${day}` as keyof Participant] as boolean;
             const bought = p[`pur_${day}` as keyof Participant] as boolean;
             return (
-              <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                 {bought ? (
                   <div title="Purchased — locked" className={`w-4 h-4 rounded-sm border-2 cursor-not-allowed opacity-60 ${
                     req
@@ -883,6 +886,7 @@ function CellContent({
                     }`}
                   />
                 )}
+                <span className="text-[7px] text-gray-400 dark:text-gray-600 leading-none">{DAY_SHORT[day]}</span>
               </div>
             );
           })}
@@ -896,7 +900,7 @@ function CellContent({
             const req = p[`req_${day}` as keyof Participant] as boolean;
             const bought = p[`pur_${day}` as keyof Participant] as boolean;
             return (
-              <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                 {req ? (
                   <button
                     onClick={() => onPurchaseToggle(p, day, !bought)}
@@ -909,6 +913,7 @@ function CellContent({
                 ) : (
                   <div className="w-4 h-4 rounded-sm border border-gray-200 dark:border-gray-700" />
                 )}
+                <span className="text-[7px] text-gray-400 dark:text-gray-600 leading-none">{DAY_SHORT[day]}</span>
               </div>
             );
           })}
@@ -921,12 +926,13 @@ function CellContent({
           {DAY_KEYS.map((day) => {
             const isGap = p.gaps.some((g) => g.toLowerCase() === day);
             return (
-              <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                 <div className={`w-4 h-4 rounded-sm border-2 ${
                   isGap
                     ? 'bg-red-500 border-red-600 dark:bg-red-500 dark:border-red-400'
                     : 'border-gray-200 dark:border-gray-700'
                 }`} />
+                <span className="text-[7px] text-gray-400 dark:text-gray-600 leading-none">{DAY_SHORT[day]}</span>
               </div>
             );
           })}
