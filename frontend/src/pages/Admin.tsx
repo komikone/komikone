@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   api,
   type EventDetail,
   type Participant,
   type YearMeta,
+  type Group,
   formatDollars,
   DAY_KEYS,
   dayLabel,
@@ -695,6 +696,22 @@ function ParticipantsTab({
   const [addOpen, setAddOpen] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
   const [newParticipant, setNewParticipant] = useState<Partial<Participant>>({ badge_type: 'ADULT' });
+  const [groups, setGroups] = useState<Group[]>([]);
+
+  const loadGroups = async (evt: EventDetail) => {
+    try {
+      const gs = await api.groups.list(evt.id, evt.access_token);
+      setGroups(gs);
+    } catch {
+      setGroups([]);
+    }
+  };
+
+  useEffect(() => {
+    if (event) loadGroups(event);
+  }, [event?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const reloadGroups = () => { if (event) loadGroups(event); };
 
   if (!event) return <div className="text-gray-500">No event for this registration type.</div>;
 
@@ -769,10 +786,17 @@ function ParticipantsTab({
         </div>
       </div>
 
+      <GroupsPanel
+        eventId={event.id}
+        secret={secret}
+        groups={groups}
+        onUpdate={() => { reloadGroups(); onUpdate(); }}
+      />
+
       {addOpen && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-4">
           <h4 className="font-medium text-gray-200 mb-3">New Participant</h4>
-          <ParticipantForm value={newParticipant} onChange={setNewParticipant} />
+          <ParticipantForm value={newParticipant} onChange={setNewParticipant} groups={groups} />
           <div className="flex gap-2 mt-3">
             <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-1.5 rounded">
               Add
@@ -809,8 +833,16 @@ function ParticipantsTab({
                   </div>
                 </td>
                 <td className="px-2 py-2">
-                  <div className="text-white font-medium">
+                  <div className="text-white font-medium flex items-center gap-1.5 flex-wrap">
                     {p.first_name} <CopyCell value={p.last_name} />
+                    {p.group_name && (
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white"
+                        style={{ backgroundColor: p.group_color ?? '#6366f1' }}
+                      >
+                        {p.group_name}
+                      </span>
+                    )}
                   </div>
                   {p.sponsor && <div className="text-xs text-gray-500">via {p.sponsor}</div>}
                   {p.notes && <div className="text-xs text-gray-500 italic">{p.notes}</div>}
@@ -885,10 +917,203 @@ function ParticipantsTab({
           participant={participants.find((p) => p.id === editingId)!}
           secret={secret}
           eventId={event.id}
+          groups={groups}
           onSave={() => { setEditingId(null); onUpdate(); }}
           onClose={() => setEditingId(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Groups Panel ─────────────────────────────────────────────────────────────
+
+function GroupsPanel({
+  eventId, secret, groups, onUpdate,
+}: {
+  eventId: number;
+  secret: string;
+  groups: Group[];
+  onUpdate: () => void;
+}) {
+  const [addingName, setAddingName] = useState('');
+  const [addingColor, setAddingColor] = useState('#6366f1');
+  const [addOpen, setAddOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState('');
+  const [saving, setSaving] = useState(false);
+  const dragSrc = useRef<number | null>(null);
+  const [dragTarget, setDragTarget] = useState<number | null>(null);
+  const [localOrder, setLocalOrder] = useState<number[]>([]);
+
+  useEffect(() => {
+    setLocalOrder(groups.map((g) => g.id));
+  }, [groups]);
+
+  const orderedGroups = localOrder.length > 0
+    ? (localOrder.map((id) => groups.find((g) => g.id === id)).filter(Boolean) as Group[])
+    : groups;
+
+  const handleAdd = async () => {
+    if (!addingName.trim()) return;
+    setSaving(true);
+    try {
+      await api.admin.groups.create(secret, eventId, { name: addingName.trim(), color: addingColor });
+      setAddingName('');
+      setAddingColor('#6366f1');
+      setAddOpen(false);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (g: Group) => {
+    if (!confirm(`Delete group "${g.name}"? Participants will be unassigned.`)) return;
+    try {
+      await api.admin.groups.delete(secret, eventId, g.id);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const startEdit = (g: Group) => {
+    setEditingId(g.id);
+    setEditName(g.name);
+    setEditColor(g.color);
+  };
+
+  const handleEditSave = async (g: Group) => {
+    try {
+      await api.admin.groups.update(secret, eventId, g.id, { name: editName, color: editColor });
+      setEditingId(null);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const onDragStart = (id: number) => { dragSrc.current = id; };
+  const onDragOver = (e: React.DragEvent, id: number) => {
+    e.preventDefault();
+    if (dragSrc.current !== null && dragSrc.current !== id) setDragTarget(id);
+  };
+  const onDrop = async (e: React.DragEvent, targetId: number) => {
+    e.preventDefault();
+    const srcId = dragSrc.current;
+    if (srcId === null || srcId === targetId) { dragSrc.current = null; setDragTarget(null); return; }
+    const next = [...localOrder];
+    const si = next.indexOf(srcId);
+    const ti = next.indexOf(targetId);
+    if (si !== -1 && ti !== -1) {
+      next.splice(si, 1);
+      next.splice(ti, 0, srcId);
+      setLocalOrder(next);
+      try {
+        await api.admin.groups.reorder(secret, eventId, next);
+        onUpdate();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Failed');
+      }
+    }
+    dragSrc.current = null;
+    setDragTarget(null);
+  };
+  const onDragEnd = () => { dragSrc.current = null; setDragTarget(null); };
+
+  return (
+    <div className="mb-4 p-3 bg-gray-900 border border-gray-700 rounded-xl">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs text-gray-400 uppercase tracking-wider font-medium">Groups</span>
+        <button
+          onClick={() => setAddOpen(!addOpen)}
+          className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-0.5 rounded"
+        >
+          +
+        </button>
+      </div>
+
+      {addOpen && (
+        <div className="flex items-center gap-2 mb-2">
+          <input
+            autoFocus
+            type="text"
+            value={addingName}
+            onChange={(e) => setAddingName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') setAddOpen(false); }}
+            placeholder="Group name"
+            className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500 w-36"
+          />
+          <input
+            type="color"
+            value={addingColor}
+            onChange={(e) => setAddingColor(e.target.value)}
+            className="w-7 h-7 rounded cursor-pointer border border-gray-600"
+          />
+          <button
+            onClick={handleAdd}
+            disabled={saving}
+            className="text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-2 py-1 rounded"
+          >
+            Add
+          </button>
+          <button onClick={() => setAddOpen(false)} className="text-xs text-gray-400 hover:text-white">Cancel</button>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {orderedGroups.map((g) => (
+          editingId === g.id ? (
+            <div key={g.id} className="flex items-center gap-1">
+              <input
+                autoFocus
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleEditSave(g); if (e.key === 'Escape') setEditingId(null); }}
+                className="bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-white text-xs focus:outline-none focus:border-blue-500 w-28"
+              />
+              <input
+                type="color"
+                value={editColor}
+                onChange={(e) => setEditColor(e.target.value)}
+                className="w-6 h-6 rounded cursor-pointer border border-gray-600"
+              />
+              <button onClick={() => handleEditSave(g)} className="text-xs text-green-400 hover:text-green-300">✓</button>
+              <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-white">✕</button>
+            </div>
+          ) : (
+            <div
+              key={g.id}
+              draggable
+              onDragStart={() => onDragStart(g.id)}
+              onDragOver={(e) => onDragOver(e, g.id)}
+              onDrop={(e) => onDrop(e, g.id)}
+              onDragEnd={onDragEnd}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs text-white font-medium cursor-grab ${
+                dragTarget === g.id ? 'ring-2 ring-blue-400' : ''
+              }`}
+              style={{ backgroundColor: g.color }}
+            >
+              <button onClick={() => startEdit(g)} className="hover:opacity-80">{g.name}</button>
+              <button
+                onClick={() => handleDelete(g)}
+                className="ml-0.5 opacity-70 hover:opacity-100 text-white"
+                title="Delete group"
+              >
+                ✕
+              </button>
+            </div>
+          )
+        ))}
+        {groups.length === 0 && !addOpen && (
+          <span className="text-xs text-gray-600 italic">No groups yet — click + to add one</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -920,11 +1145,12 @@ function ReturnToggle({
 }
 
 function EditParticipantModal({
-  participant, secret, eventId, onSave, onClose,
+  participant, secret, eventId, groups, onSave, onClose,
 }: {
   participant: Participant;
   secret: string;
   eventId: number;
+  groups: Group[];
   onSave: () => void;
   onClose: () => void;
 }) {
@@ -946,7 +1172,7 @@ function EditParticipantModal({
           <h3 className="font-bold text-white">Edit Participant</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
         </div>
-        <ParticipantForm value={form} onChange={setForm} showAdminFields />
+        <ParticipantForm value={form} onChange={setForm} showAdminFields groups={groups} />
         <div className="flex gap-2 mt-4">
           <button onClick={handleSave} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded">
             Save
@@ -959,11 +1185,12 @@ function EditParticipantModal({
 }
 
 function ParticipantForm({
-  value, onChange, showAdminFields = false,
+  value, onChange, showAdminFields = false, groups = [],
 }: {
   value: Partial<Participant>;
   onChange: (v: Partial<Participant>) => void;
   showAdminFields?: boolean;
+  groups?: Group[];
 }) {
   const set = (key: keyof Participant, val: unknown) => onChange({ ...value, [key]: val });
 
@@ -991,6 +1218,20 @@ function ParticipantForm({
       <Field label="Sponsor">
         <input type="text" value={value.sponsor ?? ''} onChange={(e) => set('sponsor', e.target.value)} className={inputCls} />
       </Field>
+      {groups.length > 0 && (
+        <Field label="Group">
+          <select
+            value={value.group_id ?? ''}
+            onChange={(e) => set('group_id', e.target.value === '' ? null : Number(e.target.value))}
+            className={inputCls}
+          >
+            <option value="">No group</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
+          </select>
+        </Field>
+      )}
       <Field label="Requested Days">
         <div className="flex flex-wrap gap-3">
           {DAY_KEYS.map((day) => (

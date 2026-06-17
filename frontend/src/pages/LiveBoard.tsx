@@ -11,7 +11,7 @@ const DAY_GAP = 2;
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type RowStatus = 'complete' | 'claiming' | 'partial' | 'none';
-type ColKey = 'idx' | 'first' | 'last' | 'badge_type' | 'member_id' | 'requested' | 'purchased' | 'gaps' | 'status' | 'sponsor' | 'total' | 'who';
+type ColKey = 'idx' | 'first' | 'last' | 'badge_type' | 'member_id' | 'requested' | 'purchased' | 'gaps' | 'status' | 'sponsor' | 'total' | 'who' | 'group';
 type SortDir = 'asc' | 'desc';
 
 // ─── Column config ────────────────────────────────────────────────────────────
@@ -24,20 +24,20 @@ const FROZEN_LEFT: Record<string, number> = {
   last: FROZEN_PX.idx + FROZEN_PX.first,
 };
 
-const DEFAULT_MOVABLE: ColKey[] = ['member_id', 'requested', 'purchased', 'gaps', 'badge_type', 'sponsor', 'status', 'total', 'who'];
+const DEFAULT_MOVABLE: ColKey[] = ['member_id', 'requested', 'purchased', 'gaps', 'badge_type', 'group', 'sponsor', 'status', 'total', 'who'];
 
 const COL_LABEL: Record<ColKey, string> = {
   idx: '#', first: 'First', last: 'Last', badge_type: 'Badge',
   member_id: 'Member ID', requested: 'Requested', status: 'Status',
   purchased: 'Purchased', gaps: 'Gaps', total: 'Total', who: 'Who Bought',
-  sponsor: 'Sponsor',
+  sponsor: 'Sponsor', group: 'Group',
 };
 
 const DEFAULT_WIDTHS: Record<ColKey, number> = {
   idx: 36, first: 90, last: 96,
   badge_type: 88, member_id: 118,
   requested: 168, purchased: 168, gaps: 168,
-  sponsor: 112, status: 112, total: 74, who: 118,
+  sponsor: 112, status: 112, total: 74, who: 118, group: 110,
 };
 
 const DAY_COLS = new Set<ColKey>(['requested', 'purchased', 'gaps']);
@@ -375,9 +375,9 @@ export default function LiveBoard() {
       const aMe = a.id === identityId ? 1 : 0;
       const bMe = b.id === identityId ? 1 : 0;
       if (bMe !== aMe) return bMe - aMe;
-      // 2. Same sponsor group
-      const aGroup = me?.sponsor && a.sponsor === me.sponsor ? 1 : 0;
-      const bGroup = me?.sponsor && b.sponsor === me.sponsor ? 1 : 0;
+      // 2. Same group
+      const aGroup = me?.group_id && a.group_id === me.group_id ? 1 : 0;
+      const bGroup = me?.group_id && b.group_id === me.group_id ? 1 : 0;
       if (bGroup !== aGroup) return bGroup - aGroup;
       // 3. More days requested = higher priority
       const aDays = DAY_KEYS.filter((d) => a[`req_${d}` as keyof Participant]).length;
@@ -481,8 +481,8 @@ export default function LiveBoard() {
               <button onClick={() => handleClaim(p)} className="text-yellow-300 dark:text-white underline hover:text-white dark:hover:text-blue-300">
                 {p.first_name} {p.last_name}
                 {p.id === identityId && <span className="text-blue-200 dark:text-blue-400 ml-1">(you)</span>}
-                {me.sponsor && p.sponsor === me.sponsor && p.id !== identityId && (
-                  <span className="text-blue-200 dark:text-blue-400 ml-1">· {p.sponsor}</span>
+                {me.group_id && p.group_id === me.group_id && p.id !== identityId && (
+                  <span className="text-blue-200 dark:text-blue-400 ml-1">· {p.group_name}</span>
                 )}
               </button>
             </span>
@@ -795,6 +795,16 @@ function CellContent({
       return p.sponsor ? (
         <span className="text-xs px-1.5 py-0.5 rounded-sm font-medium bg-purple-100 text-purple-800 border border-purple-300 dark:bg-purple-900/60 dark:text-purple-300 dark:border-purple-700">
           {p.sponsor}
+        </span>
+      ) : <span className="text-gray-300 dark:text-gray-700 text-xs">—</span>;
+
+    case 'group':
+      return p.group_name ? (
+        <span
+          className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white"
+          style={{ backgroundColor: p.group_color ?? '#6366f1' }}
+        >
+          {p.group_name}
         </span>
       ) : <span className="text-gray-300 dark:text-gray-700 text-xs">—</span>;
 
