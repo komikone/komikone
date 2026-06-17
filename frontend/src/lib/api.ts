@@ -170,6 +170,16 @@ export const api = {
         headers: headers(token),
         body: JSON.stringify({ paid }),
       }),
+    updateProfile: (
+      eventId: number,
+      pid: number,
+      token: string,
+      data: { first_name?: string; last_name?: string; member_id?: string; badge_type?: string; sponsor?: string; notes?: string }
+    ) =>
+      req<{ ok: boolean }>(
+        `/api/events/${eventId}/participants/${pid}/profile?token=${token}`,
+        { method: 'PATCH', headers: headers(token), body: JSON.stringify(data) }
+      ),
   },
 
   coordinators: {

@@ -343,6 +343,44 @@ app.put('/api/events/:id/coordinators/:name', async (c) => {
   return json({ ok: true });
 });
 
+// Update participant profile (name, member_id, badge_type, sponsor, notes) — token-gated
+app.patch('/api/events/:id/participants/:pid/profile', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const pid = Number(c.req.param('pid'));
+  const token = c.req.query('token') || c.req.header('x-access-token');
+  const authHeader = c.req.header('authorization');
+  const isAdmin = authHeader === `Bearer ${c.env.ADMIN_SECRET}`;
+
+  const event = await getEvent(c.env.DB, eventId);
+  if (!event) return err('Event not found', 404);
+  if (!isAdmin && token !== event.access_token) return err('Invalid token', 401);
+
+  const body = await c.req.json<{
+    first_name?: string; last_name?: string; member_id?: string;
+    badge_type?: string; sponsor?: string; notes?: string;
+  }>();
+
+  const fields: string[] = [];
+  const values: (string | number)[] = [];
+
+  if (body.first_name !== undefined) { fields.push('first_name = ?'); values.push(body.first_name.trim()); }
+  if (body.last_name !== undefined) { fields.push('last_name = ?'); values.push(body.last_name.trim()); }
+  if (body.member_id !== undefined) { fields.push('member_id = ?'); values.push(body.member_id.trim().toUpperCase()); }
+  if (body.badge_type !== undefined) { fields.push('badge_type = ?'); values.push(body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT'); }
+  if (body.sponsor !== undefined) { fields.push('sponsor = ?'); values.push(body.sponsor.trim()); }
+  if (body.notes !== undefined) { fields.push('notes = ?'); values.push(body.notes.trim()); }
+
+  if (fields.length === 0) return err('No fields to update');
+  fields.push("updated_at = datetime('now')");
+  values.push(pid, eventId);
+
+  await c.env.DB.prepare(
+    `UPDATE participants SET ${fields.join(', ')} WHERE id = ? AND event_id = ?`
+  ).bind(...values).run();
+
+  return json({ ok: true });
+});
+
 // ── Admin-only routes ─────────────────────────────────────────────────────────
 
 const admin = new Hono<{ Bindings: Bindings }>();
