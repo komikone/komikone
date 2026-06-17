@@ -1419,6 +1419,7 @@ const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-3 py-1.5 
 
 function CopyCell({ value, className = '' }: { value: string; className?: string }) {
   const [copied, setCopied] = useState(false);
+  const [hovered, setHovered] = useState(false);
   if (!value) return <span className="text-gray-600">—</span>;
   const handleCopy = () => {
     navigator.clipboard.writeText(value).then(() => {
@@ -1427,11 +1428,15 @@ function CopyCell({ value, className = '' }: { value: string; className?: string
     });
   };
   return (
-    <span className={`group/copy inline-flex items-center gap-1 ${className}`}>
+    <span
+      className={`inline-flex items-center gap-1 ${className}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       <span>{value}</span>
       <button
         onClick={handleCopy}
-        className="opacity-0 group-hover/copy:opacity-100 transition-opacity text-gray-500 hover:text-white"
+        className={`transition-opacity text-gray-500 hover:text-white ${hovered || copied ? 'opacity-100' : 'opacity-0'}`}
         title="Copy"
       >
         {copied ? (
