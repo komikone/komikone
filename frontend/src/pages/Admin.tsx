@@ -697,6 +697,9 @@ function ParticipantsTab({
   const [copyOpen, setCopyOpen] = useState(false);
   const [newParticipant, setNewParticipant] = useState<Partial<Participant>>({ badge_type: 'ADULT' });
   const [groups, setGroups] = useState<Group[]>([]);
+  const [localParticipantOrder, setLocalParticipantOrder] = useState<number[]>([]);
+  const dragSrcP = useRef<number | null>(null);
+  const [dragTargetP, setDragTargetP] = useState<number | null>(null);
 
   const loadGroups = async (evt: EventDetail) => {
     try {
@@ -712,6 +715,14 @@ function ParticipantsTab({
   }, [event?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reloadGroups = () => { if (event) loadGroups(event); };
+
+  useEffect(() => {
+    setLocalParticipantOrder(participants.map((p) => p.id));
+  }, [participants]);
+
+  const orderedParticipants = localParticipantOrder.length > 0
+    ? (localParticipantOrder.map((id) => participants.find((p) => p.id === id)).filter(Boolean) as Participant[])
+    : participants;
 
   if (!event) return <div className="text-gray-500">No event for this registration type.</div>;
 
@@ -740,29 +751,33 @@ function ParticipantsTab({
     }
   };
 
-  const handleMoveUp = async (_p: Participant, idx: number) => {
-    if (idx === 0) return;
-    const newOrder = [...participants];
-    [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
-    try {
-      await api.admin.participants.reorder(secret, event.id, newOrder.map((x) => x.id));
-      onUpdate();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed');
-    }
+  const onDragStartP = (id: number) => { dragSrcP.current = id; };
+  const onDragOverP = (e: React.DragEvent, id: number) => {
+    e.preventDefault();
+    if (dragSrcP.current !== null && dragSrcP.current !== id) setDragTargetP(id);
   };
-
-  const handleMoveDown = async (_p: Participant, idx: number) => {
-    if (idx === participants.length - 1) return;
-    const newOrder = [...participants];
-    [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
-    try {
-      await api.admin.participants.reorder(secret, event.id, newOrder.map((x) => x.id));
-      onUpdate();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed');
+  const onDropP = async (e: React.DragEvent, targetId: number) => {
+    e.preventDefault();
+    const srcId = dragSrcP.current;
+    if (srcId === null || srcId === targetId) { dragSrcP.current = null; setDragTargetP(null); return; }
+    const next = [...localParticipantOrder];
+    const si = next.indexOf(srcId);
+    const ti = next.indexOf(targetId);
+    if (si !== -1 && ti !== -1) {
+      next.splice(si, 1);
+      next.splice(ti, 0, srcId);
+      setLocalParticipantOrder(next);
+      try {
+        await api.admin.participants.reorder(secret, event!.id, next);
+        onUpdate();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Failed');
+      }
     }
+    dragSrcP.current = null;
+    setDragTargetP(null);
   };
+  const onDragEndP = () => { dragSrcP.current = null; setDragTargetP(null); };
 
   return (
     <div>
@@ -810,7 +825,7 @@ function ParticipantsTab({
         <table className="w-full text-sm min-w-[800px]">
           <thead className="text-gray-400 text-xs border-b border-gray-700">
             <tr>
-              <th className="px-2 py-2 text-left w-12">Sort</th>
+              <th className="px-2 py-2 text-left w-8"></th>
               <th className="px-2 py-2 text-left">Name</th>
               <th className="px-2 py-2 text-left">Member ID</th>
               <th className="px-2 py-2 text-center">Type</th>
@@ -823,13 +838,24 @@ function ParticipantsTab({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800">
-            {participants.map((p, idx) => (
-              <tr key={p.id} className={`hover:bg-gray-900/50 ${p.all_purchased ? 'opacity-70' : ''}`}>
-                <td className="px-2 py-2">
-                  <div className="flex flex-col gap-0.5">
-                    <button onClick={() => handleMoveUp(p, idx)} className="text-gray-500 hover:text-white text-xs leading-none">▲</button>
-                    <span className="text-gray-500 text-xs text-center">{idx + 1}</span>
-                    <button onClick={() => handleMoveDown(p, idx)} className="text-gray-500 hover:text-white text-xs leading-none">▼</button>
+            {orderedParticipants.map((p, idx) => (
+              <tr
+                key={p.id}
+                draggable
+                onDragStart={() => onDragStartP(p.id)}
+                onDragOver={(e) => onDragOverP(e, p.id)}
+                onDrop={(e) => onDropP(e, p.id)}
+                onDragEnd={onDragEndP}
+                className={`hover:bg-gray-900/50 ${p.all_purchased ? 'opacity-70' : ''} ${dragTargetP === p.id ? 'ring-2 ring-inset ring-blue-400' : ''}`}
+              >
+                <td className="px-2 py-2 cursor-grab active:cursor-grabbing">
+                  <div className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-gray-400 select-none">
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
+                      <circle cx="5" cy="4" r="1.2"/><circle cx="11" cy="4" r="1.2"/>
+                      <circle cx="5" cy="8" r="1.2"/><circle cx="11" cy="8" r="1.2"/>
+                      <circle cx="5" cy="12" r="1.2"/><circle cx="11" cy="12" r="1.2"/>
+                    </svg>
+                    <span className="text-[10px] text-gray-600">{idx + 1}</span>
                   </div>
                 </td>
                 <td className="px-2 py-2">
