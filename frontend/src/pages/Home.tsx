@@ -39,13 +39,13 @@ export default function Home() {
             </p>
           </div>
           <div className="flex items-center gap-4">
-            {/* SDCC badge mark */}
-            <div className="flex flex-col items-center select-none" title="San Diego Comic-Con">
-              <div className="w-12 h-12 rounded-full bg-yellow-400 border-[3px] border-black flex flex-col items-center justify-center shadow-md">
-                <span className="font-bangers text-black text-[13px] leading-none tracking-wider">SDCC</span>
-                <span className="text-black text-[6px] font-bold leading-none tracking-widest uppercase mt-0.5">Comic-Con</span>
-              </div>
-            </div>
+            {/* SDCC official logo */}
+            <img
+              src="/sdcc-logo.svg"
+              alt="San Diego Comic-Con"
+              className="h-14 w-auto select-none"
+              draggable={false}
+            />
             <button
               onClick={toggle}
               className="text-xs text-red-200 dark:text-gray-500 hover:text-white dark:hover:text-yellow-400 border border-red-400 dark:border-gray-700 px-2 py-1 rounded transition-colors uppercase tracking-widest"
