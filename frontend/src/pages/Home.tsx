@@ -3,6 +3,16 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, type EventSummary } from '../lib/api';
 import { useTheme } from '../lib/useTheme';
 
+const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
+
+type YearStat = {
+  year: number;
+  reg_type: 'return' | 'open';
+  total: number;
+  purchased_any: number;
+};
+type StatsData = { years: YearStat[] };
+
 export default function Home() {
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [searchParams] = useSearchParams();
@@ -58,6 +68,23 @@ export default function Home() {
           </section>
         )}
 
+        {/* Stats */}
+        <StatsSection />
+
+        {/* Request an invite */}
+        <section className="border-2 border-black dark:border-yellow-400 bg-white dark:bg-gray-900 p-6 comic-shadow text-center">
+          <h2 className="font-bangers text-3xl text-red-600 dark:text-yellow-400 tracking-wide mb-2">Want In?</h2>
+          <p className="text-gray-600 dark:text-gray-400 text-sm mb-5 max-w-md mx-auto">
+            This is a private purchasing train. If you're interested in joining future SDCC badge runs, send a request and we'll be in touch.
+          </p>
+          <a
+            href="mailto:tony@tonynguyen.com?subject=SDCC%20Purchasing%20Train%20%E2%80%94%20Invite%20Request"
+            className="inline-block font-bangers tracking-wide text-xl bg-red-600 hover:bg-red-700 dark:bg-yellow-400 dark:hover:bg-yellow-300 dark:text-black text-white px-8 py-2.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
+          >
+            Request an Invite →
+          </a>
+        </section>
+
         {/* Instructions */}
         <section>
           <h2 className="font-bangers text-2xl text-red-600 dark:text-yellow-400 mb-4 tracking-wide">How It Works</h2>
@@ -81,6 +108,161 @@ export default function Home() {
     </div>
   );
 }
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+
+function StatsSection() {
+  const [stats, setStats] = useState<StatsData | null>(null);
+
+  useEffect(() => {
+    fetch(`${BASE}/api/stats`)
+      .then((r) => r.json())
+      .then(setStats)
+      .catch(() => {});
+  }, []);
+
+  if (!stats) return null;
+
+  const complete = stats.years.filter((y) => y.year < 2026);
+  if (complete.length === 0) return null;
+
+  const totalParticipants = complete.reduce((s, y) => s + y.total, 0);
+  const totalPurchased = complete.reduce((s, y) => s + y.purchased_any, 0);
+  const successRate = Math.round((totalPurchased / totalParticipants) * 100);
+  const years = [...new Set(complete.map((y) => y.year))].sort();
+
+  // Build per-year combined totals for the chart
+  const yearTotals = years.map((yr) => {
+    const rows = complete.filter((y) => y.year === yr);
+    const total = rows.reduce((s, y) => s + y.total, 0);
+    const bought = rows.reduce((s, y) => s + y.purchased_any, 0);
+    return { yr, total, bought, rate: Math.round((bought / total) * 100) };
+  });
+
+  const maxTotal = Math.max(...yearTotals.map((y) => y.total));
+
+  // SVG chart dimensions
+  const W = 560;
+  const H = 140;
+  const PAD_L = 32;
+  const PAD_B = 28;
+  const PAD_T = 14;
+  const chartW = W - PAD_L - 8;
+  const chartH = H - PAD_B - PAD_T;
+  const barW = Math.min(52, Math.floor(chartW / years.length) - 10);
+  const gap = chartW / years.length;
+
+  return (
+    <section>
+      <h2 className="font-bangers text-2xl text-red-600 dark:text-yellow-400 mb-4 tracking-wide">Track Record</h2>
+
+      {/* KPI row */}
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        {[
+          { value: years.length, label: 'Years Running' },
+          { value: totalParticipants, label: 'Badges Coordinated' },
+          { value: `${successRate}%`, label: 'Success Rate' },
+        ].map(({ value, label }) => (
+          <div key={label} className="border-2 border-black dark:border-gray-700 bg-white dark:bg-gray-900 p-4 comic-shadow text-center">
+            <div className="font-bangers text-4xl text-red-600 dark:text-yellow-400 leading-none">{value}</div>
+            <div className="text-gray-500 dark:text-gray-500 text-xs mt-1 uppercase tracking-widest">{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Bar chart */}
+      <div className="border-2 border-black dark:border-gray-700 bg-white dark:bg-gray-900 p-4 comic-shadow">
+        <p className="text-xs text-gray-400 dark:text-gray-600 uppercase tracking-widest mb-3">Participants per year · % got badges</p>
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 160 }}>
+          {/* Y gridlines */}
+          {[0.25, 0.5, 0.75, 1].map((frac) => {
+            const y = PAD_T + chartH * (1 - frac);
+            return (
+              <g key={frac}>
+                <line x1={PAD_L} x2={W - 8} y1={y} y2={y} stroke="currentColor" strokeOpacity={0.07} strokeWidth={1} />
+                <text x={PAD_L - 4} y={y + 4} textAnchor="end" fontSize={8} fill="currentColor" opacity={0.35}>
+                  {Math.round(maxTotal * frac)}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Bars */}
+          {yearTotals.map(({ yr, total, bought, rate }, i) => {
+            const cx = PAD_L + gap * i + gap / 2;
+            const totalH = (total / maxTotal) * chartH;
+            const boughtH = (bought / maxTotal) * chartH;
+            const barX = cx - barW / 2;
+            const successColor = rate >= 90 ? '#22c55e' : rate >= 75 ? '#eab308' : '#ef4444';
+
+            return (
+              <g key={yr}>
+                {/* Total bar (background) */}
+                <rect
+                  x={barX} y={PAD_T + chartH - totalH}
+                  width={barW} height={totalH}
+                  fill="currentColor" opacity={0.08}
+                  rx={2}
+                />
+                {/* Purchased bar (foreground) */}
+                <rect
+                  x={barX} y={PAD_T + chartH - boughtH}
+                  width={barW} height={boughtH}
+                  fill={successColor} opacity={0.85}
+                  rx={2}
+                />
+                {/* Success % label above bar */}
+                <text
+                  x={cx} y={PAD_T + chartH - totalH - 4}
+                  textAnchor="middle" fontSize={9} fontWeight="bold"
+                  fill={successColor}
+                >
+                  {rate}%
+                </text>
+                {/* Total count inside/below bar */}
+                <text
+                  x={cx} y={PAD_T + chartH - 5}
+                  textAnchor="middle" fontSize={8}
+                  fill="currentColor" opacity={0.5}
+                >
+                  {total}
+                </text>
+                {/* Year label */}
+                <text
+                  x={cx} y={H - 6}
+                  textAnchor="middle" fontSize={10} fontWeight="bold"
+                  fill="currentColor" opacity={0.7}
+                >
+                  {yr}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Baseline */}
+          <line x1={PAD_L} x2={W - 8} y1={PAD_T + chartH} y2={PAD_T + chartH} stroke="currentColor" strokeOpacity={0.2} strokeWidth={1} />
+        </svg>
+
+        <div className="flex gap-4 mt-2 text-xs text-gray-400 dark:text-gray-600">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-green-500 opacity-85" /> ≥ 90% success
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-yellow-500 opacity-85" /> 75–89%
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-red-500 opacity-85" /> &lt; 75%
+          </span>
+          <span className="flex items-center gap-1.5 ml-auto">
+            <Link to="/stats" className="text-red-500 dark:text-yellow-500 hover:underline">Full stats →</Link>
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Event cards ──────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: EventSummary['status'] }) {
   const styles: Record<EventSummary['status'], string> = {
