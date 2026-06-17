@@ -74,6 +74,17 @@ export type Participant = {
   updated_at: string;
 };
 
+export type InviteRequest = {
+  id: number;
+  email: string;
+  referred_by: string;
+  notes: string;
+  status: 'pending' | 'approved' | 'rejected';
+  admin_notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Coordinator = {
   id: number;
   event_id: number;

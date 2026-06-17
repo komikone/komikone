@@ -43,6 +43,17 @@ export type EventDetail = EventSummary & {
   updated_at: string;
 };
 
+export type InviteRequest = {
+  id: number;
+  email: string;
+  referred_by: string;
+  notes: string;
+  status: 'pending' | 'approved' | 'rejected';
+  admin_notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Sponsor = {
   id: number;
   name: string;
@@ -144,6 +155,15 @@ export type Coordinator = {
 export const api = {
   sponsors: {
     list: () => req<Sponsor[]>('/api/sponsors'),
+  },
+
+  inviteRequests: {
+    submit: (data: { email: string; referred_by: string; notes?: string }) =>
+      req<{ ok: boolean }>('/api/invite-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
   },
 
   events: {
@@ -331,6 +351,20 @@ export const api = {
       reorder: (secret: string, eventId: number, order: number[]) =>
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/groups/reorder`, {
           method: 'PATCH', headers: headers(undefined, secret), body: JSON.stringify({ order }),
+        }),
+    },
+    inviteRequests: {
+      list: (secret: string, status?: 'pending' | 'approved' | 'rejected') =>
+        req<InviteRequest[]>(`/api/admin/invite-requests${status ? `?status=${status}` : ''}`, {
+          headers: headers(undefined, secret),
+        }),
+      update: (secret: string, id: number, data: { status?: 'pending' | 'approved' | 'rejected'; admin_notes?: string }) =>
+        req<{ ok: boolean }>(`/api/admin/invite-requests/${id}`, {
+          method: 'PATCH', headers: headers(undefined, secret), body: JSON.stringify(data),
+        }),
+      delete: (secret: string, id: number) =>
+        req<{ ok: boolean }>(`/api/admin/invite-requests/${id}`, {
+          method: 'DELETE', headers: headers(undefined, secret),
         }),
     },
     sponsors: {

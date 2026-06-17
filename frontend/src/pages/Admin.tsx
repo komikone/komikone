@@ -7,6 +7,7 @@ import {
   type YearMeta,
   type Group,
   type Sponsor,
+  type InviteRequest,
   sponsorColor,
   formatDollars,
   DAY_KEYS,
@@ -36,6 +37,8 @@ export default function Admin() {
 
   const [events, setEvents] = useState<EventDetail[]>([]);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [inviteRequests, setInviteRequests] = useState<InviteRequest[]>([]);
+  const [view, setView] = useState<'year' | 'invites'>('year');
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [activeRegType, setActiveRegType] = useState<'return' | 'open'>('return');
 
@@ -112,8 +115,18 @@ export default function Admin() {
     }
   }, [secret]);
 
+  const loadInvites = useCallback(async () => {
+    if (!secret) return;
+    try {
+      const list = await api.admin.inviteRequests.list(secret);
+      setInviteRequests(list);
+    } catch {
+      setInviteRequests([]);
+    }
+  }, [secret]);
+
   useEffect(() => {
-    if (authed) { loadEvents(); loadSponsors(); }
+    if (authed) { loadEvents(); loadSponsors(); loadInvites(); }
   }, [authed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-select latest year when events first load
@@ -209,12 +222,37 @@ export default function Admin() {
           </div>
 
           <SponsorsPanel secret={secret} sponsors={sponsors} onUpdate={loadSponsors} />
+
+          {/* Invites */}
+          <div className="border-t border-gray-800 pt-3">
+            <button
+              onClick={() => setView(view === 'invites' ? 'year' : 'invites')}
+              className={`w-full text-left px-2 py-1.5 rounded transition-colors flex items-center justify-between ${
+                view === 'invites' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+              }`}
+            >
+              <span className="text-xs uppercase tracking-wide font-medium">Invites</span>
+              {inviteRequests.filter((r) => r.status === 'pending').length > 0 && (
+                <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                  {inviteRequests.filter((r) => r.status === 'pending').length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
       </aside>
 
       {/* Main content */}
       <main className="flex-1 overflow-auto flex flex-col">
-        {selectedYear === null ? (
+        {view === 'invites' ? (
+          <div className="flex-1 overflow-auto p-6">
+            <InviteRequestsPanel
+              secret={secret}
+              requests={inviteRequests}
+              onUpdate={loadInvites}
+            />
+          </div>
+        ) : selectedYear === null ? (
           <div className="flex items-center justify-center h-full text-gray-500">
             {loading ? 'Loading…' : 'Select or initialize a year'}
           </div>
@@ -1824,6 +1862,191 @@ function CopyParticipantsModal({
           <button onClick={onClose} className="text-gray-400 hover:text-white px-4 text-sm">Cancel</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Invite Requests Panel ────────────────────────────────────────────────────
+
+function InviteRequestsPanel({
+  secret, requests, onUpdate,
+}: {
+  secret: string;
+  requests: InviteRequest[];
+  onUpdate: () => void;
+}) {
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [editingNotes, setEditingNotes] = useState<{ id: number; value: string } | null>(null);
+
+  const visible = filter === 'all' ? requests : requests.filter((r) => r.status === filter);
+
+  const pending = requests.filter((r) => r.status === 'pending').length;
+  const approved = requests.filter((r) => r.status === 'approved').length;
+  const rejected = requests.filter((r) => r.status === 'rejected').length;
+
+  const setStatus = async (id: number, status: InviteRequest['status']) => {
+    try {
+      await api.admin.inviteRequests.update(secret, id, { status });
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const saveNotes = async (id: number, admin_notes: string) => {
+    try {
+      await api.admin.inviteRequests.update(secret, id, { admin_notes });
+      setEditingNotes(null);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const handleDelete = async (r: InviteRequest) => {
+    if (!confirm(`Delete request from ${r.email}?`)) return;
+    try {
+      await api.admin.inviteRequests.delete(secret, r.id);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const statusChip = (s: InviteRequest['status']) => {
+    const styles = {
+      pending:  'bg-yellow-900/50 text-yellow-300 border border-yellow-700',
+      approved: 'bg-green-900/50 text-green-300 border border-green-700',
+      rejected: 'bg-red-900/50 text-red-300 border border-red-700',
+    };
+    return (
+      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${styles[s]}`}>{s}</span>
+    );
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-5">
+        <h2 className="text-xl font-bold text-white">Invite Requests</h2>
+        <div className="flex gap-2 text-xs text-gray-400">
+          <span className="text-yellow-400 font-bold">{pending} pending</span>
+          <span>·</span>
+          <span className="text-green-400">{approved} approved</span>
+          <span>·</span>
+          <span className="text-red-400">{rejected} rejected</span>
+        </div>
+      </div>
+
+      {/* Filter tabs */}
+      <div className="flex gap-1 mb-5">
+        {(['pending', 'approved', 'rejected', 'all'] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`px-3 py-1 rounded-full text-xs font-medium capitalize transition-colors ${
+              filter === f ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
+            }`}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+
+      {visible.length === 0 ? (
+        <p className="text-gray-500 text-sm">No {filter === 'all' ? '' : filter + ' '}requests.</p>
+      ) : (
+        <div className="space-y-3">
+          {visible.map((r) => (
+            <div key={r.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-white font-medium text-sm">{r.email}</span>
+                    {statusChip(r.status)}
+                  </div>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    via <span className="text-gray-200">{r.referred_by || '—'}</span>
+                    <span className="mx-1.5 text-gray-600">·</span>
+                    {new Date(r.created_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleDelete(r)}
+                  className="text-gray-600 hover:text-red-400 text-xs shrink-0"
+                >
+                  Delete
+                </button>
+              </div>
+
+              {r.notes && (
+                <p className="text-xs text-gray-400 italic bg-gray-800 rounded px-3 py-2 mb-2">"{r.notes}"</p>
+              )}
+
+              {/* Admin notes */}
+              {editingNotes?.id === r.id ? (
+                <div className="flex gap-2 mb-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={editingNotes.value}
+                    onChange={(e) => setEditingNotes({ id: r.id, value: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveNotes(r.id, editingNotes.value);
+                      if (e.key === 'Escape') setEditingNotes(null);
+                    }}
+                    placeholder="Admin notes…"
+                    className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500"
+                  />
+                  <button onClick={() => saveNotes(r.id, editingNotes.value)} className="text-xs text-green-400 hover:text-green-300">Save</button>
+                  <button onClick={() => setEditingNotes(null)} className="text-xs text-gray-400 hover:text-white">Cancel</button>
+                </div>
+              ) : r.admin_notes ? (
+                <button
+                  onClick={() => setEditingNotes({ id: r.id, value: r.admin_notes })}
+                  className="text-xs text-gray-500 italic mb-2 hover:text-gray-300 text-left w-full"
+                >
+                  Note: {r.admin_notes}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setEditingNotes({ id: r.id, value: '' })}
+                  className="text-xs text-gray-600 hover:text-gray-400 mb-2"
+                >
+                  + Add note
+                </button>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-1.5">
+                {r.status !== 'approved' && (
+                  <button
+                    onClick={() => setStatus(r.id, 'approved')}
+                    className="text-xs bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1 rounded transition-colors"
+                  >
+                    Approve
+                  </button>
+                )}
+                {r.status !== 'rejected' && (
+                  <button
+                    onClick={() => setStatus(r.id, 'rejected')}
+                    className="text-xs bg-red-900 hover:bg-red-800 text-red-300 px-3 py-1 rounded transition-colors"
+                  >
+                    Reject
+                  </button>
+                )}
+                {r.status !== 'pending' && (
+                  <button
+                    onClick={() => setStatus(r.id, 'pending')}
+                    className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 px-3 py-1 rounded transition-colors"
+                  >
+                    Reset to Pending
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

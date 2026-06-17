@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type Sponsor, enrichParticipant, isClaimExpired } from './db';
+import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type Sponsor, type InviteRequest, enrichParticipant, isClaimExpired } from './db';
 
 type Bindings = {
   DB: D1Database;
@@ -48,6 +48,29 @@ app.get('/api/sponsors', async (c) => {
     'SELECT * FROM sponsors ORDER BY name ASC'
   ).all<Sponsor>();
   return json(rows.results);
+});
+
+// Submit an invite request (public)
+app.post('/api/invite-requests', async (c) => {
+  const body = await c.req.json<{ email: string; referred_by: string; notes?: string }>();
+  if (!body.email?.trim()) return err('Email is required');
+  if (!body.referred_by?.trim()) return err('Please tell us who referred you');
+
+  // Prevent duplicate pending requests from the same email
+  const existing = await c.env.DB.prepare(
+    "SELECT id FROM invite_requests WHERE LOWER(email) = LOWER(?) AND status = 'pending'"
+  ).bind(body.email.trim()).first();
+  if (existing) return err('A pending request from this email already exists', 409);
+
+  await c.env.DB.prepare(
+    'INSERT INTO invite_requests (email, referred_by, notes) VALUES (?, ?, ?)'
+  ).bind(
+    body.email.trim().toLowerCase(),
+    body.referred_by.trim(),
+    body.notes?.trim() ?? '',
+  ).run();
+
+  return json({ ok: true }, 201);
 });
 
 // List events (public — only id, year, name, status, reg_type; no prices/tokens)
@@ -926,6 +949,39 @@ admin.put('/year-meta/:year', async (c) => {
     body.fri_date ?? '', body.sat_date ?? '',
     body.sun_date ?? '', body.notes ?? '',
   ).run();
+  return json({ ok: true });
+});
+
+// ── Admin invite request routes ───────────────────────────────────────────────
+
+admin.get('/invite-requests', async (c) => {
+  const status = c.req.query('status'); // optional filter: pending | approved | rejected
+  const sql = status
+    ? 'SELECT * FROM invite_requests WHERE status = ? ORDER BY created_at DESC'
+    : "SELECT * FROM invite_requests ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, created_at DESC";
+  const rows = status
+    ? await c.env.DB.prepare(sql).bind(status).all<InviteRequest>()
+    : await c.env.DB.prepare(sql).all<InviteRequest>();
+  return json(rows.results);
+});
+
+admin.patch('/invite-requests/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  const body = await c.req.json<{ status?: 'pending' | 'approved' | 'rejected'; admin_notes?: string }>();
+  const fields: string[] = [];
+  const values: (string | number)[] = [];
+  if (body.status !== undefined) { fields.push('status = ?'); values.push(body.status); }
+  if (body.admin_notes !== undefined) { fields.push('admin_notes = ?'); values.push(body.admin_notes.trim()); }
+  if (fields.length === 0) return err('No fields to update');
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+  await c.env.DB.prepare(`UPDATE invite_requests SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
+  return json({ ok: true });
+});
+
+admin.delete('/invite-requests/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  await c.env.DB.prepare('DELETE FROM invite_requests WHERE id = ?').bind(id).run();
   return json({ ok: true });
 });
 

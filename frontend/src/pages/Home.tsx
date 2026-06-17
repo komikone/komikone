@@ -79,18 +79,7 @@ export default function Home() {
         <StatsSection />
 
         {/* Request an invite */}
-        <section className="border-2 border-black dark:border-yellow-400 bg-white dark:bg-gray-900 p-6 comic-shadow text-center">
-          <h2 className="font-bangers text-3xl text-red-600 dark:text-yellow-400 tracking-wide mb-2">Want In?</h2>
-          <p className="text-gray-600 dark:text-gray-400 text-sm mb-5 max-w-md mx-auto">
-            This is a private purchasing train. If you're interested in joining future SDCC badge runs, send a request and we'll be in touch.
-          </p>
-          <a
-            href="mailto:tony@tonynguyen.com?subject=SDCC%20Purchasing%20Train%20%E2%80%94%20Invite%20Request"
-            className="inline-block font-bangers tracking-wide text-xl bg-red-600 hover:bg-red-700 dark:bg-yellow-400 dark:hover:bg-yellow-300 dark:text-black text-white px-8 py-2.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
-          >
-            Request an Invite →
-          </a>
-        </section>
+        <InviteRequestSection />
 
         {/* Instructions */}
         <section>
@@ -113,6 +102,100 @@ export default function Home() {
         )}
       </main>
     </div>
+  );
+}
+
+// ─── Invite Request ───────────────────────────────────────────────────────────
+
+function InviteRequestSection() {
+  const [form, setForm] = useState({ email: '', referred_by: '', notes: '' });
+  const [status, setStatus] = useState<'idle' | 'submitting' | 'done' | 'error'>('idle');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStatus('submitting');
+    setErrorMsg('');
+    try {
+      await api.inviteRequests.submit(form);
+      setStatus('done');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Something went wrong');
+      setStatus('error');
+    }
+  };
+
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const inputCls = 'w-full bg-gray-50 dark:bg-gray-800 border-2 border-black dark:border-gray-600 px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-red-500 dark:focus:border-yellow-400';
+
+  if (status === 'done') {
+    return (
+      <section className="border-2 border-black dark:border-yellow-400 bg-white dark:bg-gray-900 p-6 comic-shadow text-center">
+        <div className="text-4xl mb-3">✓</div>
+        <h2 className="font-bangers text-2xl text-red-600 dark:text-yellow-400 tracking-wide mb-2">Request Received!</h2>
+        <p className="text-gray-600 dark:text-gray-400 text-sm max-w-sm mx-auto">
+          We'll review your request and reach out to you soon.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="border-2 border-black dark:border-yellow-400 bg-white dark:bg-gray-900 p-6 comic-shadow">
+      <h2 className="font-bangers text-3xl text-red-600 dark:text-yellow-400 tracking-wide mb-1">Want In?</h2>
+      <p className="text-gray-600 dark:text-gray-400 text-sm mb-5">
+        This is a private purchasing train. Fill out the form below and we'll be in touch.
+      </p>
+
+      <form onSubmit={handleSubmit} className="space-y-3 max-w-md">
+        <div>
+          <label className="block text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Email *</label>
+          <input
+            type="email"
+            required
+            value={form.email}
+            onChange={set('email')}
+            placeholder="you@example.com"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Who referred you? *</label>
+          <input
+            type="text"
+            required
+            value={form.referred_by}
+            onChange={set('referred_by')}
+            placeholder="Name of the group member who told you about this"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Anything else? <span className="normal-case text-gray-400">(optional)</span></label>
+          <textarea
+            value={form.notes}
+            onChange={set('notes')}
+            placeholder="Returning member ID, badge type you need, years attending, etc."
+            rows={3}
+            className={`${inputCls} resize-none`}
+          />
+        </div>
+
+        {status === 'error' && (
+          <p className="text-red-500 dark:text-red-400 text-sm">{errorMsg}</p>
+        )}
+
+        <button
+          type="submit"
+          disabled={status === 'submitting'}
+          className="font-bangers tracking-wide text-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 dark:bg-yellow-400 dark:hover:bg-yellow-300 dark:text-black text-white px-8 py-2.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
+        >
+          {status === 'submitting' ? 'Sending…' : 'Request an Invite →'}
+        </button>
+      </form>
+    </section>
   );
 }
 
