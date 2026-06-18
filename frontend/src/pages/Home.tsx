@@ -50,12 +50,22 @@ export default function Home() {
             >
               {isDark ? '☀ Day' : '◑ Night'}
             </button>
-            <Link
-              to="/admin"
-              className="text-xs text-gray-400 hover:text-white transition-colors uppercase tracking-widest"
-            >
-              Admin
-            </Link>
+            {isSignedIn && user?.publicMetadata?.role === 'admin' && (
+              <Link
+                to="/admin"
+                className="text-xs text-gray-400 hover:text-white transition-colors uppercase tracking-widest"
+              >
+                Admin
+              </Link>
+            )}
+            {!isSignedIn && (
+              <Link
+                to="/sign-in"
+                className="text-xs text-gray-400 hover:text-white transition-colors uppercase tracking-widest"
+              >
+                Login
+              </Link>
+            )}
             {isSignedIn && user && (
               <div className="relative" ref={avatarRef}>
                 <button
