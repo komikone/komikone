@@ -392,7 +392,6 @@ export default function LiveBoard() {
   const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
 
   const [showNextUp, setShowNextUp] = useState(false);
-  const [nextUpIdx, setNextUpIdx] = useState(0);
 
   const priorityQueue = participants
     .filter((p) => !p.all_purchased && !p.claim_active)
@@ -476,7 +475,7 @@ export default function LiveBoard() {
         {withGaps > 0 && <span className="text-red-400 dark:text-red-300 text-xs font-mono font-bold">{withGaps} gaps</span>}
         {event?.status === 'purchasing' && priorityQueue.length > 0 && (
           <button
-            onClick={() => { setShowNextUp((v) => !v); setNextUpIdx(0); }}
+            onClick={() => setShowNextUp((v) => !v)}
             className={`ml-auto text-xs font-bold px-3 py-1 rounded border-2 transition-colors ${
               showNextUp
                 ? 'bg-yellow-400 text-black border-yellow-300'
@@ -492,11 +491,9 @@ export default function LiveBoard() {
       {event?.status === 'purchasing' && showNextUp && priorityQueue.length > 0 && (
         <NextUpPanel
           queue={priorityQueue}
-          idx={nextUpIdx}
           me={me}
           identityId={identityId}
-          onClaim={async (p) => { await handleClaim(p); setShowNextUp(false); }}
-          onSkip={() => setNextUpIdx((i) => (i + 1) % priorityQueue.length)}
+          onClaim={handleClaim}
           onDismiss={() => setShowNextUp(false)}
         />
       )}
@@ -1235,91 +1232,86 @@ function priorityReason(p: Participant, me: Participant | null, identityId: numb
 }
 
 function NextUpPanel({
-  queue, idx, me, identityId, onClaim, onSkip, onDismiss,
+  queue, me, identityId, onClaim, onDismiss,
 }: {
   queue: Participant[];
-  idx: number;
   me: Participant | null;
   identityId: number | null;
   onClaim: (p: Participant) => Promise<void>;
-  onSkip: () => void;
   onDismiss: () => void;
 }) {
-  const p = queue[idx];
-  const [claiming, setClaiming] = useState(false);
-
-  if (!p) return null;
-
-  const reason = priorityReason(p, me, identityId);
-  const isSelf = p.id === identityId;
-  const isGroup = !isSelf && me?.group_id != null && p.group_id === me.group_id;
+  const slots = queue.slice(0, 3);
+  if (slots.length === 0) return null;
 
   return (
     <div className="bg-zinc-900 border-b-4 border-yellow-400 px-4 py-3 shrink-0">
-      <div className="max-w-xl flex items-start gap-4">
-        {/* Avatar / priority badge */}
-        <div className="shrink-0 w-10 h-10 rounded-full bg-yellow-400 flex items-center justify-center border-2 border-yellow-300">
-          <span className="font-bangers text-black text-lg leading-none">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-yellow-400 text-[10px] font-bold uppercase tracking-widest">
+          Buy for next — up to 3
+        </span>
+        <button onClick={onDismiss} className="text-zinc-500 hover:text-zinc-300 text-xs px-1">✕</button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {slots.map((p) => (
+          <NextUpCard key={p.id} p={p} me={me} identityId={identityId} onClaim={onClaim} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NextUpCard({
+  p, me, identityId, onClaim,
+}: {
+  p: Participant;
+  me: Participant | null;
+  identityId: number | null;
+  onClaim: (p: Participant) => Promise<void>;
+}) {
+  const [claiming, setClaiming] = useState(false);
+  const isSelf = p.id === identityId;
+  const isGroup = !isSelf && me?.group_id != null && p.group_id === me.group_id;
+  const reason = priorityReason(p, me, identityId);
+
+  return (
+    <div className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 flex flex-col gap-2">
+      <div className="flex items-start gap-2">
+        <div className="shrink-0 w-8 h-8 rounded-full bg-yellow-400 flex items-center justify-center border border-yellow-300">
+          <span className="font-bangers text-black text-sm leading-none">
             {p.first_name[0]}{p.last_name[0]}
           </span>
         </div>
-
-        {/* Main content */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="font-bangers text-white text-xl tracking-wide">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-bangers text-white text-base tracking-wide leading-tight">
               {p.first_name} {p.last_name}
             </span>
             {(isSelf || isGroup) && (
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isSelf ? 'bg-yellow-400 text-black' : 'bg-blue-600 text-white'}`}>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${isSelf ? 'bg-yellow-400 text-black' : 'bg-blue-600 text-white'}`}>
                 {isSelf ? 'YOU' : p.group_name ?? 'Group'}
               </span>
             )}
           </div>
-          <div className="text-zinc-400 text-xs mt-0.5">{reason}</div>
-          {/* Gap day chips */}
-          <div className="flex gap-1.5 mt-2 flex-wrap">
-            {p.gaps.map((day) => (
-              <span
-                key={day}
-                className={`text-xs font-bold px-2 py-0.5 rounded border border-black/20 ${DAY_CHIP_COLOR[day] ?? 'bg-zinc-600 text-white'}`}
-              >
-                {day}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="shrink-0 flex flex-col gap-2 items-end">
-          <button
-            onClick={async () => { setClaiming(true); await onClaim(p); setClaiming(false); }}
-            disabled={claiming}
-            className="text-sm font-bold px-4 py-1.5 rounded bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-yellow-200 disabled:opacity-50 transition-colors whitespace-nowrap"
-          >
-            {claiming ? 'Claiming…' : 'Claim'}
-          </button>
-          <div className="flex gap-2">
-            {queue.length > 1 && (
-              <button
-                onClick={onSkip}
-                className="text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 px-2.5 py-1 rounded transition-colors"
-              >
-                Skip →
-              </button>
-            )}
-            <button
-              onClick={onDismiss}
-              className="text-xs text-zinc-500 hover:text-zinc-300 px-2 py-1"
-            >
-              ✕
-            </button>
-          </div>
-          {queue.length > 1 && (
-            <span className="text-zinc-600 text-[10px]">{idx + 1} / {queue.length}</span>
-          )}
+          <div className="text-zinc-400 text-[10px] mt-0.5 leading-tight">{reason}</div>
         </div>
       </div>
+      <div className="flex gap-1 flex-wrap">
+        {p.gaps.map((day) => (
+          <span
+            key={day}
+            className={`text-[10px] font-bold px-1.5 py-0.5 rounded border border-black/20 ${DAY_CHIP_COLOR[day] ?? 'bg-zinc-600 text-white'}`}
+          >
+            {day}
+          </span>
+        ))}
+      </div>
+      <button
+        onClick={async () => { setClaiming(true); await onClaim(p); setClaiming(false); }}
+        disabled={claiming}
+        className="mt-auto text-xs font-bold py-1.5 rounded bg-yellow-400 hover:bg-yellow-300 text-black border border-yellow-200 disabled:opacity-50 transition-colors w-full"
+      >
+        {claiming ? 'Claiming…' : 'Claim'}
+      </button>
     </div>
   );
 }
