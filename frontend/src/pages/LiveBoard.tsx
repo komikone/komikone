@@ -86,6 +86,27 @@ function wildcardToRegex(s: string): RegExp | null {
   try { return new RegExp(escaped, 'i'); } catch { return null; }
 }
 
+// Gap day labels from server match these keys
+const DAY_DIFFICULTY: Record<string, number> = {
+  Sat: 8, Fri: 4, Thu: 2, Sun: 2, Preview: 2,
+};
+
+const DAY_CHIP_COLOR: Record<string, string> = {
+  Sat:     'bg-red-600 text-white',
+  Fri:     'bg-orange-500 text-white',
+  Thu:     'bg-blue-500 text-white',
+  Sun:     'bg-blue-500 text-white',
+  Preview: 'bg-purple-600 text-white',
+};
+
+function priorityScore(p: Participant, me: Participant | null, identityId: number | null): number {
+  const isSelf    = p.id === identityId;
+  const isGroup   = !isSelf && me?.group_id != null && p.group_id === me.group_id;
+  const groupBonus = (isSelf || isGroup) ? 10000 : 0;
+  const dayScore   = p.gaps.reduce((s, d) => s + (DAY_DIFFICULTY[d] ?? 2), 0);
+  return groupBonus + p.gaps.length * 100 + dayScore;
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function LiveBoard() {
@@ -370,25 +391,16 @@ export default function LiveBoard() {
   const me = participants.find((p) => p.id === identityId) ?? null;
   const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
 
+  const [showNextUp, setShowNextUp] = useState(false);
+  const [nextUpIdx, setNextUpIdx] = useState(0);
+
   const priorityQueue = participants
     .filter((p) => !p.all_purchased && !p.claim_active)
     .sort((a, b) => {
-      // 1. Self first
-      const aMe = a.id === identityId ? 1 : 0;
-      const bMe = b.id === identityId ? 1 : 0;
-      if (bMe !== aMe) return bMe - aMe;
-      // 2. Same group
-      const aGroup = me?.group_id && a.group_id === me.group_id ? 1 : 0;
-      const bGroup = me?.group_id && b.group_id === me.group_id ? 1 : 0;
-      if (bGroup !== aGroup) return bGroup - aGroup;
-      // 3. More days requested = higher priority
-      const aDays = DAY_KEYS.filter((d) => a[`req_${d}` as keyof Participant]).length;
-      const bDays = DAY_KEYS.filter((d) => b[`req_${d}` as keyof Participant]).length;
-      if (bDays !== aDays) return bDays - aDays;
-      // 4. Registration order
-      return a.sort_order - b.sort_order;
+      const diff = priorityScore(b, me, identityId) - priorityScore(a, me, identityId);
+      return diff !== 0 ? diff : a.sort_order - b.sort_order;
     })
-    .slice(0, 3);
+    .slice(0, 10);
 
   const allCols = [...FROZEN, ...movableCols];
 
@@ -462,25 +474,31 @@ export default function LiveBoard() {
         <span className="text-yellow-400 dark:text-yellow-300 text-xs font-mono">{inProgress} <span className="text-zinc-600 dark:text-zinc-500">claiming</span></span>
         <span className="text-zinc-300 dark:text-zinc-400 text-xs font-mono">{remaining} <span className="text-zinc-600 dark:text-zinc-500">left</span></span>
         {withGaps > 0 && <span className="text-red-400 dark:text-red-300 text-xs font-mono font-bold">{withGaps} gaps</span>}
+        {event?.status === 'purchasing' && priorityQueue.length > 0 && (
+          <button
+            onClick={() => { setShowNextUp((v) => !v); setNextUpIdx(0); }}
+            className={`ml-auto text-xs font-bold px-3 py-1 rounded border-2 transition-colors ${
+              showNextUp
+                ? 'bg-yellow-400 text-black border-yellow-300'
+                : 'bg-transparent text-yellow-400 border-yellow-600 hover:bg-yellow-900/40'
+            }`}
+          >
+            ⚡ Who's next?
+          </button>
+        )}
       </div>
 
-      {/* ── Priority queue bar (purchasing phase only) ── */}
-      {event?.status === 'purchasing' && priorityQueue.length > 0 && me && (
-        <div className="bg-blue-600 dark:bg-blue-950/40 border-b-2 border-black dark:border-blue-800 px-4 py-2 shrink-0">
-          <span className="text-white dark:text-blue-300 text-xs font-bold">Buy next: </span>
-          {priorityQueue.map((p, i) => (
-            <span key={p.id} className="text-xs">
-              {i > 0 && <span className="text-blue-300 dark:text-gray-600">, </span>}
-              <button onClick={() => handleClaim(p)} className="text-yellow-300 dark:text-white underline hover:text-white dark:hover:text-blue-300">
-                {p.first_name} {p.last_name}
-                {p.id === identityId && <span className="text-blue-200 dark:text-blue-400 ml-1">(you)</span>}
-                {me.group_id && p.group_id === me.group_id && p.id !== identityId && (
-                  <span className="text-blue-200 dark:text-blue-400 ml-1">· {p.group_name}</span>
-                )}
-              </button>
-            </span>
-          ))}
-        </div>
+      {/* ── Who's Next panel (purchasing phase only) ── */}
+      {event?.status === 'purchasing' && showNextUp && priorityQueue.length > 0 && (
+        <NextUpPanel
+          queue={priorityQueue}
+          idx={nextUpIdx}
+          me={me}
+          identityId={identityId}
+          onClaim={async (p) => { await handleClaim(p); setShowNextUp(false); }}
+          onSkip={() => setNextUpIdx((i) => (i + 1) % priorityQueue.length)}
+          onDismiss={() => setShowNextUp(false)}
+        />
       )}
 
       {/* ── Registration phase tip banner ── */}
@@ -1196,6 +1214,111 @@ function EditParticipantModal({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── NextUpPanel ─────────────────────────────────────────────────────────────
+
+function priorityReason(p: Participant, me: Participant | null, identityId: number | null): string {
+  if (p.id === identityId) return "It's you!";
+  if (me?.group_id != null && p.group_id === me.group_id) return `Same group · ${p.group_name ?? ''}`;
+  const hardest = p.gaps.reduce<string | null>((best, d) => {
+    if (!best) return d;
+    return (DAY_DIFFICULTY[d] ?? 2) > (DAY_DIFFICULTY[best] ?? 2) ? d : best;
+  }, null);
+  if (hardest === 'Sat') return 'Needs Saturday — hardest to get';
+  if (hardest === 'Fri') return 'Needs Friday — high demand';
+  if (p.gaps.length >= 3) return `${p.gaps.length} days still needed`;
+  return `${p.gaps.length} gap${p.gaps.length !== 1 ? 's' : ''} remaining`;
+}
+
+function NextUpPanel({
+  queue, idx, me, identityId, onClaim, onSkip, onDismiss,
+}: {
+  queue: Participant[];
+  idx: number;
+  me: Participant | null;
+  identityId: number | null;
+  onClaim: (p: Participant) => Promise<void>;
+  onSkip: () => void;
+  onDismiss: () => void;
+}) {
+  const p = queue[idx];
+  const [claiming, setClaiming] = useState(false);
+
+  if (!p) return null;
+
+  const reason = priorityReason(p, me, identityId);
+  const isSelf = p.id === identityId;
+  const isGroup = !isSelf && me?.group_id != null && p.group_id === me.group_id;
+
+  return (
+    <div className="bg-zinc-900 border-b-4 border-yellow-400 px-4 py-3 shrink-0">
+      <div className="max-w-xl flex items-start gap-4">
+        {/* Avatar / priority badge */}
+        <div className="shrink-0 w-10 h-10 rounded-full bg-yellow-400 flex items-center justify-center border-2 border-yellow-300">
+          <span className="font-bangers text-black text-lg leading-none">
+            {p.first_name[0]}{p.last_name[0]}
+          </span>
+        </div>
+
+        {/* Main content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="font-bangers text-white text-xl tracking-wide">
+              {p.first_name} {p.last_name}
+            </span>
+            {(isSelf || isGroup) && (
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isSelf ? 'bg-yellow-400 text-black' : 'bg-blue-600 text-white'}`}>
+                {isSelf ? 'YOU' : p.group_name ?? 'Group'}
+              </span>
+            )}
+          </div>
+          <div className="text-zinc-400 text-xs mt-0.5">{reason}</div>
+          {/* Gap day chips */}
+          <div className="flex gap-1.5 mt-2 flex-wrap">
+            {p.gaps.map((day) => (
+              <span
+                key={day}
+                className={`text-xs font-bold px-2 py-0.5 rounded border border-black/20 ${DAY_CHIP_COLOR[day] ?? 'bg-zinc-600 text-white'}`}
+              >
+                {day}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="shrink-0 flex flex-col gap-2 items-end">
+          <button
+            onClick={async () => { setClaiming(true); await onClaim(p); setClaiming(false); }}
+            disabled={claiming}
+            className="text-sm font-bold px-4 py-1.5 rounded bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-yellow-200 disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {claiming ? 'Claiming…' : 'Claim'}
+          </button>
+          <div className="flex gap-2">
+            {queue.length > 1 && (
+              <button
+                onClick={onSkip}
+                className="text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 px-2.5 py-1 rounded transition-colors"
+              >
+                Skip →
+              </button>
+            )}
+            <button
+              onClick={onDismiss}
+              className="text-xs text-zinc-500 hover:text-zinc-300 px-2 py-1"
+            >
+              ✕
+            </button>
+          </div>
+          {queue.length > 1 && (
+            <span className="text-zinc-600 text-[10px]">{idx + 1} / {queue.length}</span>
+          )}
+        </div>
       </div>
     </div>
   );
