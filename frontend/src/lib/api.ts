@@ -1,9 +1,9 @@
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
 
-function headers(token?: string, adminSecret?: string): HeadersInit {
+function authHeaders(clerkToken?: string, adminToken?: string): HeadersInit {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (adminSecret) h['Authorization'] = `Bearer ${adminSecret}`;
-  if (token) h['x-access-token'] = token;
+  if (adminToken) h['Authorization'] = `Bearer ${adminToken}`;
+  else if (clerkToken) h['Authorization'] = `Bearer ${clerkToken}`;
   return h;
 }
 
@@ -38,7 +38,6 @@ export type EventDetail = EventSummary & {
   price_fri_junior: number;
   price_sat_junior: number;
   price_sun_junior: number;
-  access_token?: string; // only in admin context
   created_at: string;
   updated_at: string;
 };
@@ -54,24 +53,6 @@ export type InviteRequest = {
   updated_at: string;
 };
 
-export type Sponsor = {
-  id: number;
-  name: string;
-  notes: string;
-  created_at: string;
-  updated_at: string;
-};
-
-const SPONSOR_PALETTE = [
-  '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6',
-  '#8b5cf6', '#ef4444', '#14b8a6', '#f97316', '#84cc16',
-];
-
-export function sponsorColor(id: number): string {
-  if (id <= 1) return '#9ca3af'; // Unassigned → gray
-  return SPONSOR_PALETTE[(id - 2) % SPONSOR_PALETTE.length];
-}
-
 export type Participant = {
   id: number;
   event_id: number;
@@ -80,8 +61,6 @@ export type Participant = {
   member_id: string;
   badge_type: 'ADULT' | 'JUNIOR';
   return_eligible: boolean;
-  sponsor_id: number;
-  sponsor_name: string | null;
   notes: string;
   req_preview: boolean;
   req_thu: boolean;
@@ -102,13 +81,24 @@ export type Participant = {
   group_id: number | null;
   group_name: string | null;
   group_color: string | null;
+  clerk_user_id: string | null;
+  registered_by_clerk_user_id: string | null;
   // Computed by server
   claim_active: boolean;
   purchase_total: number; // cents
   gaps: string[];
   all_purchased: boolean;
   any_purchased: boolean;
-  clerk_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Profile = {
+  clerk_user_id: string;
+  display_name: string;
+  venmo: string;
+  paypal: string;
+  zelle: string;
   created_at: string;
   updated_at: string;
 };
@@ -154,10 +144,6 @@ export type Coordinator = {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export const api = {
-  sponsors: {
-    list: () => req<Sponsor[]>('/api/sponsors'),
-  },
-
   inviteRequests: {
     submit: (data: { email: string; referred_by: string; notes?: string }) =>
       req<{ ok: boolean }>('/api/invite-requests', {
@@ -169,157 +155,136 @@ export const api = {
 
   events: {
     list: () => req<EventSummary[]>('/api/events'),
-    get: (id: number, token?: string) =>
-      req<EventDetail>(`/api/events/${id}${token ? `?token=${token}` : ''}`, {
-        headers: headers(token),
-      }),
+    get: (id: number, clerkToken: string) =>
+      req<EventDetail>(`/api/events/${id}`, { headers: authHeaders(clerkToken) }),
   },
 
   participants: {
-    list: (eventId: number, token?: string) =>
-      req<Participant[]>(`/api/events/${eventId}/participants${token ? `?token=${token}` : ''}`, {
-        headers: headers(token),
-      }),
-    getMyIdentity: (eventId: number, token: string, authToken: string) =>
+    list: (eventId: number, clerkToken: string) =>
+      req<Participant[]>(`/api/events/${eventId}/participants`, { headers: authHeaders(clerkToken) }),
+    getMyIdentity: (eventId: number, clerkToken: string) =>
       req<{ linked: boolean; participant?: Participant }>(
-        `/api/events/${eventId}/me?token=${token}`,
-        { headers: headers(token, authToken) }
+        `/api/events/${eventId}/me`,
+        { headers: authHeaders(clerkToken) }
       ),
-    linkIdentity: (eventId: number, pid: number, token: string, authToken: string) =>
+    linkIdentity: (eventId: number, pid: number, clerkToken: string) =>
       req<{ ok: boolean }>(
-        `/api/events/${eventId}/participants/${pid}/link-identity?token=${token}`,
-        { method: 'POST', headers: headers(token, authToken), body: JSON.stringify({}) }
+        `/api/events/${eventId}/participants/${pid}/link-identity`,
+        { method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify({}) }
       ),
-    register: (eventId: number, token: string, data: Partial<Participant>) =>
-      req<{ ok: boolean; id: number }>(`/api/events/${eventId}/register?token=${token}`, {
+    register: (eventId: number, clerkToken: string, data: Partial<Participant>) =>
+      req<{ ok: boolean; id: number }>(`/api/events/${eventId}/register`, {
         method: 'POST',
-        headers: headers(token),
+        headers: authHeaders(clerkToken),
         body: JSON.stringify(data),
       }),
-    claim: (eventId: number, pid: number, token: string, coordinator_name: string) =>
-      req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/claim?token=${token}`, {
+    claim: (eventId: number, pid: number, clerkToken: string, coordinator_name: string) =>
+      req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/claim`, {
         method: 'POST',
-        headers: headers(token),
+        headers: authHeaders(clerkToken),
         body: JSON.stringify({ coordinator_name }),
       }),
-    unclaim: (eventId: number, pid: number, token: string) =>
-      req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/unclaim?token=${token}`, {
+    unclaim: (eventId: number, pid: number, clerkToken: string) =>
+      req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/unclaim`, {
         method: 'POST',
-        headers: headers(token),
+        headers: authHeaders(clerkToken),
         body: JSON.stringify({}),
       }),
     updatePurchased: (
-      eventId: number,
-      pid: number,
-      token: string,
-      data: {
-        pur_preview?: boolean; pur_thu?: boolean; pur_fri?: boolean;
-        pur_sat?: boolean; pur_sun?: boolean; who_purchased?: string;
-      }
+      eventId: number, pid: number, clerkToken: string,
+      data: { pur_preview?: boolean; pur_thu?: boolean; pur_fri?: boolean; pur_sat?: boolean; pur_sun?: boolean; who_purchased?: string }
     ) =>
-      req<{ ok: boolean }>(
-        `/api/events/${eventId}/participants/${pid}/purchased?token=${token}`,
-        { method: 'PATCH', headers: headers(token), body: JSON.stringify(data) }
-      ),
+      req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/purchased`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),
+      }),
     updateRequested: (
-      eventId: number,
-      pid: number,
-      token: string,
+      eventId: number, pid: number, clerkToken: string,
       data: { req_preview?: boolean; req_thu?: boolean; req_fri?: boolean; req_sat?: boolean; req_sun?: boolean }
     ) =>
-      req<{ ok: boolean }>(
-        `/api/events/${eventId}/participants/${pid}/requested?token=${token}`,
-        { method: 'PATCH', headers: headers(token), body: JSON.stringify(data) }
-      ),
-    markPaid: (eventId: number, pid: number, token: string, paid: boolean) =>
-      req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/paid?token=${token}`, {
-        method: 'PATCH',
-        headers: headers(token),
-        body: JSON.stringify({ paid }),
+      req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/requested`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),
+      }),
+    markPaid: (eventId: number, pid: number, clerkToken: string, paid: boolean) =>
+      req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/paid`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify({ paid }),
       }),
     updateProfile: (
-      eventId: number,
-      pid: number,
-      token: string,
+      eventId: number, pid: number, clerkToken: string,
       data: { first_name?: string; last_name?: string; member_id?: string; badge_type?: string; notes?: string }
     ) =>
-      req<{ ok: boolean }>(
-        `/api/events/${eventId}/participants/${pid}/profile?token=${token}`,
-        { method: 'PATCH', headers: headers(token), body: JSON.stringify(data) }
-      ),
+      req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/profile`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),
+      }),
   },
 
   groups: {
-    list: (eventId: number, token?: string) =>
-      req<Group[]>(`/api/events/${eventId}/groups${token ? `?token=${token}` : ''}`, {
-        headers: headers(token),
-      }),
+    list: (eventId: number, clerkToken: string) =>
+      req<Group[]>(`/api/events/${eventId}/groups`, { headers: authHeaders(clerkToken) }),
   },
 
   coordinators: {
-    list: (eventId: number, token?: string) =>
-      req<Coordinator[]>(`/api/events/${eventId}/coordinators${token ? `?token=${token}` : ''}`, {
-        headers: headers(token),
+    list: (eventId: number, clerkToken: string) =>
+      req<Coordinator[]>(`/api/events/${eventId}/coordinators`, { headers: authHeaders(clerkToken) }),
+    upsert: (eventId: number, name: string, clerkToken: string, data: Partial<Coordinator>) =>
+      req<{ ok: boolean }>(`/api/events/${eventId}/coordinators/${encodeURIComponent(name)}`, {
+        method: 'PUT', headers: authHeaders(clerkToken), body: JSON.stringify(data),
       }),
-    upsert: (eventId: number, name: string, token: string, data: Partial<Coordinator>) =>
-      req<{ ok: boolean }>(
-        `/api/events/${eventId}/coordinators/${encodeURIComponent(name)}?token=${token}`,
-        { method: 'PUT', headers: headers(token), body: JSON.stringify(data) }
-      ),
+  },
+
+  profile: {
+    get: (clerkToken: string) =>
+      req<Profile>('/api/profile', { headers: authHeaders(clerkToken) }),
+    update: (clerkToken: string, data: Partial<Profile>) =>
+      req<{ ok: boolean }>('/api/profile', {
+        method: 'PUT', headers: authHeaders(clerkToken), body: JSON.stringify(data),
+      }),
   },
 
   // ─── Admin API ──────────────────────────────────────────────────────────────
   admin: {
     events: {
       create: (authToken: string, data: Partial<EventDetail>) =>
-        req<{ id: number; access_token: string }>('/api/admin/events', {
+        req<{ id: number }>('/api/admin/events', {
           method: 'POST',
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
           body: JSON.stringify(data),
         }),
       update: (authToken: string, id: number, data: Partial<EventDetail>) =>
         req<{ ok: boolean }>(`/api/admin/events/${id}`, {
           method: 'PATCH',
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
           body: JSON.stringify(data),
         }),
       delete: (authToken: string, id: number) =>
         req<{ ok: boolean }>(`/api/admin/events/${id}`, {
           method: 'DELETE',
-          headers: headers(undefined, authToken),
-        }),
-      regenerateToken: (authToken: string, id: number) =>
-        req<{ access_token: string }>(`/api/admin/events/${id}/token`, {
-          method: 'POST',
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
         }),
       getWithToken: (authToken: string, id: number) =>
-        req<EventDetail>(`/api/events/${id}`, {
-          headers: headers(undefined, authToken),
-        }),
+        req<EventDetail>(`/api/events/${id}`, { headers: authHeaders(undefined, authToken) }),
     },
     participants: {
       add: (authToken: string, eventId: number, data: Partial<Participant>) =>
         req<{ id: number }>(`/api/admin/events/${eventId}/participants`, {
           method: 'POST',
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
           body: JSON.stringify(data),
         }),
       update: (authToken: string, eventId: number, pid: number, data: Partial<Participant>) =>
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/participants/${pid}`, {
           method: 'PATCH',
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
           body: JSON.stringify(data),
         }),
       delete: (authToken: string, eventId: number, pid: number) =>
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/participants/${pid}`, {
           method: 'DELETE',
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
         }),
       reorder: (authToken: string, eventId: number, order: number[]) =>
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/participants/sort`, {
           method: 'PATCH',
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
           body: JSON.stringify({ order }),
         }),
       copy: (
@@ -329,7 +294,7 @@ export const api = {
       ) =>
         req<{ ok: boolean; copied: number }>(`/api/admin/events/${sourceEventId}/participants/copy`, {
           method: 'POST',
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
           body: JSON.stringify(data),
         }),
     },
@@ -337,88 +302,67 @@ export const api = {
       add: (authToken: string, eventId: number, data: Partial<Coordinator>) =>
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/coordinators`, {
           method: 'POST',
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
           body: JSON.stringify(data),
         }),
       delete: (authToken: string, eventId: number, cid: number) =>
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/coordinators/${cid}`, {
           method: 'DELETE',
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
         }),
     },
     groups: {
       create: (authToken: string, eventId: number, data: { name: string; color?: string }) =>
         req<{ id: number }>(`/api/admin/events/${eventId}/groups`, {
-          method: 'POST', headers: headers(undefined, authToken), body: JSON.stringify(data),
+          method: 'POST', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
         }),
       update: (authToken: string, eventId: number, gid: number, data: { name?: string; color?: string }) =>
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/groups/${gid}`, {
-          method: 'PATCH', headers: headers(undefined, authToken), body: JSON.stringify(data),
+          method: 'PATCH', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
         }),
       delete: (authToken: string, eventId: number, gid: number) =>
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/groups/${gid}`, {
-          method: 'DELETE', headers: headers(undefined, authToken),
+          method: 'DELETE', headers: authHeaders(undefined, authToken),
         }),
       reorder: (authToken: string, eventId: number, order: number[]) =>
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/groups/reorder`, {
-          method: 'PATCH', headers: headers(undefined, authToken), body: JSON.stringify({ order }),
+          method: 'PATCH', headers: authHeaders(undefined, authToken), body: JSON.stringify({ order }),
         }),
     },
     inviteRequests: {
       list: (authToken: string, status?: 'pending' | 'approved' | 'rejected') =>
         req<InviteRequest[]>(`/api/admin/invite-requests${status ? `?status=${status}` : ''}`, {
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
         }),
       update: (authToken: string, id: number, data: { status?: 'pending' | 'approved' | 'rejected'; admin_notes?: string }) =>
         req<{ ok: boolean }>(`/api/admin/invite-requests/${id}`, {
-          method: 'PATCH', headers: headers(undefined, authToken), body: JSON.stringify(data),
+          method: 'PATCH', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
         }),
       delete: (authToken: string, id: number) =>
         req<{ ok: boolean }>(`/api/admin/invite-requests/${id}`, {
-          method: 'DELETE', headers: headers(undefined, authToken),
-        }),
-    },
-    sponsors: {
-      list: (authToken: string) =>
-        req<Sponsor[]>('/api/admin/sponsors', { headers: headers(undefined, authToken) }),
-      create: (authToken: string, data: { name: string; notes?: string }) =>
-        req<{ id: number }>('/api/admin/sponsors', {
-          method: 'POST', headers: headers(undefined, authToken), body: JSON.stringify(data),
-        }),
-      update: (authToken: string, id: number, data: { name?: string; notes?: string }) =>
-        req<{ ok: boolean }>(`/api/admin/sponsors/${id}`, {
-          method: 'PATCH', headers: headers(undefined, authToken), body: JSON.stringify(data),
-        }),
-      delete: (authToken: string, id: number) =>
-        req<{ ok: boolean }>(`/api/admin/sponsors/${id}`, {
-          method: 'DELETE', headers: headers(undefined, authToken),
+          method: 'DELETE', headers: authHeaders(undefined, authToken),
         }),
     },
     yearMeta: {
       get: (authToken: string, year: number) =>
-        req<YearMeta>(`/api/admin/year-meta/${year}`, {
-          headers: headers(undefined, authToken),
-        }),
+        req<YearMeta>(`/api/admin/year-meta/${year}`, { headers: authHeaders(undefined, authToken) }),
       upsert: (authToken: string, year: number, data: Partial<YearMeta>) =>
         req<{ ok: boolean }>(`/api/admin/year-meta/${year}`, {
           method: 'PUT',
-          headers: headers(undefined, authToken),
+          headers: authHeaders(undefined, authToken),
           body: JSON.stringify(data),
         }),
     },
-    initializeYear: (
-      authToken: string,
-      data: {
-        year: number;
-        price_preview_adult: number; price_thu_adult: number; price_fri_adult: number;
-        price_sat_adult: number; price_sun_adult: number;
-        price_preview_junior: number; price_thu_junior: number; price_fri_junior: number;
-        price_sat_junior: number; price_sun_junior: number;
-      }
-    ) =>
+    initializeYear: (authToken: string, data: {
+      year: number;
+      price_preview_adult: number; price_thu_adult: number; price_fri_adult: number;
+      price_sat_adult: number; price_sun_adult: number;
+      price_preview_junior: number; price_thu_junior: number; price_fri_junior: number;
+      price_sat_junior: number; price_sun_junior: number;
+    }) =>
       req<{ ok: boolean }>('/api/admin/initialize-year', {
         method: 'POST',
-        headers: headers(undefined, authToken),
+        headers: authHeaders(undefined, authToken),
         body: JSON.stringify(data),
       }),
     exportUrl: (id: number, authToken: string) =>

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '@clerk/clerk-react';
 import { api, type EventDetail, type Participant, type Coordinator, formatDollars } from '../lib/api';
 
 export default function Payment() {
   const { eventId } = useParams<{ eventId: string }>();
-  const [params] = useSearchParams();
-  const token = params.get('token') ?? '';
+  const navigate = useNavigate();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
 
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -18,17 +19,25 @@ export default function Payment() {
   const [coordSaved, setCoordSaved] = useState(false);
 
   useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      navigate('/sign-in?redirect=' + encodeURIComponent(window.location.pathname));
+      return;
+    }
     if (!eventId) return;
-    Promise.all([
-      api.events.get(Number(eventId), token),
-      api.participants.list(Number(eventId), token),
-      api.coordinators.list(Number(eventId), token),
-    ]).then(([ev, ps, cs]) => {
-      setEvent(ev);
-      setParticipants(ps);
-      setCoordinators(cs);
-    }).catch((e) => setError(e.message));
-  }, [eventId, token]);
+    getToken({ template: 'komikone' }).then((tok) => {
+      if (!tok) return;
+      Promise.all([
+        api.events.get(Number(eventId), tok),
+        api.participants.list(Number(eventId), tok),
+        api.coordinators.list(Number(eventId), tok),
+      ]).then(([ev, ps, cs]) => {
+        setEvent(ev);
+        setParticipants(ps);
+        setCoordinators(cs);
+      }).catch((e) => setError(e.message));
+    });
+  }, [isLoaded, isSignedIn, eventId, getToken, navigate]);
 
   // Group participants by who_purchased
   const byCoordinator: Record<string, Participant[]> = {};
@@ -44,8 +53,10 @@ export default function Payment() {
   const handleCoordSave = async () => {
     if (!myCoordName.trim()) return;
     try {
-      await api.coordinators.upsert(Number(eventId), myCoordName, token, coordForm);
-      const cs = await api.coordinators.list(Number(eventId), token);
+      const tok = await getToken({ template: 'komikone' });
+      if (!tok) return;
+      await api.coordinators.upsert(Number(eventId), myCoordName, tok, coordForm);
+      const cs = await api.coordinators.list(Number(eventId), tok);
       setCoordinators(cs);
       setCoordSaved(true);
     } catch (e) {
@@ -55,13 +66,23 @@ export default function Payment() {
 
   const handleMarkPaid = async (p: Participant) => {
     try {
-      await api.participants.markPaid(Number(eventId), p.id, token, !p.paid);
-      const ps = await api.participants.list(Number(eventId), token);
+      const tok = await getToken({ template: 'komikone' });
+      if (!tok) return;
+      await api.participants.markPaid(Number(eventId), p.id, tok, !p.paid);
+      const ps = await api.participants.list(Number(eventId), tok);
       setParticipants(ps);
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to update');
     }
   };
+
+  if (!isLoaded || (!event && !error)) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+        <div className="text-gray-500">Loading…</div>
+      </div>
+    );
+  }
 
   if (error) {
     return (

@@ -1,11 +1,3 @@
-export type Sponsor = {
-  id: number;
-  name: string;
-  notes: string;
-  created_at: string;
-  updated_at: string;
-};
-
 export type Group = {
   id: number;
   event_id: number;
@@ -32,7 +24,6 @@ export type Event = {
   price_fri_junior: number;
   price_sat_junior: number;
   price_sun_junior: number;
-  access_token: string;
   created_at: string;
   updated_at: string;
 };
@@ -45,8 +36,6 @@ export type Participant = {
   member_id: string;
   badge_type: 'ADULT' | 'JUNIOR';
   return_eligible: number;
-  sponsor: string; // legacy text column — use sponsor_name for display
-  sponsor_id: number;
   notes: string;
   req_preview: number;
   req_thu: number;
@@ -65,11 +54,20 @@ export type Participant = {
   who_purchased: string;
   paid: number;
   group_id: number | null;
-  // Joined from groups table:
   group_name: string | null;
   group_color: string | null;
-  // Joined from sponsors table:
-  sponsor_name: string | null;
+  clerk_user_id: string | null;
+  registered_by_clerk_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Profile = {
+  clerk_user_id: string;
+  display_name: string;
+  venmo: string;
+  paypal: string;
+  zelle: string;
   created_at: string;
   updated_at: string;
 };
@@ -115,7 +113,6 @@ export type YearMeta = {
   updated_at: string;
 };
 
-// Claim expires after 10 minutes
 export const CLAIM_TIMEOUT_MINUTES = 10;
 
 export function computePurchaseTotal(p: Participant, event: Event): number {
@@ -142,8 +139,7 @@ export function computeGaps(p: Participant): string[] {
 export function isClaimExpired(claimedAt: string | null): boolean {
   if (!claimedAt) return true;
   const claimed = new Date(claimedAt).getTime();
-  const now = Date.now();
-  return now - claimed > CLAIM_TIMEOUT_MINUTES * 60 * 1000;
+  return Date.now() - claimed > CLAIM_TIMEOUT_MINUTES * 60 * 1000;
 }
 
 export function enrichParticipant(p: Participant, event: Event) {
@@ -162,7 +158,6 @@ export function enrichParticipant(p: Participant, event: Event) {
     group_id: p.group_id ?? null,
     group_name: p.group_name ?? null,
     group_color: p.group_color ?? null,
-    sponsor_name: p.sponsor_name ?? null,
     return_eligible: Boolean(p.return_eligible),
     req_preview: Boolean(p.req_preview),
     req_thu: Boolean(p.req_thu),

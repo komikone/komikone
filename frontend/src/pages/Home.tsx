@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useClerk, useUser } from '@clerk/clerk-react';
 import { api, type EventSummary } from '../lib/api';
 import { useTheme } from '../lib/useTheme';
@@ -12,7 +12,6 @@ type StatsData = { years: YearStat[] };
 export default function Home() {
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [searchParams] = useSearchParams();
-  const token = searchParams.get('token') ?? '';
   const { toggle, isDark } = useTheme();
   const [inviteOpen, setInviteOpen] = useState(false);
   const { user, isSignedIn } = useUser();
@@ -108,7 +107,7 @@ export default function Home() {
           <section className="border-y-4 border-black bg-red-50 dark:bg-red-950/20 scroll-mt-16">
             <div className="max-w-4xl mx-auto px-6 py-6 space-y-4">
               <h2 className="font-bangers text-2xl text-red-600 dark:text-yellow-400 tracking-wide">Active Events</h2>
-              {active.map((e) => <EventCard key={e.id} event={e} token={token} />)}
+              {active.map((e) => <EventCard key={e.id} event={e} />)}
             </div>
           </section>
         )}
@@ -691,7 +690,7 @@ function StatusBadge({ status }: { status: EventSummary['status'] }) {
   );
 }
 
-function EventCard({ event, token }: { event: EventSummary; token: string }) {
+function EventCard({ event }: { event: EventSummary }) {
   const isPurchasing = event.status === 'purchasing';
   const isRegistration = event.status === 'registration';
   const isPayment = event.status === 'payment';
@@ -716,34 +715,32 @@ function EventCard({ event, token }: { event: EventSummary; token: string }) {
         <StatusBadge status={event.status} />
       </div>
 
-      {token && (
-        <div className="flex gap-3 mt-4 flex-wrap">
-          {isRegistration && (
-            <Link
-              to={`/register/${event.id}?token=${token}`}
-              className="font-bangers tracking-wide text-base bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
-            >
-              Register →
-            </Link>
-          )}
-          {isPurchasing && (
-            <Link
-              to={`/live/${event.id}?token=${token}`}
-              className="font-bangers tracking-wide text-base bg-red-600 hover:bg-red-700 text-white px-5 py-1.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all dark:bg-yellow-400 dark:hover:bg-yellow-300 dark:text-black"
-            >
-              Open Live Board →
-            </Link>
-          )}
-          {(isPayment || isPurchasing) && (
-            <Link
-              to={`/payment/${event.id}?token=${token}`}
-              className="font-bangers tracking-wide text-base bg-purple-600 hover:bg-purple-700 text-white px-5 py-1.5 border-2 border-purple-400 comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
-            >
-              Payment Info →
-            </Link>
-          )}
-        </div>
-      )}
+      <div className="flex gap-3 mt-4 flex-wrap">
+        {isRegistration && (
+          <Link
+            to={`/register/${event.id}`}
+            className="font-bangers tracking-wide text-base bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
+          >
+            Register →
+          </Link>
+        )}
+        {isPurchasing && (
+          <Link
+            to={`/live/${event.id}`}
+            className="font-bangers tracking-wide text-base bg-red-600 hover:bg-red-700 text-white px-5 py-1.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all dark:bg-yellow-400 dark:hover:bg-yellow-300 dark:text-black"
+          >
+            Open Live Board →
+          </Link>
+        )}
+        {(isPayment || isPurchasing) && (
+          <Link
+            to={`/payment/${event.id}`}
+            className="font-bangers tracking-wide text-base bg-purple-600 hover:bg-purple-700 text-white px-5 py-1.5 border-2 border-purple-400 comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
+          >
+            Payment Info →
+          </Link>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
-import { api, type EventDetail, type Sponsor, DAY_KEYS, dayLabel } from '../lib/api';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '@clerk/clerk-react';
+import { api, type EventDetail, DAY_KEYS, dayLabel } from '../lib/api';
 
 export default function Registration() {
   const { eventId } = useParams<{ eventId: string }>();
-  const [params] = useSearchParams();
-  const token = params.get('token') ?? '';
+  const { getToken, isLoaded, isSignedIn } = useAuth();
+  const navigate = useNavigate();
 
   const [event, setEvent] = useState<EventDetail | null>(null);
-  const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
@@ -17,7 +17,6 @@ export default function Registration() {
     last_name: '',
     member_id: '',
     badge_type: 'ADULT' as 'ADULT' | 'JUNIOR',
-    sponsor_id: 0,
     req_preview: false,
     req_thu: false,
     req_fri: false,
@@ -26,13 +25,15 @@ export default function Registration() {
   });
 
   useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) { navigate('/sign-in?redirect=' + encodeURIComponent(window.location.pathname)); return; }
     if (!eventId) return;
-    api.events.get(Number(eventId), token).then(setEvent).catch((e) => setError(e.message));
-    api.sponsors.list().then((list) => {
-      // Exclude the Unassigned sentinel (id=1) from the dropdown
-      setSponsors(list.filter((s) => s.id !== 1));
-    }).catch(() => {});
-  }, [eventId, token]);
+
+    getToken({ template: 'komikone' }).then((tok) => {
+      if (!tok) return;
+      api.events.get(Number(eventId), tok).then(setEvent).catch((e) => setError(e.message));
+    });
+  }, [isLoaded, isSignedIn, eventId, getToken, navigate]);
 
   const setDay = (day: string, val: boolean) =>
     setForm((f) => ({ ...f, [`req_${day}`]: val }));
@@ -43,18 +44,23 @@ export default function Registration() {
       setError('First and last name are required.');
       return;
     }
-    if (!form.sponsor_id) {
-      setError('Please select a sponsor.');
-      return;
-    }
     try {
-      const res = await api.participants.register(Number(eventId), token, form);
-      localStorage.setItem(`komikone_id_${eventId}`, String(res.id));
+      const tok = await getToken({ template: 'komikone' });
+      if (!tok) { setError('Authentication error — please sign in again.'); return; }
+      await api.participants.register(Number(eventId), tok, form);
       setSubmitted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Submission failed');
     }
   };
+
+  if (!isLoaded || (!event && !error)) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+        <div className="text-gray-500">Loading…</div>
+      </div>
+    );
+  }
 
   if (error && !event) {
     return (
@@ -71,7 +77,7 @@ export default function Registration() {
           <div className="text-green-400 text-4xl mb-4">✓</div>
           <h2 className="text-white text-xl font-bold mb-2">You're registered!</h2>
           <p className="text-gray-400 text-sm mb-6">
-            On purchase day, open the live board link — you'll be recognized automatically.
+            On purchase day, open the live board — you'll be recognized automatically.
           </p>
           <Link to="/" className="text-blue-400 hover:text-blue-300 text-sm">← Back to home</Link>
         </div>
@@ -100,7 +106,6 @@ export default function Registration() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Name */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm text-gray-300 mb-1">First Name *</label>
@@ -124,7 +129,6 @@ export default function Registration() {
             </div>
           </div>
 
-          {/* Member ID */}
           <div>
             <label className="block text-sm text-gray-300 mb-1">
               Comic-Con Member ID
@@ -140,7 +144,6 @@ export default function Registration() {
             />
           </div>
 
-          {/* Badge type */}
           <div>
             <label className="block text-sm text-gray-300 mb-2">Badge Type</label>
             <div className="flex gap-4">
@@ -162,7 +165,6 @@ export default function Registration() {
             </div>
           </div>
 
-          {/* Days */}
           <div>
             <label className="block text-sm text-gray-300 mb-2">Which days do you want?</label>
             <div className="space-y-2">
@@ -178,24 +180,6 @@ export default function Registration() {
                 </label>
               ))}
             </div>
-          </div>
-
-          {/* Sponsor */}
-          <div>
-            <label className="block text-sm text-gray-300 mb-1">
-              Sponsor <span className="text-red-400">*</span>
-            </label>
-            <select
-              required
-              value={form.sponsor_id || ''}
-              onChange={(e) => setForm((f) => ({ ...f, sponsor_id: Number(e.target.value) }))}
-              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-            >
-              <option value="">— Select the group member who invited you —</option>
-              {sponsors.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
           </div>
 
           <button

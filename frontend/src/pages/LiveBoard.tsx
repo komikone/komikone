@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth, useUser, UserButton } from '@clerk/clerk-react';
-import { api, type EventDetail, type Participant, sponsorColor, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
+import { api, type EventDetail, type Participant, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
 import { useTheme } from '../lib/useTheme';
 
 const POLL_MS = 8000;
@@ -12,7 +12,7 @@ const DAY_GAP = 2;
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type RowStatus = 'complete' | 'claiming' | 'partial' | 'none';
-type ColKey = 'idx' | 'first' | 'last' | 'actions' | 'return_eligible' | 'badge_type' | 'member_id' | 'requested' | 'purchased' | 'gaps' | 'status' | 'sponsor' | 'total' | 'who' | 'group';
+type ColKey = 'idx' | 'first' | 'last' | 'actions' | 'return_eligible' | 'badge_type' | 'member_id' | 'requested' | 'purchased' | 'gaps' | 'status' | 'total' | 'who' | 'group';
 type SortDir = 'asc' | 'desc';
 
 // ─── Column config ────────────────────────────────────────────────────────────
@@ -26,20 +26,20 @@ const FROZEN_LEFT: Record<string, number> = {
   last: FROZEN_PX.actions + FROZEN_PX.idx + FROZEN_PX.first,
 };
 
-const DEFAULT_MOVABLE: ColKey[] = ['return_eligible', 'member_id', 'requested', 'purchased', 'gaps', 'badge_type', 'group', 'sponsor', 'status', 'total', 'who'];
+const DEFAULT_MOVABLE: ColKey[] = ['return_eligible', 'member_id', 'requested', 'purchased', 'gaps', 'badge_type', 'group', 'status', 'total', 'who'];
 
 const COL_LABEL: Record<ColKey, string> = {
   idx: '#', first: 'First', last: 'Last', actions: '', return_eligible: 'Return', badge_type: 'Badge',
   member_id: 'Member ID', requested: 'Requested', status: 'Status',
   purchased: 'Purchased', gaps: 'Gaps', total: 'Total', who: 'Who Bought',
-  sponsor: 'Sponsor', group: 'Group',
+  group: 'Group',
 };
 
 const DEFAULT_WIDTHS: Record<ColKey, number> = {
   idx: 36, first: 90, last: 96, actions: 28, return_eligible: 52,
   badge_type: 88, member_id: 118,
   requested: 168, purchased: 168, gaps: 168,
-  sponsor: 112, status: 112, total: 74, who: 118, group: 110,
+  status: 112, total: 74, who: 118, group: 110,
 };
 
 const DAY_COLS = new Set<ColKey>(['requested', 'purchased', 'gaps']);
@@ -58,7 +58,6 @@ function sortValue(p: Participant, col: ColKey, naturalIdx: number): string | nu
     case 'idx':        return naturalIdx;
     case 'first':      return p.first_name.toLowerCase();
     case 'last':       return p.last_name.toLowerCase();
-    case 'sponsor':    return (p.sponsor_name ?? '').toLowerCase();
     case 'member_id':  return p.member_id.toLowerCase();
     case 'badge_type': return p.badge_type;
     case 'requested':  return DAY_KEYS.filter((d) => p[`req_${d}` as keyof Participant]).length;
@@ -112,11 +111,10 @@ function priorityScore(p: Participant, me: Participant | null, identityId: numbe
 
 export default function LiveBoard() {
   const { eventId } = useParams<{ eventId: string }>();
-  const [params] = useSearchParams();
-  const token = params.get('token') ?? '';
+  const navigate = useNavigate();
   const { toggle, isDark } = useTheme();
 
-  const { getToken } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const { user } = useUser();
 
   const [event, setEvent] = useState<EventDetail | null>(null);
@@ -186,14 +184,24 @@ export default function LiveBoard() {
     };
   }, []);
 
+  // ─── Auth redirect ───────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) {
+      navigate('/sign-in?redirect=' + encodeURIComponent(window.location.pathname));
+    }
+  }, [isLoaded, isSignedIn, navigate]);
+
   // ─── Data fetching ──────────────────────────────────────────────────────────
 
   const fetchAll = useCallback(async () => {
     if (!eventId) return;
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
     try {
       const [ev, ps] = await Promise.all([
-        api.events.get(Number(eventId), token),
-        api.participants.list(Number(eventId), token),
+        api.events.get(Number(eventId), clerkToken),
+        api.participants.list(Number(eventId), clerkToken),
       ]);
       setEvent(ev);
       const newFlash: Record<number, boolean> = {};
@@ -222,21 +230,21 @@ export default function LiveBoard() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     }
-  }, [eventId, token, participants]);
+  }, [eventId, getToken, participants]);
 
   useEffect(() => {
     fetchAll();
     const interval = setInterval(fetchAll, POLL_MS);
     return () => clearInterval(interval);
-  }, [eventId, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [eventId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Resolve Clerk identity → participant link
   useEffect(() => {
-    if (!token || !eventId) return;
-    getToken().then(async (authToken) => {
-      if (!authToken) return;
+    if (!eventId || !isSignedIn) return;
+    getToken({ template: 'komikone' }).then(async (clerkToken) => {
+      if (!clerkToken) return;
       try {
-        const res = await api.participants.getMyIdentity(Number(eventId), token, authToken);
+        const res = await api.participants.getMyIdentity(Number(eventId), clerkToken);
         if (res.linked && res.participant) {
           setIdentityId(res.participant.id);
         } else {
@@ -246,7 +254,7 @@ export default function LiveBoard() {
         // silently degrade — user can still observe the board
       }
     });
-  }, [eventId, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [eventId, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Actions ────────────────────────────────────────────────────────────────
 
@@ -254,14 +262,18 @@ export default function LiveBoard() {
     const me = participants.find((x) => x.id === identityId);
     if (!me) { setShowLinkModal(true); return; }
     try {
-      await api.participants.claim(Number(eventId), p.id, token, `${me.first_name} ${me.last_name}`);
+      const clerkToken = await getToken({ template: 'komikone' });
+      if (!clerkToken) return;
+      await api.participants.claim(Number(eventId), p.id, clerkToken, `${me.first_name} ${me.last_name}`);
       await fetchAll();
     } catch (e) { alert(e instanceof Error ? e.message : 'Failed'); }
   };
 
   const handleUnclaim = async (p: Participant) => {
     try {
-      await api.participants.unclaim(Number(eventId), p.id, token);
+      const clerkToken = await getToken({ template: 'komikone' });
+      if (!clerkToken) return;
+      await api.participants.unclaim(Number(eventId), p.id, clerkToken);
       await fetchAll();
     } catch (e) { alert(e instanceof Error ? e.message : 'Failed'); }
   };
@@ -269,7 +281,9 @@ export default function LiveBoard() {
   const handlePurchaseToggle = async (p: Participant, day: DayKey, checked: boolean) => {
     const me = participants.find((x) => x.id === identityId);
     const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
-    await api.participants.updatePurchased(Number(eventId), p.id, token, {
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    await api.participants.updatePurchased(Number(eventId), p.id, clerkToken, {
       pur_preview: p.pur_preview, pur_thu: p.pur_thu, pur_fri: p.pur_fri,
       pur_sat: p.pur_sat, pur_sun: p.pur_sun,
       who_purchased: p.who_purchased || myDisplayName,
@@ -279,7 +293,9 @@ export default function LiveBoard() {
   };
 
   const handleRequestedToggle = async (p: Participant, day: DayKey, checked: boolean) => {
-    await api.participants.updateRequested(Number(eventId), p.id, token, {
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    await api.participants.updateRequested(Number(eventId), p.id, clerkToken, {
       req_preview: p.req_preview, req_thu: p.req_thu, req_fri: p.req_fri,
       req_sat: p.req_sat, req_sun: p.req_sun,
       [`req_${day}`]: checked,
@@ -288,7 +304,9 @@ export default function LiveBoard() {
   };
 
   const handleWhoChange = async (p: Participant, who: string) => {
-    await api.participants.updatePurchased(Number(eventId), p.id, token, {
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    await api.participants.updatePurchased(Number(eventId), p.id, clerkToken, {
       pur_preview: p.pur_preview, pur_thu: p.pur_thu, pur_fri: p.pur_fri,
       pur_sat: p.pur_sat, pur_sun: p.pur_sun, who_purchased: who,
     }).catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
@@ -383,7 +401,7 @@ export default function LiveBoard() {
     const q = filterText.includes('*') ? filterText : `*${filterText}*`;
     const re = wildcardToRegex(q);
     if (!re) return false;
-    return re.test(p.first_name) || re.test(p.last_name) || re.test(p.member_id) || re.test(p.sponsor_name ?? '') || re.test(p.purchasing_coordinator);
+    return re.test(p.first_name) || re.test(p.last_name) || re.test(p.member_id) || re.test(p.purchasing_coordinator);
   });
 
   const displayRows = sortCol
@@ -418,10 +436,10 @@ export default function LiveBoard() {
   const allCols = [...FROZEN, ...movableCols];
 
   const handleLinkIdentity = async (pid: number) => {
-    const authToken = await getToken();
-    if (!authToken) return;
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
     try {
-      await api.participants.linkIdentity(Number(eventId), pid, token, authToken);
+      await api.participants.linkIdentity(Number(eventId), pid, clerkToken);
       setIdentityId(pid);
       setShowLinkModal(false);
     } catch (e) {
@@ -431,7 +449,9 @@ export default function LiveBoard() {
 
   const handleEditSave = async (data: Partial<Participant>) => {
     if (!editParticipant) return;
-    await api.participants.updateProfile(Number(eventId), editParticipant.id, token, data)
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    await api.participants.updateProfile(Number(eventId), editParticipant.id, clerkToken, data)
       .catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
     setEditParticipant(null);
     await fetchAll();
@@ -581,7 +601,7 @@ export default function LiveBoard() {
           userName={user ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : ''}
           onLink={handleLinkIdentity}
           onDismiss={() => setShowLinkModal(false)}
-          registerUrl={`/register/${eventId}?token=${token}`}
+          registerUrl={`/register/${eventId}`}
         />
       )}
 
@@ -869,14 +889,6 @@ function CellContent({
         </div>
       ) : <span className="text-gray-400 dark:text-gray-600 text-xs flex justify-center">—</span>;
 
-    case 'sponsor':
-      return p.sponsor_name && p.sponsor_id !== 1 ? (
-        <span className="flex items-center gap-1 text-xs">
-          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sponsorColor(p.sponsor_id) }} />
-          <span className="text-gray-800 dark:text-gray-200">{p.sponsor_name}</span>
-        </span>
-      ) : <span className="text-gray-400 dark:text-gray-600 text-xs">—</span>;
-
     case 'group':
       return p.group_name ? (
         <span
@@ -1138,8 +1150,8 @@ function LinkIdentityModal({
             >
               <span>
                 <span className="text-white font-medium text-sm">{p.first_name} {p.last_name}</span>
-                {p.sponsor_name && p.sponsor_id !== 1 && (
-                  <span className="ml-2 text-xs text-gray-500">via {p.sponsor_name}</span>
+                {p.group_name && (
+                  <span className="ml-2 text-xs text-gray-500">{p.group_name}</span>
                 )}
               </span>
               {linking === p.id && <span className="text-yellow-400 text-xs">Linking…</span>}
