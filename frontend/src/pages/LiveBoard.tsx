@@ -1240,8 +1240,15 @@ function NextUpPanel({
   onClaim: (p: Participant) => Promise<void>;
   onDismiss: () => void;
 }) {
-  const slots = queue.slice(0, 3);
+  const [slots] = useState(() => queue.slice(0, 3));
+  const [claimed, setClaimed] = useState<Set<number>>(new Set());
+
   if (slots.length === 0) return null;
+
+  const handleClaim = async (p: Participant) => {
+    await onClaim(p);
+    setClaimed((prev) => new Set(prev).add(p.id));
+  };
 
   return (
     <div className="bg-zinc-900 border-b-4 border-yellow-400 px-4 py-3 shrink-0">
@@ -1253,7 +1260,7 @@ function NextUpPanel({
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         {slots.map((p) => (
-          <NextUpCard key={p.id} p={p} me={me} identityId={identityId} onClaim={onClaim} />
+          <NextUpCard key={p.id} p={p} me={me} identityId={identityId} claimed={claimed.has(p.id)} onClaim={handleClaim} />
         ))}
       </div>
     </div>
@@ -1261,11 +1268,12 @@ function NextUpPanel({
 }
 
 function NextUpCard({
-  p, me, identityId, onClaim,
+  p, me, identityId, claimed, onClaim,
 }: {
   p: Participant;
   me: Participant | null;
   identityId: number | null;
+  claimed: boolean;
   onClaim: (p: Participant) => Promise<void>;
 }) {
   const [claiming, setClaiming] = useState(false);
@@ -1274,9 +1282,9 @@ function NextUpCard({
   const reason = priorityReason(p, me, identityId);
 
   return (
-    <div className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 flex flex-col gap-2">
+    <div className={`border rounded-lg px-3 py-2.5 flex flex-col gap-2 transition-colors ${claimed ? 'bg-green-950/40 border-green-700' : 'bg-zinc-800 border-zinc-700'}`}>
       <div className="flex items-start gap-2">
-        <div className="shrink-0 w-8 h-8 rounded-full bg-yellow-400 flex items-center justify-center border border-yellow-300">
+        <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center border ${claimed ? 'bg-green-600 border-green-400' : 'bg-yellow-400 border-yellow-300'}`}>
           <span className="font-bangers text-black text-sm leading-none">
             {p.first_name[0]}{p.last_name[0]}
           </span>
@@ -1305,13 +1313,19 @@ function NextUpCard({
           </span>
         ))}
       </div>
-      <button
-        onClick={async () => { setClaiming(true); await onClaim(p); setClaiming(false); }}
-        disabled={claiming}
-        className="mt-auto text-xs font-bold py-1.5 rounded bg-yellow-400 hover:bg-yellow-300 text-black border border-yellow-200 disabled:opacity-50 transition-colors w-full"
-      >
-        {claiming ? 'Claiming…' : 'Claim'}
-      </button>
+      {claimed ? (
+        <div className="mt-auto text-xs font-bold py-1.5 rounded bg-green-700 text-green-200 text-center w-full">
+          ✓ Claimed
+        </div>
+      ) : (
+        <button
+          onClick={async () => { setClaiming(true); await onClaim(p); setClaiming(false); }}
+          disabled={claiming}
+          className="mt-auto text-xs font-bold py-1.5 rounded bg-yellow-400 hover:bg-yellow-300 text-black border border-yellow-200 disabled:opacity-50 transition-colors w-full"
+        >
+          {claiming ? 'Claiming…' : 'Claim'}
+        </button>
+      )}
     </div>
   );
 }
