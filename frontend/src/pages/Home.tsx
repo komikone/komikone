@@ -186,7 +186,7 @@ function HeroSection({ onRequestInvite }: { onRequestInvite: () => void }) {
         </h1>
 
         <p className="text-red-300 text-sm md:text-base uppercase tracking-[0.3em] mb-10 font-medium">
-          Badge Coordination · Est. 2020
+          Badge Coordination · Est. 2017
         </p>
 
         <div className="flex gap-4 justify-center flex-wrap">
