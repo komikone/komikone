@@ -464,8 +464,8 @@ export default function LiveBoard() {
         {withGaps > 0 && <span className="text-red-400 dark:text-red-300 text-xs font-mono font-bold">{withGaps} gaps</span>}
       </div>
 
-      {/* ── Priority queue bar ── */}
-      {priorityQueue.length > 0 && me && (
+      {/* ── Priority queue bar (purchasing phase only) ── */}
+      {event?.status === 'purchasing' && priorityQueue.length > 0 && me && (
         <div className="bg-blue-600 dark:bg-blue-950/40 border-b-2 border-black dark:border-blue-800 px-4 py-2 shrink-0">
           <span className="text-white dark:text-blue-300 text-xs font-bold">Buy next: </span>
           {priorityQueue.map((p, i) => (
@@ -480,6 +480,16 @@ export default function LiveBoard() {
               </button>
             </span>
           ))}
+        </div>
+      )}
+
+      {/* ── Registration phase tip banner ── */}
+      {event?.status === 'registration' && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 border-b-2 border-blue-300 dark:border-blue-800 px-4 py-2 shrink-0">
+          <span className="text-blue-700 dark:text-blue-300 text-xs font-bold uppercase tracking-wider">Registration is open · </span>
+          <span className="text-blue-600 dark:text-blue-400 text-xs">
+            Purchase day hasn't started. While you wait: verify your requested days, confirm your Member ID, and check your badge type are all correct.
+          </span>
         </div>
       )}
 
@@ -694,6 +704,7 @@ export default function LiveBoard() {
                             col={col}
                             p={p}
                             status={status}
+                            eventStatus={event?.status ?? ''}
                             naturalIdx={naturalIdx}
                             editingRow={editingRow}
                             setEditingRow={setEditingRow}
@@ -765,12 +776,13 @@ function CopyCell({ value, children }: { value: string; children?: React.ReactNo
 }
 
 function CellContent({
-  col, p, status, editingRow, setEditingRow,
+  col, p, status, eventStatus, editingRow, setEditingRow,
   onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
 }: {
   col: ColKey;
   p: Participant;
   status: RowStatus;
+  eventStatus: string;
   naturalIdx: number;
   editingRow: number | null;
   setEditingRow: (id: number | null) => void;
@@ -947,6 +959,9 @@ function CellContent({
             ✓ Done
           </span>
         );
+      }
+      if (eventStatus !== 'purchasing') {
+        return <span className="text-gray-400 dark:text-gray-600 text-xs">—</span>;
       }
       if (p.claim_active) {
         return (
