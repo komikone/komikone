@@ -598,7 +598,7 @@ function Footer() {
           </p>
         </div>
         <a
-          href="https://buymeacoffee.com/tonynguyen"
+          href="https://buymeacoffee.com/therealtonynguyen"
           target="_blank"
           rel="noopener noreferrer"
           className="font-bangers tracking-wide text-lg bg-yellow-400 hover:bg-yellow-300 text-black px-6 py-2 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all flex items-center gap-2 whitespace-nowrap"
