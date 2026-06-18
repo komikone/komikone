@@ -72,6 +72,40 @@ export type Profile = {
   updated_at: string;
 };
 
+export type Year = {
+  id: number;
+  name: string;
+  con_year: number;
+  owner_clerk_user_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type YearMember = {
+  id: number;
+  year_id: number;
+  clerk_user_id: string;
+  role: 'owner' | 'admin' | 'registered';
+  sponsor_clerk_user_id: string | null;
+  first_name: string;
+  last_name: string;
+  member_id: string;
+  badge_type: 'ADULT' | 'JUNIOR';
+  return_eligible: number;
+  joined_at: string;
+};
+
+export type Invite = {
+  id: number;
+  year_id: number;
+  code: string;
+  label: string;
+  invited_by_clerk_user_id: string;
+  used_by_clerk_user_id: string | null;
+  used_at: string | null;
+  created_at: string;
+};
+
 export type InviteRequest = {
   id: number;
   email: string;

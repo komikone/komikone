@@ -42,6 +42,40 @@ export type EventDetail = EventSummary & {
   updated_at: string;
 };
 
+export type Year = {
+  id: number;
+  name: string;
+  con_year: number;
+  owner_clerk_user_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type YearMember = {
+  id: number;
+  year_id: number;
+  clerk_user_id: string;
+  role: 'owner' | 'admin' | 'registered';
+  sponsor_clerk_user_id: string | null;
+  first_name: string;
+  last_name: string;
+  member_id: string;
+  badge_type: 'ADULT' | 'JUNIOR';
+  return_eligible: boolean;
+  joined_at: string;
+};
+
+export type Invite = {
+  id: number;
+  year_id: number;
+  code: string;
+  label: string;
+  invited_by_clerk_user_id: string;
+  used_by_clerk_user_id: string | null;
+  used_at: string | null;
+  created_at: string;
+};
+
 export type InviteRequest = {
   id: number;
   email: string;
@@ -240,6 +274,52 @@ export const api = {
       }),
   },
 
+  invites: {
+    get: (code: string) =>
+      req<{ invite: Pick<Invite, 'code' | 'label' | 'year_id'>; year: Pick<Year, 'id' | 'name' | 'con_year'> }>(
+        `/api/invites/${code.toUpperCase()}`
+      ),
+    accept: (code: string, clerkToken: string, data: {
+      first_name: string; last_name: string; member_id: string;
+      badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean;
+    }) =>
+      req<{ ok: boolean; member: YearMember }>(`/api/invites/${code.toUpperCase()}/accept`, {
+        method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify(data),
+      }),
+    createForYear: (yearId: number, clerkToken: string, label?: string) =>
+      req<Invite>(`/api/years/${yearId}/invites`, {
+        method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify({ label }),
+      }),
+  },
+
+  years: {
+    me: (yearId: number, clerkToken: string) =>
+      req<{ member: YearMember }>(`/api/years/${yearId}/me`, { headers: authHeaders(clerkToken) }),
+    myGroup: (yearId: number, eventId: number, clerkToken: string) =>
+      req<{ group: Group | null; participants: Participant[] }>(
+        `/api/years/${yearId}/events/${eventId}/my-group`,
+        { headers: authHeaders(clerkToken) }
+      ),
+    addParticipant: (yearId: number, eventId: number, clerkToken: string, data: {
+      first_name: string; last_name: string; member_id?: string;
+      badge_type?: 'ADULT' | 'JUNIOR'; return_eligible?: boolean;
+    }) =>
+      req<Participant>(`/api/years/${yearId}/events/${eventId}/my-group/participants`, {
+        method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify(data),
+      }),
+    updateParticipant: (yearId: number, eventId: number, pid: number, clerkToken: string, data: Partial<{
+      first_name: string; last_name: string; member_id: string;
+      badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean;
+    }>) =>
+      req<Participant>(`/api/years/${yearId}/events/${eventId}/my-group/participants/${pid}`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),
+      }),
+    removeParticipant: (yearId: number, eventId: number, pid: number, clerkToken: string) =>
+      req<{ ok: boolean }>(`/api/years/${yearId}/events/${eventId}/my-group/participants/${pid}`, {
+        method: 'DELETE', headers: authHeaders(clerkToken),
+      }),
+  },
+
   // ─── Admin API ──────────────────────────────────────────────────────────────
   admin: {
     events: {
@@ -328,6 +408,34 @@ export const api = {
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/groups/reorder`, {
           method: 'PATCH', headers: authHeaders(undefined, authToken), body: JSON.stringify({ order }),
         }),
+    },
+    years: {
+      list: (authToken: string) =>
+        req<Year[]>('/api/admin/years', { headers: authHeaders(undefined, authToken) }),
+      create: (authToken: string, data: { name?: string; con_year: number }) =>
+        req<Year>('/api/admin/years', {
+          method: 'POST', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
+        }),
+      update: (authToken: string, yearId: number, data: Partial<Pick<Year, 'name' | 'owner_clerk_user_id'>>) =>
+        req<{ ok: boolean }>(`/api/admin/years/${yearId}`, {
+          method: 'PATCH', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
+        }),
+    },
+    invites: {
+      list: (authToken: string, yearId: number) =>
+        req<Invite[]>(`/api/admin/years/${yearId}/invites`, { headers: authHeaders(undefined, authToken) }),
+      create: (authToken: string, yearId: number, label?: string) =>
+        req<Invite>(`/api/admin/years/${yearId}/invites`, {
+          method: 'POST', headers: authHeaders(undefined, authToken), body: JSON.stringify({ label }),
+        }),
+      delete: (authToken: string, yearId: number, inviteId: number) =>
+        req<{ ok: boolean }>(`/api/admin/years/${yearId}/invites/${inviteId}`, {
+          method: 'DELETE', headers: authHeaders(undefined, authToken),
+        }),
+    },
+    members: {
+      list: (authToken: string, yearId: number) =>
+        req<YearMember[]>(`/api/admin/years/${yearId}/members`, { headers: authHeaders(undefined, authToken) }),
     },
     inviteRequests: {
       list: (authToken: string, status?: 'pending' | 'approved' | 'rejected') =>

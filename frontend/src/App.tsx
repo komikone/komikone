@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { useAuth } from '@clerk/clerk-react';
 import Home from './pages/Home';
 import Registration from './pages/Registration';
+import JoinPage from './pages/Join';
+import Dashboard from './pages/Dashboard';
 import LiveBoard from './pages/LiveBoard';
 import Payment from './pages/Payment';
 import Admin from './pages/Admin';
@@ -26,6 +28,8 @@ export default function App() {
         <Route path="/sign-in" element={<SignIn />} />
         <Route path="/stats" element={<Stats />} />
         <Route path="/register/:eventId" element={<Registration />} />
+        <Route path="/join/:code" element={<JoinPage />} />
+        <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
         <Route path="/live/:eventId" element={<RequireAuth><LiveBoard /></RequireAuth>} />
         <Route path="/payment/:eventId" element={<RequireAuth><Payment /></RequireAuth>} />
         <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
