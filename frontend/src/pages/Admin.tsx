@@ -51,7 +51,7 @@ export default function Admin() {
   const participants = activeRegType === 'return' ? returnParticipants : openParticipants;
 
   const getAuth = useCallback(async (): Promise<string> => {
-    const t = await getToken() ?? '';
+    const t = await getToken({ template: 'komikone' }) ?? '';
     if (t) setSecret(t);
     return t;
   }, [getToken]);
