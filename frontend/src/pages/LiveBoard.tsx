@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { useAuth, useUser, UserButton } from '@clerk/clerk-react';
 import { api, type EventDetail, type Participant, sponsorColor, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
 import { useTheme } from '../lib/useTheme';
 
@@ -115,15 +116,15 @@ export default function LiveBoard() {
   const token = params.get('token') ?? '';
   const { toggle, isDark } = useTheme();
 
+  const { getToken } = useAuth();
+  const { user } = useUser();
+
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [identityId, setIdentityId] = useState<number | null>(() => {
-    const stored = localStorage.getItem(`komikone_id_${eventId}`);
-    return stored ? Number(stored) : null;
-  });
-  const [showWhoModal, setShowWhoModal] = useState(false);
+  const [identityId, setIdentityId] = useState<number | null>(null);
+  const [showLinkModal, setShowLinkModal] = useState(false);
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editParticipant, setEditParticipant] = useState<Participant | null>(null);
   const [flash, setFlash] = useState<Record<number, boolean>>({});
@@ -229,16 +230,29 @@ export default function LiveBoard() {
     return () => clearInterval(interval);
   }, [eventId, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Show identity modal on first load if not identified
+  // Resolve Clerk identity → participant link
   useEffect(() => {
-    if (identityId === null && participants.length > 0) setShowWhoModal(true);
-  }, [participants.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!token || !eventId) return;
+    getToken().then(async (authToken) => {
+      if (!authToken) return;
+      try {
+        const res = await api.participants.getMyIdentity(Number(eventId), token, authToken);
+        if (res.linked && res.participant) {
+          setIdentityId(res.participant.id);
+        } else {
+          setShowLinkModal(true);
+        }
+      } catch {
+        // silently degrade — user can still observe the board
+      }
+    });
+  }, [eventId, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Actions ────────────────────────────────────────────────────────────────
 
   const handleClaim = async (p: Participant) => {
     const me = participants.find((x) => x.id === identityId);
-    if (!me) { setShowWhoModal(true); return; }
+    if (!me) { setShowLinkModal(true); return; }
     try {
       await api.participants.claim(Number(eventId), p.id, token, `${me.first_name} ${me.last_name}`);
       await fetchAll();
@@ -403,10 +417,16 @@ export default function LiveBoard() {
 
   const allCols = [...FROZEN, ...movableCols];
 
-  const handleSetIdentity = (pid: number) => {
-    localStorage.setItem(`komikone_id_${eventId}`, String(pid));
-    setIdentityId(pid);
-    setShowWhoModal(false);
+  const handleLinkIdentity = async (pid: number) => {
+    const authToken = await getToken();
+    if (!authToken) return;
+    try {
+      await api.participants.linkIdentity(Number(eventId), pid, token, authToken);
+      setIdentityId(pid);
+      setShowLinkModal(false);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to link identity');
+    }
   };
 
   const handleEditSave = async (data: Partial<Participant>) => {
@@ -454,16 +474,8 @@ export default function LiveBoard() {
           <button onClick={toggle} className="text-zinc-400 dark:text-zinc-300 hover:text-yellow-400 text-xs border border-zinc-700 dark:border-zinc-600 px-2 py-0.5 rounded transition-colors">
             {isDark ? '☀ Day' : '◑ Night'}
           </button>
-          {me ? (
-            <IdentityAvatar me={me} myDisplayName={myDisplayName} onChangeIdentity={() => setShowWhoModal(true)} />
-          ) : (
-            <button
-              onClick={() => setShowWhoModal(true)}
-              className="text-xs font-bold px-3 py-1 rounded bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-yellow-300"
-            >
-              Who are you? →
-            </button>
-          )}
+          {me && <IdentityAvatar me={me} myDisplayName={myDisplayName} onChangeIdentity={() => setShowLinkModal(true)} />}
+          <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: 'w-7 h-7' } }} />
         </div>
       </div>
 
@@ -561,12 +573,14 @@ export default function LiveBoard() {
         </div>
       </div>
 
-      {/* ── Who are you modal ── */}
-      {showWhoModal && (
-        <WhoAreYouModal
+      {/* ── Link identity modal ── */}
+      {showLinkModal && (
+        <LinkIdentityModal
           participants={participants}
-          onSelect={handleSetIdentity}
-          onDismiss={() => setShowWhoModal(false)}
+          currentIdentityId={identityId}
+          userName={user ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : ''}
+          onLink={handleLinkIdentity}
+          onDismiss={() => setShowLinkModal(false)}
           registerUrl={`/register/${eventId}?token=${token}`}
         />
       )}
@@ -1074,46 +1088,61 @@ function IdentityAvatar({
   );
 }
 
-function WhoAreYouModal({
-  participants, onSelect, onDismiss, registerUrl,
+function LinkIdentityModal({
+  participants, currentIdentityId, userName, onLink, onDismiss, registerUrl,
 }: {
   participants: Participant[];
-  onSelect: (id: number) => void;
+  currentIdentityId: number | null;
+  userName: string;
+  onLink: (id: number) => Promise<void>;
   onDismiss: () => void;
   registerUrl: string;
 }) {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(userName);
+  const [linking, setLinking] = useState<number | null>(null);
   const filtered = participants.filter((p) => {
     const q = search.toLowerCase();
     return !q || p.first_name.toLowerCase().includes(q) || p.last_name.toLowerCase().includes(q);
   });
 
+  const isReLinking = currentIdentityId !== null;
+
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
       <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-sm shadow-2xl">
         <div className="px-5 pt-5 pb-3 border-b border-gray-800">
-          <h2 className="text-white font-bold text-lg">Who are you?</h2>
-          <p className="text-gray-400 text-sm mt-0.5">Select yourself from the participant list</p>
+          <h2 className="text-white font-bold text-lg">
+            {isReLinking ? 'Change your identity' : 'Link your account'}
+          </h2>
+          <p className="text-gray-400 text-sm mt-0.5">
+            {isReLinking
+              ? 'Pick a different participant to link to your account'
+              : 'Select yourself from the list — this links your Clerk account to your participant slot'}
+          </p>
           <input
             autoFocus
             type="search"
             placeholder="Search by name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full mt-3 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 placeholder-gray-500"
+            className="w-full mt-3 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-yellow-500 placeholder-gray-500"
           />
         </div>
         <div className="overflow-y-auto max-h-72 py-1">
           {filtered.map((p) => (
             <button
               key={p.id}
-              onClick={() => onSelect(p.id)}
-              className="w-full text-left px-5 py-2.5 hover:bg-gray-800 transition-colors"
+              disabled={linking !== null}
+              onClick={async () => { setLinking(p.id); await onLink(p.id); setLinking(null); }}
+              className="w-full text-left px-5 py-2.5 hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center justify-between"
             >
-              <span className="text-white font-medium text-sm">{p.first_name} {p.last_name}</span>
-              {p.sponsor_name && p.sponsor_id !== 1 && (
-                <span className="ml-2 text-xs text-gray-500">via {p.sponsor_name}</span>
-              )}
+              <span>
+                <span className="text-white font-medium text-sm">{p.first_name} {p.last_name}</span>
+                {p.sponsor_name && p.sponsor_id !== 1 && (
+                  <span className="ml-2 text-xs text-gray-500">via {p.sponsor_name}</span>
+                )}
+              </span>
+              {linking === p.id && <span className="text-yellow-400 text-xs">Linking…</span>}
             </button>
           ))}
           {filtered.length === 0 && (
@@ -1121,17 +1150,11 @@ function WhoAreYouModal({
           )}
         </div>
         <div className="px-5 py-3 border-t border-gray-800 flex items-center justify-between">
-          <Link
-            to={registerUrl}
-            className="text-gray-500 hover:text-gray-300 text-sm underline"
-          >
-            I'm not on the list — click here to register
+          <Link to={registerUrl} className="text-gray-500 hover:text-gray-300 text-sm underline">
+            Not on the list? Register here
           </Link>
-          <button
-            onClick={onDismiss}
-            className="text-gray-600 hover:text-gray-400 text-xs"
-          >
-            Dismiss
+          <button onClick={onDismiss} className="text-gray-600 hover:text-gray-400 text-xs">
+            {isReLinking ? 'Cancel' : 'Skip for now'}
           </button>
         </div>
       </div>

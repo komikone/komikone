@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth, useUser } from '@clerk/clerk-react';
 import {
   api,
   type EventDetail,
@@ -16,24 +17,12 @@ import {
 
 const STATUS_OPTIONS: EventDetail['status'][] = ['setup', 'registration', 'purchasing', 'payment', 'complete'];
 
-// ─── Auth gate ────────────────────────────────────────────────────────────────
-
-function useAdminSecret(): [string, (s: string) => void] {
-  const [secret, setSecretState] = useState(() => sessionStorage.getItem('admin_secret') ?? '');
-  const setSecret = (s: string) => {
-    sessionStorage.setItem('admin_secret', s);
-    setSecretState(s);
-  };
-  return [secret, setSecret];
-}
-
 // ─── Admin ────────────────────────────────────────────────────────────────────
 
 export default function Admin() {
-  const [secret, setSecret] = useAdminSecret();
-  const [inputSecret, setInputSecret] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [authed, setAuthed] = useState(Boolean(sessionStorage.getItem('admin_secret')));
+  const { getToken } = useAuth();
+  const { user, isLoaded: userLoaded } = useUser();
+  const [secret, setSecret] = useState('');
 
   const [events, setEvents] = useState<EventDetail[]>([]);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
@@ -61,12 +50,19 @@ export default function Admin() {
   const activeEvent = yearEvents.find((e) => e.reg_type === activeRegType) ?? yearEvents[0] ?? null;
   const participants = activeRegType === 'return' ? returnParticipants : openParticipants;
 
+  const getAuth = useCallback(async (): Promise<string> => {
+    const t = await getToken() ?? '';
+    if (t) setSecret(t);
+    return t;
+  }, [getToken]);
+
   const loadEvents = useCallback(async (): Promise<EventDetail[]> => {
-    if (!secret) return [];
+    const tok = await getAuth();
+    if (!tok) return [];
     setLoading(true);
     try {
       const summaries = await api.events.list();
-      const detailed = await Promise.all(summaries.map((s) => api.admin.events.getWithToken(secret, s.id)));
+      const detailed = await Promise.all(summaries.map((s) => api.admin.events.getWithToken(tok, s.id)));
       setEvents(detailed);
       return detailed;
     } catch (e) {
@@ -75,21 +71,22 @@ export default function Admin() {
     } finally {
       setLoading(false);
     }
-  }, [secret]);
+  }, [getAuth]);
 
   const loadYearData = useCallback(async (year: number, evts: EventDetail[]) => {
+    const tok = await getAuth();
     const retEvt = evts.find((e) => e.year === year && e.reg_type === 'return');
     const openEvt = evts.find((e) => e.year === year && e.reg_type === 'open');
 
     const [retPs, openPs, meta] = await Promise.all([
       retEvt ? api.participants.list(retEvt.id, retEvt.access_token).catch(() => []) : Promise.resolve([]),
       openEvt ? api.participants.list(openEvt.id, openEvt.access_token).catch(() => []) : Promise.resolve([]),
-      api.admin.yearMeta.get(secret, year).catch(() => null),
+      api.admin.yearMeta.get(tok, year).catch(() => null),
     ]);
     setReturnParticipants(retPs);
     setOpenParticipants(openPs);
     setYearMeta(meta);
-  }, [secret]);
+  }, [getAuth]);
 
   const reloadAll = useCallback(async (year?: number) => {
     const fresh = await loadEvents();
@@ -106,28 +103,32 @@ export default function Admin() {
   }, []);
 
   const loadSponsors = useCallback(async () => {
-    if (!secret) return;
+    const tok = await getAuth();
+    if (!tok) return;
     try {
-      const list = await api.admin.sponsors.list(secret);
+      const list = await api.admin.sponsors.list(tok);
       setSponsors(list);
     } catch {
       setSponsors([]);
     }
-  }, [secret]);
+  }, [getAuth]);
 
   const loadInvites = useCallback(async () => {
-    if (!secret) return;
+    const tok = await getAuth();
+    if (!tok) return;
     try {
-      const list = await api.admin.inviteRequests.list(secret);
+      const list = await api.admin.inviteRequests.list(tok);
       setInviteRequests(list);
     } catch {
       setInviteRequests([]);
     }
-  }, [secret]);
+  }, [getAuth]);
+
+  const isAdmin = userLoaded && user?.publicMetadata?.role === 'admin';
 
   useEffect(() => {
-    if (authed) { loadEvents(); loadSponsors(); loadInvites(); }
-  }, [authed]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (isAdmin) { loadEvents(); loadSponsors(); loadInvites(); }
+  }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-select latest year when events first load
   useEffect(() => {
@@ -151,35 +152,22 @@ export default function Admin() {
     setActiveRegType(type);
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError('');
-    setSecret(inputSecret);
-    setAuthed(true);
-  };
+  if (!userLoaded) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-gray-500 text-sm">Loading…</div>
+      </div>
+    );
+  }
 
-  if (!authed) {
+  if (!isAdmin) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center halftone-bg">
-        <form onSubmit={handleLogin} className="bg-gray-950 border-2 border-yellow-400 comic-shadow p-8 w-80">
-          <h1 className="font-bangers text-4xl text-yellow-400 text-center tracking-wide leading-none mb-1">komikone</h1>
-          <p className="text-gray-500 text-xs text-center uppercase tracking-widest mb-6">Admin Access</p>
-          <label className="block text-xs text-gray-400 mb-1 uppercase tracking-wider">Admin Secret</label>
-          <input
-            type="password"
-            value={inputSecret}
-            onChange={(e) => setInputSecret(e.target.value)}
-            className="w-full bg-gray-800 border-2 border-gray-600 px-3 py-2 text-white mb-4 focus:outline-none focus:border-yellow-400"
-            autoFocus
-          />
-          {authError && <p className="text-red-400 text-sm mb-3">{authError}</p>}
-          <button
-            type="submit"
-            className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bangers tracking-wide text-xl py-2 border-2 border-black comic-shadow-sm transition-colors"
-          >
-            Sign In
-          </button>
-        </form>
+        <div className="bg-gray-950 border-2 border-red-500 comic-shadow p-8 w-80 text-center">
+          <h1 className="font-bangers text-4xl text-yellow-400 tracking-wide leading-none mb-4">komikone</h1>
+          <p className="text-red-400 text-sm mb-4">Access denied — admin role required.</p>
+          <Link to="/" className="text-gray-400 hover:text-white text-sm underline">← Back to home</Link>
+        </div>
       </div>
     );
   }

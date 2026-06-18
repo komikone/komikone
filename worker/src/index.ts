@@ -6,7 +6,56 @@ type Bindings = {
   DB: D1Database;
   ADMIN_SECRET: string;
   FRONTEND_URL: string;
+  CLERK_JWKS_URL: string;
 };
+
+// ── Clerk JWT verification ────────────────────────────────────────────────────
+
+type ClerkClaims = {
+  sub: string;
+  public_metadata?: Record<string, unknown>;
+};
+
+let jwksCache: { keys: (JsonWebKey & { kid?: string })[] } | null = null;
+
+async function verifyClerkJWT(token: string, jwksUrl: string): Promise<ClerkClaims | null> {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [h, p, s] = parts;
+    const decode = (b64: string) => JSON.parse(atob(b64.replace(/-/g, '+').replace(/_/g, '/')));
+    const header = decode(h) as { kid?: string };
+    const payload = decode(p) as ClerkClaims & { exp: number };
+    if (payload.exp < Date.now() / 1000) return null;
+    if (!jwksCache) {
+      const res = await fetch(jwksUrl);
+      jwksCache = await res.json() as { keys: (JsonWebKey & { kid?: string })[] };
+    }
+    const jwk = jwksCache.keys.find((k) => k.kid === header.kid);
+    if (!jwk) return null;
+    const key = await crypto.subtle.importKey(
+      'jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']
+    );
+    const sig = Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+    const data = new TextEncoder().encode(`${h}.${p}`);
+    const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sig, data);
+    return valid ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getClerkUserId(c: { req: { header: (k: string) => string | undefined } }, jwksUrl: string): Promise<string | null> {
+  const auth = c.req.header('authorization') ?? '';
+  if (!auth.startsWith('Bearer ')) return null;
+  const token = auth.slice(7);
+  const claims = await verifyClerkJWT(token, jwksUrl);
+  return claims?.sub ?? null;
+}
+
+function isAdminAuth(authHeader: string | undefined, adminSecret: string): boolean {
+  return authHeader === `Bearer ${adminSecret}`;
+}
 
 const app = new Hono<{ Bindings: Bindings }>();
 
@@ -443,15 +492,65 @@ app.get('/api/events/:id/groups', async (c) => {
   return json(rows.results);
 });
 
+// Resolve current Clerk user's participant identity for an event
+app.get('/api/events/:id/me', async (c) => {
+  const id = Number(c.req.param('id'));
+  const token = c.req.query('token') || c.req.header('x-access-token');
+  const event = await getEvent(c.env.DB, id);
+  if (!event) return err('Event not found', 404);
+  if (!isAdminAuth(c.req.header('authorization'), c.env.ADMIN_SECRET) && token !== event.access_token) {
+    return err('Invalid token', 401);
+  }
+  const userId = await getClerkUserId(c, c.env.CLERK_JWKS_URL ?? '');
+  if (!userId) return err('Not authenticated', 401);
+  const participant = await c.env.DB.prepare(
+    `SELECT p.*, g.name AS group_name, g.color AS group_color, s.name AS sponsor_name
+     FROM participants p
+     LEFT JOIN groups g ON g.id = p.group_id
+     LEFT JOIN sponsors s ON s.id = p.sponsor_id
+     WHERE p.event_id = ? AND p.clerk_user_id = ?`
+  ).bind(id, userId).first<Participant>();
+  if (!participant) return json({ linked: false });
+  return json({ linked: true, participant: enrichParticipant(participant, event) });
+});
+
+// Link current Clerk user to a participant row (one-time identity setup)
+app.post('/api/events/:id/participants/:pid/link-identity', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const pid = Number(c.req.param('pid'));
+  const token = c.req.query('token') || c.req.header('x-access-token');
+  const event = await getEvent(c.env.DB, eventId);
+  if (!event) return err('Event not found', 404);
+  if (!isAdminAuth(c.req.header('authorization'), c.env.ADMIN_SECRET) && token !== event.access_token) {
+    return err('Invalid token', 401);
+  }
+  const userId = await getClerkUserId(c, c.env.CLERK_JWKS_URL ?? '');
+  if (!userId) return err('Not authenticated', 401);
+  // Prevent a single Clerk account from claiming two different slots in the same event
+  const existing = await c.env.DB.prepare(
+    'SELECT id FROM participants WHERE event_id = ? AND clerk_user_id = ?'
+  ).bind(eventId, userId).first();
+  if (existing) return err('Already linked to a participant in this event', 409);
+  await c.env.DB.prepare(
+    "UPDATE participants SET clerk_user_id = ?, updated_at = datetime('now') WHERE id = ? AND event_id = ?"
+  ).bind(userId, pid, eventId).run();
+  return json({ ok: true });
+});
+
 // ── Admin-only routes ─────────────────────────────────────────────────────────
 
 const admin = new Hono<{ Bindings: Bindings }>();
 admin.use('*', async (c, next) => {
   const authHeader = c.req.header('authorization') ?? '';
-  if (authHeader !== `Bearer ${c.env.ADMIN_SECRET}`) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  // Accept legacy ADMIN_SECRET
+  if (authHeader === `Bearer ${c.env.ADMIN_SECRET}`) return next();
+  // Accept Clerk JWT with admin role
+  if (c.env.CLERK_JWKS_URL && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    const claims = await verifyClerkJWT(token, c.env.CLERK_JWKS_URL);
+    if (claims?.public_metadata?.role === 'admin') return next();
   }
-  return next();
+  return Response.json({ error: 'Unauthorized' }, { status: 401 });
 });
 
 // Create event
@@ -739,8 +838,8 @@ admin.post('/events/:id/participants/copy', async (c) => {
         (event_id, first_name, last_name, member_id, badge_type, return_eligible, sponsor_id, notes,
          req_preview, req_thu, req_fri, req_sat, req_sun, sort_order,
          purchasing_coordinator, purchasing_claimed_by,
-         pur_preview, pur_thu, pur_fri, pur_sat, pur_sun, who_purchased, paid)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         pur_preview, pur_thu, pur_fri, pur_sat, pur_sun, who_purchased, paid, clerk_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       body.target_event_id,
       p.first_name, p.last_name, p.member_id,
@@ -761,6 +860,7 @@ admin.post('/events/:id/participants/copy', async (c) => {
       reset ? 0 : (p.pur_sun ? 1 : 0),
       reset ? '' : p.who_purchased,
       reset ? 0 : (p.paid ? 1 : 0),
+      p.clerk_user_id ?? null,
     )
   );
 

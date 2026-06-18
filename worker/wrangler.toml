@@ -11,6 +11,9 @@ database_id = "bd7afe67-a858-4bdf-9f10-e9b93be5116d"
 
 [vars]
 FRONTEND_URL = "https://komikone.com"
+# Set CLERK_JWKS_URL via: npx wrangler secret put CLERK_JWKS_URL
+# Value: https://<your-clerk-instance>.clerk.accounts.dev/.well-known/jwks.json
+CLERK_JWKS_URL = ""
 
 [[routes]]
 pattern = "api.komikone.com"
