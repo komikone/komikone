@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useClerk, useUser } from '@clerk/clerk-react';
 import { api, type EventSummary } from '../lib/api';
 import { useTheme } from '../lib/useTheme';
 
@@ -14,6 +15,21 @@ export default function Home() {
   const token = searchParams.get('token') ?? '';
   const { toggle, isDark } = useTheme();
   const [inviteOpen, setInviteOpen] = useState(false);
+  const { user, isSignedIn } = useUser();
+  const { signOut } = useClerk();
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const avatarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!avatarOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (avatarRef.current && !avatarRef.current.contains(e.target as Node)) {
+        setAvatarOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [avatarOpen]);
 
   useEffect(() => {
     api.events.list().then(setEvents).catch(() => {});
@@ -40,6 +56,36 @@ export default function Home() {
             >
               Admin
             </Link>
+            {isSignedIn && user && (
+              <div className="relative" ref={avatarRef}>
+                <button
+                  onClick={() => setAvatarOpen((o) => !o)}
+                  className="flex items-center justify-center w-8 h-8 rounded-full overflow-hidden border-2 border-white/20 hover:border-yellow-400 transition-colors focus:outline-none"
+                >
+                  {user.imageUrl ? (
+                    <img src={user.imageUrl} alt={user.fullName ?? ''} className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="bg-zinc-700 w-full h-full flex items-center justify-center text-white text-xs font-bold">
+                      {(user.firstName?.[0] ?? user.emailAddresses[0]?.emailAddress[0] ?? '?').toUpperCase()}
+                    </span>
+                  )}
+                </button>
+                {avatarOpen && (
+                  <div className="absolute right-0 top-10 w-48 bg-zinc-900 border border-zinc-700 shadow-xl z-50">
+                    <div className="px-3 py-2 border-b border-zinc-700">
+                      <p className="text-white text-xs font-medium truncate">{user.fullName ?? user.firstName}</p>
+                      <p className="text-zinc-400 text-xs truncate">{user.emailAddresses[0]?.emailAddress}</p>
+                    </div>
+                    <button
+                      onClick={() => signOut({ redirectUrl: '/' })}
+                      className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                    >
+                      Sign out
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </header>
