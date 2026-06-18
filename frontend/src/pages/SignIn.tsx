@@ -26,6 +26,10 @@ export default function SignIn() {
           elements: {
             card: 'shadow-2xl border border-zinc-700',
             headerTitle: 'font-bangers tracking-wide text-yellow-400',
+            socialButtonsBlockButton: 'bg-zinc-700 border border-zinc-600 hover:bg-zinc-600',
+            socialButtonsBlockButtonText: 'text-white font-medium',
+            dividerLine: 'bg-zinc-700',
+            dividerText: 'text-zinc-400',
           },
         }}
       />
