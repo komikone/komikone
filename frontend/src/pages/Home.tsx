@@ -20,7 +20,6 @@ export default function Home() {
   }, []);
 
   const active = events.filter((e) => e.status !== 'complete');
-  const past = events.filter((e) => e.status === 'complete');
 
   return (
     <div className="min-h-screen bg-amber-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
@@ -65,19 +64,6 @@ export default function Home() {
           <StatsSection />
 
           <WantInSection onOpen={() => setInviteOpen(true)} />
-
-          {past.length > 0 && (
-            <section>
-              <h2 className="font-bangers text-xl text-gray-400 dark:text-gray-600 mb-3 tracking-wide">Past Events</h2>
-              <div className="space-y-1">
-                {past.map((e) => (
-                  <div key={e.id} className="text-gray-500 dark:text-gray-600 text-sm">
-                    {e.name} — {e.reg_type === 'return' ? 'Return Reg' : 'Open Reg'}
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
         </div>
       </main>
 
@@ -488,7 +474,10 @@ function StatsSection() {
 
   if (!stats) return null;
 
+  const FOUNDING_YEAR = 2018;
   const currentYear = new Date().getFullYear();
+  const yearsRunning = currentYear - FOUNDING_YEAR + 1;
+
   const complete = stats.years.filter((y) => y.year < currentYear && y.year >= currentYear - 3);
   if (complete.length === 0) return null;
 
@@ -520,7 +509,7 @@ function StatsSection() {
 
       <div className="grid grid-cols-3 gap-3 mb-6">
         {[
-          { value: years.length, label: 'Years Running' },
+          { value: yearsRunning, label: 'Years Running' },
           { value: totalParticipants, label: 'Badges Coordinated' },
           { value: `${successRate}%`, label: 'Success Rate' },
         ].map(({ value, label }) => (
