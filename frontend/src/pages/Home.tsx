@@ -50,14 +50,6 @@ export default function Home() {
             >
               {isDark ? '☀ Day' : '◑ Night'}
             </button>
-            {isSignedIn && user?.publicMetadata?.role === 'admin' && (
-              <Link
-                to="/admin"
-                className="text-xs text-gray-400 hover:text-white transition-colors uppercase tracking-widest"
-              >
-                Admin
-              </Link>
-            )}
             {!isSignedIn && (
               <Link
                 to="/sign-in"
@@ -86,6 +78,15 @@ export default function Home() {
                       <p className="text-white text-xs font-medium truncate">{user.fullName ?? user.firstName}</p>
                       <p className="text-zinc-400 text-xs truncate">{user.emailAddresses[0]?.emailAddress}</p>
                     </div>
+                    {user.publicMetadata?.role === 'admin' && (
+                      <Link
+                        to="/admin"
+                        onClick={() => setAvatarOpen(false)}
+                        className="block px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                      >
+                        Admin
+                      </Link>
+                    )}
                     <button
                       onClick={() => signOut({ redirectUrl: '/' })}
                       className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
