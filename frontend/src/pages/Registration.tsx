@@ -12,6 +12,7 @@ export default function Registration() {
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [alreadyRegistered, setAlreadyRegistered] = useState(false);
+  const [needsInvite, setNeedsInvite] = useState(false);
 
   const [form, setForm] = useState({
     first_name: '',
@@ -35,6 +36,17 @@ export default function Registration() {
       try {
         const ev = await api.events.get(Number(eventId), tok);
         setEvent(ev);
+
+        const yearList = await api.years.list(tok).catch(() => []);
+        const yearObj = yearList.find((y) => y.con_year === ev.year);
+        if (yearObj) {
+          const memberRes = await api.years.me(yearObj.id, tok).catch(() => null);
+          if (!memberRes) {
+            setNeedsInvite(true);
+            return;
+          }
+        }
+
         const identity = await api.participants.getMyIdentity(Number(eventId), tok);
         if (identity.linked && identity.participant) {
           const p = identity.participant;
@@ -76,7 +88,21 @@ export default function Registration() {
     }
   };
 
-  if (!isLoaded || (!event && !error)) {
+  if (needsInvite) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center px-6">
+        <div className="bg-gray-900 border border-gray-700 rounded-xl p-8 max-w-sm text-center">
+          <h2 className="text-xl font-bold text-white mb-2">Invite required</h2>
+          <p className="text-gray-400 text-sm mb-6">
+            You need an invite link before you can select badge days. Check your email or request access from the homepage.
+          </p>
+          <Link to="/" className="text-blue-400 hover:text-blue-300 text-sm">← Back to home</Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isLoaded || (!event && !error && !needsInvite)) {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
         <div className="text-gray-500">Loading…</div>

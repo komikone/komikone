@@ -10,6 +10,7 @@ import {
   type Year,
   type YearMember,
   type Invite,
+  type InviteRequest,
   formatDollars,
   DAY_KEYS,
   dayLabel,
@@ -38,6 +39,8 @@ export default function Admin() {
 
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<'overview' | 'participants' | 'prices' | 'dates' | 'invites' | 'members'>('overview');
+  const [adminView, setAdminView] = useState<'year' | 'requests'>('year');
+  const [accessRequests, setAccessRequests] = useState<InviteRequest[]>([]);
 
   // Derived
   const years = useMemo(
@@ -121,6 +124,17 @@ export default function Admin() {
     setYearMembers(mems);
   }, [getAuth]);
 
+  const loadAccessRequests = useCallback(async () => {
+    const tok = await getAuth();
+    if (!tok) return;
+    try {
+      const list = await api.admin.inviteRequests.list(tok);
+      setAccessRequests(list);
+    } catch {
+      setAccessRequests([]);
+    }
+  }, [getAuth]);
+
   const reloadAll = useCallback(async (year?: number) => {
     const [fresh, freshYears] = await Promise.all([loadEvents(), loadYearsData()]);
     const yr = year ?? selectedYear;
@@ -134,8 +148,10 @@ export default function Admin() {
   const isAdmin = userLoaded && user?.publicMetadata?.role === 'admin';
 
   useEffect(() => {
-    if (isAdmin) { loadEvents(); loadYearsData(); }
+    if (isAdmin) { loadEvents(); loadYearsData(); loadAccessRequests(); }
   }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pendingRequestCount = accessRequests.filter((r) => r.status === 'pending').length;
 
   // Auto-select latest year when events first load
   useEffect(() => {
@@ -154,6 +170,7 @@ export default function Admin() {
   }, [selectedYear, yearsData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleYearSelect = (year: number) => {
+    setAdminView('year');
     setSelectedYear(year);
     setActiveRegType('return');
     setTab('overview');
@@ -230,7 +247,20 @@ export default function Admin() {
           {/* Invites */}
           <div className="border-t border-gray-800 pt-3 space-y-0.5">
             <button
-              onClick={() => { setTab('invites'); if (activeYear) loadYearExtras(activeYear); }}
+              onClick={() => setAdminView('requests')}
+              className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium flex items-center justify-between ${
+                adminView === 'requests' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+              }`}
+            >
+              <span>Access Requests</span>
+              {pendingRequestCount > 0 && (
+                <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                  {pendingRequestCount}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => { setAdminView('year'); setTab('invites'); if (activeYear) loadYearExtras(activeYear); }}
               className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
                 tab === 'invites' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
               }`}
@@ -238,7 +268,7 @@ export default function Admin() {
               Invite Codes
             </button>
             <button
-              onClick={() => { setTab('members'); if (activeYear) loadYearExtras(activeYear); }}
+              onClick={() => { setAdminView('year'); setTab('members'); if (activeYear) loadYearExtras(activeYear); }}
               className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
                 tab === 'members' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
               }`}
@@ -251,7 +281,16 @@ export default function Admin() {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto flex flex-col">
-        {selectedYear === null ? (
+        {adminView === 'requests' ? (
+          <div className="flex-1 overflow-auto p-6">
+            <AccessRequestsPanel
+              secret={secret}
+              requests={accessRequests}
+              inviteYear={activeYear ?? yearsData[0] ?? null}
+              onUpdate={loadAccessRequests}
+            />
+          </div>
+        ) : selectedYear === null ? (
           <div className="flex items-center justify-center h-full text-gray-500">
             {loading ? 'Loading…' : 'Select or initialize a year'}
           </div>
@@ -1614,6 +1653,147 @@ function CopyParticipantsModal({
           <button onClick={onClose} className="text-gray-400 hover:text-white px-4 text-sm">Cancel</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Access Requests Panel ────────────────────────────────────────────────────
+
+function AccessRequestsPanel({
+  secret, requests, inviteYear, onUpdate,
+}: {
+  secret: string;
+  requests: InviteRequest[];
+  inviteYear: Year | null;
+  onUpdate: () => void;
+}) {
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [approvingId, setApprovingId] = useState<number | null>(null);
+  const [lastInviteUrl, setLastInviteUrl] = useState<string | null>(null);
+
+  const filtered = filter === 'all' ? requests : requests.filter((r) => r.status === filter);
+  const origin = window.location.origin;
+
+  const handleApprove = async (req: InviteRequest) => {
+    if (!inviteYear) {
+      alert('Create or select a year first (sidebar) before approving requests.');
+      return;
+    }
+    setApprovingId(req.id);
+    try {
+      await api.admin.inviteRequests.update(secret, req.id, { status: 'approved' });
+      const invite = await api.admin.invites.create(secret, inviteYear.id, req.email);
+      const url = `${origin}/join/${invite.code}`;
+      setLastInviteUrl(url);
+      await navigator.clipboard.writeText(url);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to approve');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleReject = async (id: number) => {
+    try {
+      await api.admin.inviteRequests.update(secret, id, { status: 'rejected' });
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Delete this request?')) return;
+    try {
+      await api.admin.inviteRequests.delete(secret, id);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white">Access Requests</h2>
+        <p className="text-gray-500 text-sm mt-1">
+          Approve to create an invite for {inviteYear?.name ?? '— select a year in sidebar'}.
+        </p>
+      </div>
+
+      {lastInviteUrl && (
+        <div className="bg-green-950/40 border border-green-800 rounded-xl p-4 text-sm">
+          <p className="text-green-300 font-medium mb-1">Invite created — link copied to clipboard</p>
+          <p className="text-gray-400 font-mono text-xs break-all">{lastInviteUrl}</p>
+          <button onClick={() => setLastInviteUrl(null)} className="text-xs text-gray-500 hover:text-gray-300 mt-2">Dismiss</button>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        {(['pending', 'approved', 'rejected', 'all'] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`text-xs px-3 py-1.5 rounded capitalize transition-colors ${
+              filter === f ? 'bg-blue-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
+            }`}
+          >
+            {f}
+            {f === 'pending' && requests.filter((r) => r.status === 'pending').length > 0 && (
+              <span className="ml-1.5 bg-red-500 text-white px-1.5 rounded-full text-[10px]">
+                {requests.filter((r) => r.status === 'pending').length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-gray-500 text-sm">No {filter === 'all' ? '' : filter} requests.</p>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((r) => (
+            <div key={r.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-white font-medium">{r.email}</p>
+                  <p className="text-gray-500 text-xs mt-0.5">
+                    Referred by {r.referred_by || '—'} · {new Date(r.created_at + 'Z').toLocaleDateString()}
+                  </p>
+                  {r.notes && <p className="text-gray-400 text-sm mt-2 italic">&ldquo;{r.notes}&rdquo;</p>}
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded shrink-0 ${
+                  r.status === 'pending' ? 'bg-yellow-900/50 text-yellow-300' :
+                  r.status === 'approved' ? 'bg-green-900/50 text-green-300' :
+                  'bg-red-900/50 text-red-300'
+                }`}>{r.status}</span>
+              </div>
+              {r.status === 'pending' && (
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={() => handleApprove(r)}
+                    disabled={approvingId === r.id || !inviteYear}
+                    className="text-xs bg-green-800 hover:bg-green-700 disabled:opacity-50 text-green-100 px-3 py-1.5 rounded"
+                  >
+                    {approvingId === r.id ? 'Creating…' : 'Approve & copy invite link'}
+                  </button>
+                  <button
+                    onClick={() => handleReject(r.id)}
+                    className="text-xs bg-red-900 hover:bg-red-800 text-red-200 px-3 py-1.5 rounded"
+                  >
+                    Reject
+                  </button>
+                  <button onClick={() => handleDelete(r.id)} className="text-xs text-gray-500 hover:text-red-400 ml-auto">Delete</button>
+                </div>
+              )}
+              {r.status !== 'pending' && (
+                <button onClick={() => handleDelete(r.id)} className="text-xs text-gray-500 hover:text-red-400 mt-2">Delete</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useClerk, useUser } from '@clerk/clerk-react';
 import { api, type EventSummary } from '../lib/api';
 import { useTheme } from '../lib/useTheme';
@@ -48,14 +48,6 @@ export default function Home() {
             >
               {isDark ? '☀ Day' : '◑ Night'}
             </button>
-            {!isSignedIn && (
-              <Link
-                to="/sign-in"
-                className="text-xs text-gray-400 hover:text-white transition-colors uppercase tracking-widest"
-              >
-                Login
-              </Link>
-            )}
             {isSignedIn && user && (
               <div className="relative" ref={avatarRef}>
                 <button
@@ -106,7 +98,7 @@ export default function Home() {
         </div>
       </header>
 
-      <HeroSection onRequestInvite={() => setInviteOpen(true)} />
+      <HeroSection isSignedIn={!!isSignedIn} onRequestAccess={() => setInviteOpen(true)} />
 
       <main>
         {active.length > 0 && (
@@ -125,7 +117,7 @@ export default function Home() {
         <div className="max-w-3xl mx-auto px-6 py-10 space-y-10">
           <StatsSection />
 
-          <WantInSection onOpen={() => setInviteOpen(true)} />
+          {!isSignedIn && <WantInSection onOpen={() => setInviteOpen(true)} />}
         </div>
       </main>
 
@@ -138,14 +130,22 @@ export default function Home() {
 
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
-function HeroSection({ onRequestInvite }: { onRequestInvite: () => void }) {
+function HeroSection({ isSignedIn, onRequestAccess }: { isSignedIn: boolean; onRequestAccess: () => void }) {
+  const navigate = useNavigate();
   const [offsetY, setOffsetY] = useState(0);
+  const [inviteCode, setInviteCode] = useState('');
 
   useEffect(() => {
     const onScroll = () => setOffsetY(window.scrollY);
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  const goToJoin = () => {
+    const code = inviteCode.trim().replace(/^\/join\//i, '').split('/').pop()?.split('?')[0] ?? '';
+    if (!code) return;
+    navigate(`/join/${code}`);
+  };
 
   return (
     <section className="relative h-screen overflow-hidden bg-black flex items-center justify-center">
@@ -195,20 +195,60 @@ function HeroSection({ onRequestInvite }: { onRequestInvite: () => void }) {
           Badge Coordination · Est. 2017
         </p>
 
-        <div className="flex gap-4 justify-center flex-wrap">
-          <button
-            onClick={onRequestInvite}
-            className="font-bangers tracking-wide text-2xl bg-red-600 hover:bg-red-700 text-white px-10 py-3 border-2 border-white comic-shadow hover:translate-x-px hover:translate-y-px transition-all"
-          >
-            Request an Invite →
-          </button>
-          <a
-            href="#how-it-works"
-            className="font-bangers tracking-wide text-2xl text-white px-10 py-3 border-2 border-white/40 hover:border-white transition-colors"
-          >
-            How It Works
-          </a>
-        </div>
+        {isSignedIn ? (
+          <div className="flex gap-4 justify-center flex-wrap">
+            <Link
+              to="/dashboard"
+              className="font-bangers tracking-wide text-2xl bg-red-600 hover:bg-red-700 text-white px-10 py-3 border-2 border-white comic-shadow hover:translate-x-px hover:translate-y-px transition-all"
+            >
+              Go to Dashboard →
+            </Link>
+            <a
+              href="#how-it-works"
+              className="font-bangers tracking-wide text-2xl text-white px-10 py-3 border-2 border-white/40 hover:border-white transition-colors"
+            >
+              How It Works
+            </a>
+          </div>
+        ) : (
+          <div className="max-w-md mx-auto space-y-4">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                onKeyDown={(e) => e.key === 'Enter' && goToJoin()}
+                placeholder="Invite code"
+                className="flex-1 bg-zinc-900/90 border-2 border-white/30 focus:border-yellow-400 text-white font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider"
+              />
+              <button
+                onClick={goToJoin}
+                disabled={!inviteCode.trim()}
+                className="font-bangers tracking-wide text-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-3 border-2 border-white comic-shadow-sm transition-all"
+              >
+                Continue →
+              </button>
+            </div>
+            <p className="text-gray-500 text-xs">
+              Already joined?{' '}
+              <Link to="/sign-in?redirect=%2Fdashboard" className="text-yellow-400/90 hover:text-yellow-300 underline underline-offset-2">
+                Sign in
+              </Link>
+            </p>
+            <p className="text-gray-600 text-xs">
+              Don&apos;t have a code?{' '}
+              <button type="button" onClick={onRequestAccess} className="text-gray-400 hover:text-white underline underline-offset-2">
+                Request access
+              </button>
+            </p>
+            <a
+              href="#how-it-works"
+              className="inline-block font-bangers tracking-wide text-base text-white/60 hover:text-white transition-colors mt-2"
+            >
+              How It Works ↓
+            </a>
+          </div>
+        )}
       </div>
 
       {/* SDCC logo */}
@@ -291,11 +331,11 @@ function HowItWorksSection() {
     {
       num: '01',
       color: 'bg-blue-600',
-      title: 'Register',
+      title: 'Join',
       items: [
-        'Fill out the form with your name, Member ID, and desired days.',
-        'Tony confirms eligibility and assigns your coordinator.',
-        'Bringing a friend? Register them separately with you as sponsor.',
+        'Use your invite link to create an account and join the group.',
+        'Pick your badge days when registration opens.',
+        'Add family members on your dashboard — they don\'t need their own account.',
       ],
     },
     {
@@ -382,14 +422,13 @@ function WantInSection({ onOpen }: { onOpen: () => void }) {
     <section className="border-2 border-black dark:border-yellow-400 bg-white dark:bg-gray-900 p-6 comic-shadow">
       <h2 className="font-bangers text-3xl text-red-600 dark:text-yellow-400 tracking-wide mb-1">Want In?</h2>
       <p className="text-gray-600 dark:text-gray-400 text-sm mb-5">
-        This is a private purchasing train. Space is limited — if someone in the group referred you,
-        reach out and we'll get you on the list.
+        This is a private group. If someone referred you, request access and we&apos;ll send you an invite link.
       </p>
       <button
         onClick={onOpen}
-        className="font-bangers tracking-wide text-xl bg-red-600 hover:bg-red-700 dark:bg-yellow-400 dark:hover:bg-yellow-300 dark:text-black text-white px-8 py-2.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
+        className="font-bangers tracking-wide text-lg text-red-600 dark:text-yellow-400 hover:underline underline-offset-4"
       >
-        Request an Invite →
+        Request access →
       </button>
     </section>
   );
@@ -430,7 +469,7 @@ function InviteRequestModal({ onClose }: { onClose: () => void }) {
       <div className="w-full max-w-md border-2 border-black dark:border-yellow-400 bg-white dark:bg-gray-900 comic-shadow">
         <div className="flex items-center justify-between border-b-2 border-black dark:border-gray-700 px-5 py-3">
           <h2 className="font-bangers text-2xl text-red-600 dark:text-yellow-400 tracking-wide">
-            Request an Invite
+            Request Access
           </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-900 dark:hover:text-white text-xl leading-none">
             ✕
@@ -721,14 +760,11 @@ function EventCard({ event }: { event: EventSummary }) {
         <StatusBadge status={event.status} />
       </div>
 
-      <div className="flex gap-3 mt-4 flex-wrap">
+      <div className="flex gap-3 mt-4 flex-wrap items-center">
         {isRegistration && (
-          <Link
-            to={`/register/${event.id}`}
-            className="font-bangers tracking-wide text-base bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all"
-          >
-            Register →
-          </Link>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Registration open — invite link required.
+          </p>
         )}
         {isPurchasing && (
           <Link

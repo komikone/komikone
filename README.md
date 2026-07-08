@@ -88,11 +88,17 @@ npm run deploy
 
 ## Two registration paths (both active)
 
-**Legacy / in-flight (2026):** Participants use the homepage **Register** link → `/register/:eventId` to pick badge days. Works for anyone signed in with Clerk.
+**Everyone needs an invite** to join a year. The homepage invite code box (or link in email) is the entry point.
 
-**Invite flow (new members):** Admin or member generates invite → `/join/:code` → identity setup → `/register/:eventId` for badge days → `/dashboard` for group management.
+| Step | What happens |
+|------|----------------|
+| 1. Invite | `/join/:code` — sign in, confirm identity |
+| 2. Days | `/register/:eventId` — pick badge days (members only) |
+| 3. Family | `/dashboard` — add people you're buying for |
 
-Homepage **Request an Invite** still collects email requests for admin review.
+**Returning members:** use "Already joined? Sign in" on the homepage — no invite code needed again.
+
+**New strangers:** "Request access" on homepage → admin approves in Access Requests → invite link sent.
 
 ## Admin workflow per event
 

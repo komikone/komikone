@@ -3,13 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 
 export default function SignIn() {
   const [params] = useSearchParams();
-  const redirect = params.get('redirect') ?? '/';
+  const redirect = params.get('redirect') ?? '/dashboard';
 
   return (
     <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center gap-6 p-4">
       <div className="text-center mb-2">
         <div className="font-bangers text-yellow-400 text-4xl tracking-wide">komikone</div>
-        <div className="text-zinc-500 text-sm mt-1">Sign in to access the live board</div>
+        <div className="text-zinc-500 text-sm mt-1">Sign in to access your dashboard</div>
       </div>
       <ClerkSignIn
         routing="hash"

@@ -187,6 +187,21 @@ app.post('/api/events/:id/register', async (c) => {
   if (!event) return err('Event not found', 404);
   if (event.status !== 'registration') return err('Registration is not open', 403);
 
+  const clerkUserId = access.userId === 'admin' ? null : access.userId;
+  if (clerkUserId) {
+    const yearRow = await c.env.DB.prepare(
+      'SELECT id FROM years WHERE con_year = ?'
+    ).bind(event.year).first<{ id: number }>();
+    if (yearRow) {
+      const member = await c.env.DB.prepare(
+        'SELECT id FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+      ).bind(yearRow.id, clerkUserId).first();
+      if (!member) {
+        return err('An invite is required before you can register. Use your invite link or request access.', 403);
+      }
+    }
+  }
+
   const body = await c.req.json<{
     first_name: string;
     last_name: string;
@@ -204,7 +219,6 @@ app.post('/api/events/:id/register', async (c) => {
   }
 
   const badgeType = body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT';
-  const clerkUserId = access.userId === 'admin' ? null : access.userId;
   const firstName = body.first_name.trim();
   const lastName = body.last_name.trim();
   const memberId = body.member_id?.trim() ?? '';

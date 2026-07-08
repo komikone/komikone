@@ -18,6 +18,7 @@ export default function JoinPage() {
 
   const [inviteInfo, setInviteInfo] = useState<InviteInfo | null>(null);
   const [inviteError, setInviteError] = useState('');
+  const [inviteUsed, setInviteUsed] = useState(false);
   const [step, setStep] = useState<'loading' | 'sign-in' | 'form' | 'done'>('loading');
 
   const [form, setForm] = useState({
@@ -38,8 +39,10 @@ export default function JoinPage() {
       setInviteInfo(info);
       setStep(isLoaded && isSignedIn ? 'form' : 'sign-in');
     }).catch((e) => {
-      setInviteError(e.message);
-      setStep('form'); // show error state
+      const msg = e.message ?? '';
+      setInviteError(msg);
+      setInviteUsed(msg.toLowerCase().includes('already been used'));
+      setStep('form');
     });
   }, [code]);
 
@@ -72,7 +75,12 @@ export default function JoinPage() {
       setRegEventId(target?.id ?? null);
       setStep('done');
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : 'Registration failed');
+      const msg = e instanceof Error ? e.message : 'Registration failed';
+      if (msg.toLowerCase().includes('already registered')) {
+        navigate('/dashboard');
+        return;
+      }
+      setSubmitError(msg);
     } finally {
       setSubmitting(false);
     }
@@ -86,8 +94,18 @@ export default function JoinPage() {
     return (
       <Screen>
         <div className="bg-red-950/40 border border-red-700 rounded-xl p-6 text-center">
-          <p className="text-red-300 font-medium mb-1">Invalid invite</p>
+          <p className="text-red-300 font-medium mb-1">
+            {inviteUsed ? 'Invite already used' : 'Invalid invite'}
+          </p>
           <p className="text-gray-400 text-sm">{inviteError}</p>
+          {inviteUsed && (
+            <p className="text-gray-400 text-sm mt-4">
+              Already joined?{' '}
+              <Link to="/sign-in?redirect=%2Fdashboard" className="text-blue-400 hover:text-blue-300">
+                Sign in to your dashboard
+              </Link>
+            </p>
+          )}
         </div>
         <Link to="/" className="text-gray-500 hover:text-gray-300 text-sm mt-6 block text-center">← Home</Link>
       </Screen>
