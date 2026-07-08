@@ -449,7 +449,7 @@ function AddParticipantForm({
 }
 
 function EditParticipantRow({
-  participant, isSelf, onSave, onCancel,
+  participant, isSelf: _isSelf, onSave, onCancel,
 }: {
   participant: Participant;
   isSelf: boolean;

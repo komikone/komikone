@@ -11,7 +11,6 @@ type StatsData = { years: YearStat[] };
 
 export default function Home() {
   const [events, setEvents] = useState<EventSummary[]>([]);
-  const [searchParams] = useSearchParams();
   const { toggle, isDark } = useTheme();
   const [inviteOpen, setInviteOpen] = useState(false);
   const { user, isSignedIn } = useUser();

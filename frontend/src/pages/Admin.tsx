@@ -7,7 +7,9 @@ import {
   type Participant,
   type YearMeta,
   type Group,
-  type InviteRequest,
+  type Year,
+  type YearMember,
+  type Invite,
   formatDollars,
   DAY_KEYS,
   dayLabel,
@@ -23,8 +25,9 @@ export default function Admin() {
   const [secret, setSecret] = useState('');
 
   const [events, setEvents] = useState<EventDetail[]>([]);
-  const [inviteRequests, setInviteRequests] = useState<InviteRequest[]>([]);
-  const [view, setView] = useState<'year' | 'invites'>('year');
+  const [yearsData, setYearsData] = useState<Year[]>([]);
+  const [yearInvites, setYearInvites] = useState<Invite[]>([]);
+  const [yearMembers, setYearMembers] = useState<YearMember[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [activeRegType, setActiveRegType] = useState<'return' | 'open'>('return');
 
@@ -34,7 +37,7 @@ export default function Admin() {
   const [yearMeta, setYearMeta] = useState<YearMeta | null>(null);
 
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'overview' | 'participants' | 'prices' | 'dates'>('overview');
+  const [tab, setTab] = useState<'overview' | 'participants' | 'prices' | 'dates' | 'invites' | 'members'>('overview');
 
   // Derived
   const years = useMemo(
@@ -45,6 +48,7 @@ export default function Admin() {
   const returnEvent = yearEvents.find((e) => e.reg_type === 'return') ?? null;
   const openEvent = yearEvents.find((e) => e.reg_type === 'open') ?? null;
   const activeEvent = yearEvents.find((e) => e.reg_type === activeRegType) ?? yearEvents[0] ?? null;
+  const activeYear = yearsData.find((y) => y.con_year === selectedYear) ?? null;
   const participants = activeRegType === 'return' ? returnParticipants : openParticipants;
 
   const getAuth = useCallback(async (): Promise<string> => {
@@ -86,12 +90,6 @@ export default function Admin() {
     setYearMeta(meta);
   }, [getAuth]);
 
-  const reloadAll = useCallback(async (year?: number) => {
-    const fresh = await loadEvents();
-    const yr = year ?? selectedYear;
-    if (yr !== null) loadYearData(yr, fresh);
-  }, [loadEvents, loadYearData, selectedYear]);
-
   const reloadEventData = useCallback(async (regType: 'return' | 'open', evts: EventDetail[], year: number) => {
     const tok = await getAuth();
     if (!tok) return;
@@ -102,21 +100,41 @@ export default function Admin() {
     else setOpenParticipants(ps);
   }, [getAuth]);
 
-  const loadInvites = useCallback(async () => {
+  const loadYearsData = useCallback(async (): Promise<Year[]> => {
+    const tok = await getAuth();
+    if (!tok) return [];
+    try {
+      const ys = await api.admin.years.list(tok);
+      setYearsData(ys);
+      return ys;
+    } catch { return []; }
+  }, [getAuth]);
+
+  const loadYearExtras = useCallback(async (yearObj: Year) => {
     const tok = await getAuth();
     if (!tok) return;
-    try {
-      const list = await api.admin.inviteRequests.list(tok);
-      setInviteRequests(list);
-    } catch {
-      setInviteRequests([]);
-    }
+    const [invs, mems] = await Promise.all([
+      api.admin.invites.list(tok, yearObj.id).catch(() => []),
+      api.admin.members.list(tok, yearObj.id).catch(() => []),
+    ]);
+    setYearInvites(invs);
+    setYearMembers(mems);
   }, [getAuth]);
+
+  const reloadAll = useCallback(async (year?: number) => {
+    const [fresh, freshYears] = await Promise.all([loadEvents(), loadYearsData()]);
+    const yr = year ?? selectedYear;
+    if (yr !== null) {
+      loadYearData(yr, fresh);
+      const yearObj = freshYears.find((y) => y.con_year === yr);
+      if (yearObj) loadYearExtras(yearObj);
+    }
+  }, [loadEvents, loadYearsData, loadYearData, loadYearExtras, selectedYear]);
 
   const isAdmin = userLoaded && user?.publicMetadata?.role === 'admin';
 
   useEffect(() => {
-    if (isAdmin) { loadEvents(); loadInvites(); }
+    if (isAdmin) { loadEvents(); loadYearsData(); }
   }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-select latest year when events first load
@@ -128,11 +146,22 @@ export default function Admin() {
     }
   }, [events.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Load invites/members once years metadata is available for the selected year
+  useEffect(() => {
+    if (selectedYear === null || yearsData.length === 0) return;
+    const yearObj = yearsData.find((y) => y.con_year === selectedYear);
+    if (yearObj) loadYearExtras(yearObj);
+  }, [selectedYear, yearsData]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleYearSelect = (year: number) => {
     setSelectedYear(year);
     setActiveRegType('return');
     setTab('overview');
+    setYearInvites([]);
+    setYearMembers([]);
     loadYearData(year, events);
+    const yearObj = yearsData.find((y) => y.con_year === year);
+    if (yearObj) loadYearExtras(yearObj);
   };
 
   const handleRegTypeSwitch = (type: 'return' | 'open') => {
@@ -195,23 +224,26 @@ export default function Admin() {
                 </button>
               );
             })}
-            <InitializeYearButton secret={secret} onCreated={loadEvents} />
+            <CreateYearButton secret={secret} onCreated={() => reloadAll()} />
           </div>
 
           {/* Invites */}
-          <div className="border-t border-gray-800 pt-3">
+          <div className="border-t border-gray-800 pt-3 space-y-0.5">
             <button
-              onClick={() => setView(view === 'invites' ? 'year' : 'invites')}
-              className={`w-full text-left px-2 py-1.5 rounded transition-colors flex items-center justify-between ${
-                view === 'invites' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+              onClick={() => { setTab('invites'); if (activeYear) loadYearExtras(activeYear); }}
+              className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
+                tab === 'invites' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
               }`}
             >
-              <span className="text-xs uppercase tracking-wide font-medium">Invites</span>
-              {inviteRequests.filter((r) => r.status === 'pending').length > 0 && (
-                <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-                  {inviteRequests.filter((r) => r.status === 'pending').length}
-                </span>
-              )}
+              Invite Codes
+            </button>
+            <button
+              onClick={() => { setTab('members'); if (activeYear) loadYearExtras(activeYear); }}
+              className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
+                tab === 'members' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+              }`}
+            >
+              Members
             </button>
           </div>
         </div>
@@ -219,15 +251,7 @@ export default function Admin() {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto flex flex-col">
-        {view === 'invites' ? (
-          <div className="flex-1 overflow-auto p-6">
-            <InviteRequestsPanel
-              secret={secret}
-              requests={inviteRequests}
-              onUpdate={loadInvites}
-            />
-          </div>
-        ) : selectedYear === null ? (
+        {selectedYear === null ? (
           <div className="flex items-center justify-center h-full text-gray-500">
             {loading ? 'Loading…' : 'Select or initialize a year'}
           </div>
@@ -263,7 +287,7 @@ export default function Admin() {
               </div>
               {/* Tabs */}
               <div className="flex gap-1">
-                {(['overview', 'participants', 'prices', 'dates'] as const).map((t) => (
+                {(['overview', 'participants', 'prices', 'dates', 'invites', 'members'] as const).map((t) => (
                   <button
                     key={t}
                     onClick={() => setTab(t)}
@@ -324,6 +348,20 @@ export default function Admin() {
                 onUpdate={() => selectedYear !== null && api.admin.yearMeta.get(secret, selectedYear).then(setYearMeta).catch(() => {})}
               />
             )}
+            {tab === 'invites' && activeYear && (
+              <InvitesTab
+                year={activeYear}
+                invites={yearInvites}
+                secret={secret}
+                onUpdate={() => loadYearExtras(activeYear)}
+              />
+            )}
+            {tab === 'invites' && !activeYear && (
+              <div className="text-gray-500 text-sm">Select a year to manage invite codes.</div>
+            )}
+            {tab === 'members' && (
+              <MembersTab members={yearMembers} />
+            )}
             </div>
           </>
         )}
@@ -332,7 +370,7 @@ export default function Admin() {
   );
 }
 
-// ─── Initialize Year ──────────────────────────────────────────────────────────
+// ─── Create Year Button ───────────────────────────────────────────────────────
 
 const SDCC_DEFAULTS = {
   price_preview_adult: 6400, price_thu_adult: 8500, price_fri_adult: 8500,
@@ -341,41 +379,20 @@ const SDCC_DEFAULTS = {
   price_sat_junior: 4300, price_sun_junior: 3200,
 };
 
-const PRICE_ROWS: { day: string; adultKey: keyof typeof SDCC_DEFAULTS; juniorKey: keyof typeof SDCC_DEFAULTS }[] = [
-  { day: 'Preview', adultKey: 'price_preview_adult', juniorKey: 'price_preview_junior' },
-  { day: 'Thursday', adultKey: 'price_thu_adult', juniorKey: 'price_thu_junior' },
-  { day: 'Friday', adultKey: 'price_fri_adult', juniorKey: 'price_fri_junior' },
-  { day: 'Saturday', adultKey: 'price_sat_adult', juniorKey: 'price_sat_junior' },
-  { day: 'Sunday', adultKey: 'price_sun_adult', juniorKey: 'price_sun_junior' },
-];
-
-function InitializeYearButton({ secret, onCreated }: { secret: string; onCreated: () => void }) {
+function CreateYearButton({ secret, onCreated }: { secret: string; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [year, setYear] = useState(new Date().getFullYear() + 1);
-  const [prices, setPrices] = useState<Record<string, string>>(
-    Object.fromEntries(Object.entries(SDCC_DEFAULTS).map(([k, v]) => [k, (v / 100).toFixed(2)]))
-  );
   const [loading, setLoading] = useState(false);
 
-  const setPrice = (key: string, val: string) => setPrices((p) => ({ ...p, [key]: val }));
-  const centsOf = (key: string) => Math.round(parseFloat(prices[key] || '0') * 100);
-
-  const handleInit = async () => {
+  const handleCreate = async () => {
     setLoading(true);
     try {
-      await api.admin.initializeYear(secret, {
-        year,
-        price_preview_adult: centsOf('price_preview_adult'),
-        price_thu_adult: centsOf('price_thu_adult'),
-        price_fri_adult: centsOf('price_fri_adult'),
-        price_sat_adult: centsOf('price_sat_adult'),
-        price_sun_adult: centsOf('price_sun_adult'),
-        price_preview_junior: centsOf('price_preview_junior'),
-        price_thu_junior: centsOf('price_thu_junior'),
-        price_fri_junior: centsOf('price_fri_junior'),
-        price_sat_junior: centsOf('price_sat_junior'),
-        price_sun_junior: centsOf('price_sun_junior'),
-      });
+      await api.admin.years.create(secret, { con_year: year });
+      const summaries = await api.events.list();
+      const newEvents = summaries.filter((e) => e.year === year);
+      await Promise.all(
+        newEvents.map((e) => api.admin.events.update(secret, e.id, SDCC_DEFAULTS))
+      );
       setOpen(false);
       onCreated();
     } catch (e) {
@@ -391,72 +408,37 @@ function InitializeYearButton({ secret, onCreated }: { secret: string; onCreated
         onClick={() => setOpen(true)}
         className="w-full text-left px-2 py-1.5 rounded text-sm text-blue-400 hover:bg-gray-800 mt-1"
       >
-        + Initialize Year
+        + New Year
       </button>
     );
   }
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-sm">
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-80">
         <div className="flex justify-between items-center mb-5">
-          <h3 className="font-bold text-white">Initialize Year</h3>
+          <h3 className="font-bold text-white">New Year</h3>
           <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-white">✕</button>
         </div>
-
-        <p className="text-gray-400 text-xs mb-4">
-          Creates <span className="text-white font-medium">Return Reg</span> and{' '}
-          <span className="text-white font-medium">Open Reg</span> events for the year, both in setup status.
-        </p>
-
         <div className="mb-5">
-          <label className="block text-xs text-gray-400 mb-1">Year</label>
+          <label className="block text-xs text-gray-400 mb-1">Con Year</label>
           <input
             type="number"
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
             className="w-28 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
           />
+          <p className="text-xs text-gray-600 mt-2">
+            Creates Return &amp; Open Reg events with default prices. Customize prices in the Prices tab.
+          </p>
         </div>
-
-        <div className="mb-5">
-          <div className="grid grid-cols-3 gap-1 mb-2 text-xs text-gray-400 text-center">
-            <div className="text-left">Day</div>
-            <div>Adult</div>
-            <div>Jr / Mil / Sr</div>
-          </div>
-          {PRICE_ROWS.map(({ day, adultKey, juniorKey }) => (
-            <div key={day} className="grid grid-cols-3 gap-1 mb-1.5 items-center">
-              <div className="text-xs text-gray-300">{day}</div>
-              <div className="relative">
-                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
-                <input
-                  type="number" step="0.01" min="0"
-                  value={prices[adultKey]}
-                  onChange={(e) => setPrice(adultKey, e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-600 rounded pl-5 pr-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div className="relative">
-                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
-                <input
-                  type="number" step="0.01" min="0"
-                  value={prices[juniorKey]}
-                  onChange={(e) => setPrice(juniorKey, e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-600 rounded pl-5 pr-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-
         <div className="flex gap-2">
           <button
-            onClick={handleInit}
+            onClick={handleCreate}
             disabled={loading}
             className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2 rounded text-sm font-medium transition-colors"
           >
-            {loading ? 'Creating…' : `Initialize ${year}`}
+            {loading ? 'Creating…' : `Create ${year}`}
           </button>
           <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-white px-4 text-sm">Cancel</button>
         </div>
@@ -1636,187 +1618,184 @@ function CopyParticipantsModal({
   );
 }
 
-// ─── Invite Requests Panel ────────────────────────────────────────────────────
+// ─── Invites Tab ──────────────────────────────────────────────────────────────
 
-function InviteRequestsPanel({
-  secret, requests, onUpdate,
+function InvitesTab({
+  year, invites, secret, onUpdate,
 }: {
+  year: Year;
+  invites: Invite[];
   secret: string;
-  requests: InviteRequest[];
   onUpdate: () => void;
 }) {
-  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
-  const [editingNotes, setEditingNotes] = useState<{ id: number; value: string } | null>(null);
+  const [label, setLabel] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
 
-  const visible = filter === 'all' ? requests : requests.filter((r) => r.status === filter);
+  const origin = window.location.origin;
+  const inviteUrl = (code: string) => `${origin}/join/${code}`;
 
-  const pending = requests.filter((r) => r.status === 'pending').length;
-  const approved = requests.filter((r) => r.status === 'approved').length;
-  const rejected = requests.filter((r) => r.status === 'rejected').length;
-
-  const setStatus = async (id: number, status: InviteRequest['status']) => {
+  const handleCreate = async () => {
+    setCreating(true);
     try {
-      await api.admin.inviteRequests.update(secret, id, { status });
+      await api.admin.invites.create(secret, year.id, label.trim() || undefined);
+      setLabel('');
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to create invite');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDelete = async (inv: Invite) => {
+    if (inv.used_by_clerk_user_id && !confirm(`This invite has been used. Delete "${inv.label || inv.code}" anyway?`)) return;
+    try {
+      await api.admin.invites.delete(secret, year.id, inv.id);
       onUpdate();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed');
     }
   };
 
-  const saveNotes = async (id: number, admin_notes: string) => {
-    try {
-      await api.admin.inviteRequests.update(secret, id, { admin_notes });
-      setEditingNotes(null);
-      onUpdate();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed');
-    }
+  const copyLink = (inv: Invite) => {
+    navigator.clipboard.writeText(inviteUrl(inv.code));
+    setCopiedId(inv.id);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleDelete = async (r: InviteRequest) => {
-    if (!confirm(`Delete request from ${r.email}?`)) return;
-    try {
-      await api.admin.inviteRequests.delete(secret, r.id);
-      onUpdate();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed');
-    }
-  };
-
-  const statusChip = (s: InviteRequest['status']) => {
-    const styles = {
-      pending:  'bg-yellow-900/50 text-yellow-300 border border-yellow-700',
-      approved: 'bg-green-900/50 text-green-300 border border-green-700',
-      rejected: 'bg-red-900/50 text-red-300 border border-red-700',
-    };
-    return (
-      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${styles[s]}`}>{s}</span>
-    );
-  };
+  const unused = invites.filter((i) => !i.used_by_clerk_user_id);
+  const used = invites.filter((i) => i.used_by_clerk_user_id);
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-xl font-bold text-white">Invite Requests</h2>
-        <div className="flex gap-2 text-xs text-gray-400">
-          <span className="text-yellow-400 font-bold">{pending} pending</span>
-          <span>·</span>
-          <span className="text-green-400">{approved} approved</span>
-          <span>·</span>
-          <span className="text-red-400">{rejected} rejected</span>
+    <div className="max-w-2xl space-y-6">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-gray-200">Invite Codes — {year.name}</h3>
+        <div className="text-xs text-gray-500">{unused.length} unused · {used.length} used</div>
+      </div>
+
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+        <h4 className="text-xs text-gray-400 uppercase tracking-wide mb-3">Create New Invite</h4>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
+            placeholder="Label (e.g. Tony's Group, Sarah)"
+            className={inputCls}
+          />
+          <button
+            onClick={handleCreate}
+            disabled={creating}
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm px-4 py-1.5 rounded whitespace-nowrap transition-colors"
+          >
+            {creating ? 'Creating…' : 'Create'}
+          </button>
         </div>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex gap-1 mb-5">
-        {(['pending', 'approved', 'rejected', 'all'] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-3 py-1 rounded-full text-xs font-medium capitalize transition-colors ${
-              filter === f ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
-            }`}
-          >
-            {f}
-          </button>
-        ))}
-      </div>
-
-      {visible.length === 0 ? (
-        <p className="text-gray-500 text-sm">No {filter === 'all' ? '' : filter + ' '}requests.</p>
+      {invites.length === 0 ? (
+        <p className="text-gray-500 text-sm">No invites yet for {year.name}.</p>
       ) : (
-        <div className="space-y-3">
-          {visible.map((r) => (
-            <div key={r.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-              <div className="flex items-start justify-between gap-3 mb-2">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-white font-medium text-sm">{r.email}</span>
-                    {statusChip(r.status)}
-                  </div>
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    via <span className="text-gray-200">{r.referred_by || '—'}</span>
-                    <span className="mx-1.5 text-gray-600">·</span>
-                    {new Date(r.created_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </div>
+        <div className="space-y-2">
+          {invites.map((inv) => (
+            <div
+              key={inv.id}
+              className={`bg-gray-900 border rounded-xl p-4 flex items-center gap-4 ${
+                inv.used_by_clerk_user_id ? 'border-gray-800 opacity-70' : 'border-gray-700'
+              }`}
+            >
+              <div className={`w-2 h-2 rounded-full shrink-0 ${inv.used_by_clerk_user_id ? 'bg-green-500' : 'bg-yellow-400'}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-sm text-white font-medium">{inv.code}</span>
+                  {inv.label && <span className="text-gray-400 text-sm">{inv.label}</span>}
+                  {inv.used_by_clerk_user_id ? (
+                    <span className="text-xs bg-green-900/50 text-green-300 border border-green-800 px-1.5 py-0.5 rounded">used</span>
+                  ) : (
+                    <span className="text-xs bg-yellow-900/50 text-yellow-300 border border-yellow-800 px-1.5 py-0.5 rounded">unused</span>
+                  )}
                 </div>
-                <button
-                  onClick={() => handleDelete(r)}
-                  className="text-gray-600 hover:text-red-400 text-xs shrink-0"
-                >
-                  Delete
-                </button>
+                {inv.used_at && (
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    Used {new Date(inv.used_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </div>
+                )}
+                <div className="text-xs text-gray-600 mt-0.5 truncate">{inviteUrl(inv.code)}</div>
               </div>
-
-              {r.notes && (
-                <p className="text-xs text-gray-400 italic bg-gray-800 rounded px-3 py-2 mb-2">"{r.notes}"</p>
-              )}
-
-              {/* Admin notes */}
-              {editingNotes?.id === r.id ? (
-                <div className="flex gap-2 mb-2">
-                  <input
-                    autoFocus
-                    type="text"
-                    value={editingNotes.value}
-                    onChange={(e) => setEditingNotes({ id: r.id, value: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') saveNotes(r.id, editingNotes.value);
-                      if (e.key === 'Escape') setEditingNotes(null);
-                    }}
-                    placeholder="Admin notes…"
-                    className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500"
-                  />
-                  <button onClick={() => saveNotes(r.id, editingNotes.value)} className="text-xs text-green-400 hover:text-green-300">Save</button>
-                  <button onClick={() => setEditingNotes(null)} className="text-xs text-gray-400 hover:text-white">Cancel</button>
-                </div>
-              ) : r.admin_notes ? (
+              <div className="flex gap-1.5 shrink-0">
                 <button
-                  onClick={() => setEditingNotes({ id: r.id, value: r.admin_notes })}
-                  className="text-xs text-gray-500 italic mb-2 hover:text-gray-300 text-left w-full"
+                  onClick={() => copyLink(inv)}
+                  className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2.5 py-1 rounded transition-colors"
                 >
-                  Note: {r.admin_notes}
+                  {copiedId === inv.id ? 'Copied ✓' : 'Copy Link'}
                 </button>
-              ) : (
                 <button
-                  onClick={() => setEditingNotes({ id: r.id, value: '' })}
-                  className="text-xs text-gray-600 hover:text-gray-400 mb-2"
+                  onClick={() => handleDelete(inv)}
+                  className="text-xs text-gray-500 hover:text-red-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors"
                 >
-                  + Add note
+                  Del
                 </button>
-              )}
-
-              {/* Actions */}
-              <div className="flex gap-1.5">
-                {r.status !== 'approved' && (
-                  <button
-                    onClick={() => setStatus(r.id, 'approved')}
-                    className="text-xs bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1 rounded transition-colors"
-                  >
-                    Approve
-                  </button>
-                )}
-                {r.status !== 'rejected' && (
-                  <button
-                    onClick={() => setStatus(r.id, 'rejected')}
-                    className="text-xs bg-red-900 hover:bg-red-800 text-red-300 px-3 py-1 rounded transition-colors"
-                  >
-                    Reject
-                  </button>
-                )}
-                {r.status !== 'pending' && (
-                  <button
-                    onClick={() => setStatus(r.id, 'pending')}
-                    className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 px-3 py-1 rounded transition-colors"
-                  >
-                    Reset to Pending
-                  </button>
-                )}
               </div>
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Members Tab ──────────────────────────────────────────────────────────────
+
+function MembersTab({ members }: { members: YearMember[] }) {
+  if (members.length === 0) {
+    return <p className="text-gray-500 text-sm">No members registered for this year yet.</p>;
+  }
+
+  return (
+    <div>
+      <h3 className="font-semibold text-gray-200 mb-4">{members.length} member{members.length !== 1 ? 's' : ''}</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[700px]">
+          <thead className="text-gray-400 text-xs border-b border-gray-700">
+            <tr>
+              <th className="px-3 py-2 text-left">Name</th>
+              <th className="px-3 py-2 text-left">Member ID</th>
+              <th className="px-3 py-2 text-center">Badge</th>
+              <th className="px-3 py-2 text-center">Return</th>
+              <th className="px-3 py-2 text-left">Role</th>
+              <th className="px-3 py-2 text-left">Joined</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800">
+            {members.map((m) => (
+              <tr key={m.id} className="hover:bg-gray-900/50">
+                <td className="px-3 py-2 text-white font-medium">{m.first_name} {m.last_name}</td>
+                <td className="px-3 py-2 font-mono text-xs text-gray-300">{m.member_id || '—'}</td>
+                <td className="px-3 py-2 text-center text-xs">
+                  <span className={m.badge_type === 'JUNIOR' ? 'text-blue-400' : 'text-gray-300'}>{m.badge_type}</span>
+                </td>
+                <td className="px-3 py-2 text-center text-xs">
+                  <span className={m.return_eligible ? 'text-green-400' : 'text-gray-600'}>
+                    {m.return_eligible ? '✓' : '—'}
+                  </span>
+                </td>
+                <td className="px-3 py-2">
+                  <span className={`text-xs px-2 py-0.5 rounded ${
+                    m.role === 'owner' ? 'bg-yellow-900/50 text-yellow-300' :
+                    m.role === 'admin' ? 'bg-blue-900/50 text-blue-300' :
+                    'bg-gray-800 text-gray-400'
+                  }`}>{m.role}</span>
+                </td>
+                <td className="px-3 py-2 text-xs text-gray-400">
+                  {new Date(m.joined_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
