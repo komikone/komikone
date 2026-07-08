@@ -9,6 +9,7 @@ import Payment from './pages/Payment';
 import Admin from './pages/Admin';
 import Stats from './pages/Stats';
 import SignIn from './pages/SignIn';
+import ProfilePage from './pages/Profile';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { isLoaded, isSignedIn } = useAuth();
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/register/:eventId" element={<Registration />} />
         <Route path="/join/:code" element={<JoinPage />} />
         <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
+        <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
         <Route path="/live/:eventId" element={<RequireAuth><LiveBoard /></RequireAuth>} />
         <Route path="/payment/:eventId" element={<RequireAuth><Payment /></RequireAuth>} />
         <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />

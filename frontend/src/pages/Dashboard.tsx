@@ -31,64 +31,57 @@ export default function Dashboard() {
     return t;
   }, [getToken]);
 
-  // Load available years from events list
   useEffect(() => {
-    api.events.list().then((events) => {
-      const seen = new Map<number, Year>();
-      for (const e of events) {
-        if (!seen.has(e.year)) {
-          seen.set(e.year, { id: e.year, name: `SDCC ${e.year}`, con_year: e.year, owner_clerk_user_id: '', created_at: '', updated_at: '' });
-        }
-      }
-      setYears([...seen.values()].reverse());
-    }).catch(() => {});
-  }, []);
+    tok()
+      .then((t) => api.years.list(t))
+      .then((ys) => {
+        setYears(ys);
+        if (ys.length > 0) setSelectedYearId((prev) => prev ?? ys[0].con_year);
+      })
+      .catch(() => {});
+  }, [tok]);
 
-  const loadYear = useCallback(async (yearId: number) => {
+  const loadYear = useCallback(async (conYear: number) => {
     setLoading(true);
     setError('');
     try {
       const t = await tok();
+      const yearList = await api.years.list(t);
+      setYears(yearList);
 
-      // Load admin years to get real year IDs
-      let realYearId = yearId;
-      try {
-        const adminYears = await api.admin.years.list(t);
-        const matched = adminYears.find(y => y.con_year === yearId);
-        if (matched) realYearId = matched.id;
-      } catch {}
+      const yearObj = yearList.find((y) => y.con_year === conYear);
+      if (!yearObj) {
+        setMember(null);
+        setGroupViews([]);
+        setInvites([]);
+        return;
+      }
 
       const [memberRes, events] = await Promise.all([
-        api.years.me(realYearId, t).catch(() => null),
+        api.years.me(yearObj.id, t).catch(() => null),
         api.events.list(),
       ]);
 
       if (!memberRes) {
         setMember(null);
         setGroupViews([]);
-        setLoading(false);
+        setInvites([]);
         return;
       }
 
       setMember(memberRes.member);
 
-      const yearEvents = events.filter(e => e.year === yearId);
+      const yearEvents = events.filter((e) => e.year === conYear);
       const views = await Promise.all(
         yearEvents.map(async (e) => {
-          const { group, participants } = await api.years.myGroup(realYearId, e.id, t);
+          const { group, participants } = await api.years.myGroup(yearObj.id, e.id, t);
           return { group, participants, event: e };
         })
       );
       setGroupViews(views);
 
-      // Load invites the user has created for this year
-      try {
-        const inv = await api.admin.invites.list(t, realYearId);
-        setInvites(inv.filter(i => !i.used_at));
-      } catch {
-        // Non-admin users won't have access to admin invite list — that's fine
-        setInvites([]);
-      }
+      const inv = await api.invites.listForYear(yearObj.id, t).catch(() => []);
+      setInvites(inv.filter((i) => !i.used_at));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -97,25 +90,18 @@ export default function Dashboard() {
   }, [tok]);
 
   useEffect(() => {
-    if (years.length > 0 && !selectedYearId) {
-      setSelectedYearId(years[0].con_year);
-    }
-  }, [years, selectedYearId]);
-
-  useEffect(() => {
-    if (selectedYearId) loadYear(selectedYearId);
+    if (selectedYearId !== null) loadYear(selectedYearId);
   }, [selectedYearId, loadYear]);
 
   const handleCreateInvite = async () => {
-    if (!selectedYearId) return;
+    if (selectedYearId === null) return;
     setCreatingInvite(true);
     try {
       const t = await tok();
-      const adminYears = await api.admin.years.list(t);
-      const matched = adminYears.find(y => y.con_year === selectedYearId);
-      const yearId = matched?.id ?? selectedYearId;
-      const inv = await api.admin.invites.create(t, yearId, inviteLabel || undefined);
-      setInvites(prev => [inv, ...prev]);
+      const yearObj = years.find((y) => y.con_year === selectedYearId);
+      if (!yearObj) throw new Error('Year not found');
+      const inv = await api.invites.createForYear(yearObj.id, t, inviteLabel || undefined);
+      setInvites((prev) => [inv, ...prev]);
       setInviteLabel('');
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to create invite');
@@ -142,6 +128,14 @@ export default function Dashboard() {
   const returnView = groupViews.find(v => v.event.reg_type === 'return');
   const openView = groupViews.find(v => v.event.reg_type === 'open');
   const primaryView = returnView ?? openView;
+  const yearObj = years.find((y) => y.con_year === selectedYearId);
+  const registrationEvent = (() => {
+    if (!member) return null;
+    const view = member.return_eligible ? returnView ?? openView : openView ?? returnView;
+    return view?.event.status === 'registration' ? view.event : null;
+  })();
+
+  const resolveYearId = () => yearObj?.id ?? null;
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -195,6 +189,21 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {registrationEvent && (
+              <div className="bg-blue-950/40 border border-blue-800 rounded-xl p-4 mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-white text-sm font-medium">Registration is open</p>
+                  <p className="text-gray-400 text-xs mt-0.5">Select which badge days you want for {registrationEvent.name}.</p>
+                </div>
+                <Link
+                  to={`/register/${registrationEvent.id}`}
+                  className="text-sm bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg transition-colors shrink-0"
+                >
+                  Select days →
+                </Link>
+              </div>
+            )}
+
             {/* Group members */}
             {primaryView && (
               <section className="mb-6">
@@ -210,13 +219,12 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                {addOpen && (
+                {addOpen && primaryView && (
                   <AddParticipantForm
                     onSave={async (data) => {
                       const t = await tok();
-                      const adminYears = await api.admin.years.list(t).catch(() => []);
-                      const matched = adminYears.find(y => y.con_year === selectedYearId);
-                      const realYearId = matched?.id ?? selectedYearId!;
+                      const realYearId = resolveYearId();
+                      if (!realYearId) throw new Error('Year not found');
                       await api.years.addParticipant(realYearId, primaryView.event.id, t, data);
                       setAddOpen(false);
                       loadYear(selectedYearId!);
@@ -248,9 +256,8 @@ export default function Dashboard() {
                               isSelf={p.clerk_user_id === member.clerk_user_id}
                               onSave={async (data) => {
                                 const t = await tok();
-                                const adminYears = await api.admin.years.list(t).catch(() => []);
-                                const matched = adminYears.find(y => y.con_year === selectedYearId);
-                                const realYearId = matched?.id ?? selectedYearId!;
+                                const realYearId = resolveYearId();
+                                if (!realYearId || !primaryView) return;
                                 await api.years.updateParticipant(realYearId, primaryView.event.id, p.id, t, data);
                                 setEditingId(null);
                                 loadYear(selectedYearId!);
@@ -288,9 +295,8 @@ export default function Dashboard() {
                                       onClick={async () => {
                                         if (!confirm(`Remove ${p.first_name} ${p.last_name}?`)) return;
                                         const t = await tok();
-                                        const adminYears = await api.admin.years.list(t).catch(() => []);
-                                        const matched = adminYears.find(y => y.con_year === selectedYearId);
-                                        const realYearId = matched?.id ?? selectedYearId!;
+                                        const realYearId = resolveYearId();
+                                        if (!realYearId || !primaryView) return;
                                         await api.years.removeParticipant(realYearId, primaryView.event.id, p.id, t);
                                         loadYear(selectedYearId!);
                                       }}

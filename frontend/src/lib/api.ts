@@ -290,9 +290,13 @@ export const api = {
       req<Invite>(`/api/years/${yearId}/invites`, {
         method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify({ label }),
       }),
+    listForYear: (yearId: number, clerkToken: string) =>
+      req<Invite[]>(`/api/years/${yearId}/invites`, { headers: authHeaders(clerkToken) }),
   },
 
   years: {
+    list: (clerkToken: string) =>
+      req<Year[]>('/api/years', { headers: authHeaders(clerkToken) }),
     me: (yearId: number, clerkToken: string) =>
       req<{ member: YearMember }>(`/api/years/${yearId}/me`, { headers: authHeaders(clerkToken) }),
     myGroup: (yearId: number, eventId: number, clerkToken: string) =>

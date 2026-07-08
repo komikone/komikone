@@ -205,6 +205,36 @@ app.post('/api/events/:id/register', async (c) => {
 
   const badgeType = body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT';
   const clerkUserId = access.userId === 'admin' ? null : access.userId;
+  const firstName = body.first_name.trim();
+  const lastName = body.last_name.trim();
+  const memberId = body.member_id?.trim() ?? '';
+  const reqPreview = body.req_preview ? 1 : 0;
+  const reqThu = body.req_thu ? 1 : 0;
+  const reqFri = body.req_fri ? 1 : 0;
+  const reqSat = body.req_sat ? 1 : 0;
+  const reqSun = body.req_sun ? 1 : 0;
+
+  // Update existing linked participant (invite flow or re-submitting days)
+  if (clerkUserId) {
+    const existing = await c.env.DB.prepare(
+      'SELECT id FROM participants WHERE event_id = ? AND clerk_user_id = ?'
+    ).bind(id, clerkUserId).first<{ id: number }>();
+
+    if (existing) {
+      await c.env.DB.prepare(`
+        UPDATE participants SET
+          first_name = ?, last_name = ?, member_id = ?, badge_type = ?,
+          req_preview = ?, req_thu = ?, req_fri = ?, req_sat = ?, req_sun = ?,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(
+        firstName, lastName, memberId, badgeType,
+        reqPreview, reqThu, reqFri, reqSat, reqSun,
+        existing.id,
+      ).run();
+      return json({ ok: true, id: existing.id, updated: true });
+    }
+  }
 
   let result;
   try {
@@ -215,18 +245,9 @@ app.post('/api/events/:id/register', async (c) => {
          clerk_user_id, registered_by_clerk_user_id, sort_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 9999)
     `).bind(
-      id,
-      body.first_name.trim(),
-      body.last_name.trim(),
-      body.member_id?.trim() ?? '',
-      badgeType,
-      body.req_preview ? 1 : 0,
-      body.req_thu ? 1 : 0,
-      body.req_fri ? 1 : 0,
-      body.req_sat ? 1 : 0,
-      body.req_sun ? 1 : 0,
-      clerkUserId,
-      clerkUserId,
+      id, firstName, lastName, memberId, badgeType,
+      reqPreview, reqThu, reqFri, reqSat, reqSun,
+      clerkUserId, clerkUserId,
     ).run();
   } catch (e) {
     if (e instanceof Error && e.message.includes('UNIQUE')) return err('Already registered for this event', 409);
@@ -638,6 +659,16 @@ app.post('/api/invites/:code/accept', async (c) => {
 
 // ── User dashboard endpoints ──────────────────────────────────────────────────
 
+app.get('/api/years', async (c) => {
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access || access.userId === 'admin') return err('Sign in required', 401);
+
+  const rows = await c.env.DB.prepare(
+    'SELECT * FROM years ORDER BY con_year DESC'
+  ).all<Year>();
+  return json(rows.results);
+});
+
 // Current user's membership + group info for a year
 app.get('/api/years/:yearId/me', async (c) => {
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
@@ -827,6 +858,24 @@ app.delete('/api/years/:yearId/events/:eventId/my-group/participants/:pid', asyn
 
   await c.env.DB.prepare('DELETE FROM participants WHERE id = ?').bind(pid).run();
   return json({ ok: true });
+});
+
+// List invites created by the current user for a year
+app.get('/api/years/:yearId/invites', async (c) => {
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access || access.userId === 'admin') return err('Sign in required', 401);
+
+  const yearId = Number(c.req.param('yearId'));
+
+  const member = await c.env.DB.prepare(
+    'SELECT id FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+  ).bind(yearId, access.userId).first();
+  if (!member) return err('Not a member of this year', 403);
+
+  const rows = await c.env.DB.prepare(
+    'SELECT * FROM invites WHERE year_id = ? AND invited_by_clerk_user_id = ? ORDER BY created_at DESC'
+  ).bind(yearId, access.userId).all<Invite>();
+  return json(rows.results);
 });
 
 // Create an invite (registered users and admins)

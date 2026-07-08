@@ -85,6 +85,13 @@ export default function Home() {
                         Admin
                       </Link>
                     )}
+                    <Link
+                      to="/dashboard"
+                      onClick={() => setAvatarOpen(false)}
+                      className="block px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                    >
+                      Dashboard
+                    </Link>
                     <button
                       onClick={() => signOut({ redirectUrl: '/' })}
                       className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"

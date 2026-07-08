@@ -11,6 +11,7 @@ export default function Registration() {
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [alreadyRegistered, setAlreadyRegistered] = useState(false);
 
   const [form, setForm] = useState({
     first_name: '',
@@ -29,9 +30,30 @@ export default function Registration() {
     if (!isSignedIn) { navigate('/sign-in?redirect=' + encodeURIComponent(window.location.pathname)); return; }
     if (!eventId) return;
 
-    getToken({ template: 'komikone' }).then((tok) => {
+    getToken({ template: 'komikone' }).then(async (tok) => {
       if (!tok) return;
-      api.events.get(Number(eventId), tok).then(setEvent).catch((e) => setError(e.message));
+      try {
+        const ev = await api.events.get(Number(eventId), tok);
+        setEvent(ev);
+        const identity = await api.participants.getMyIdentity(Number(eventId), tok);
+        if (identity.linked && identity.participant) {
+          const p = identity.participant;
+          setAlreadyRegistered(true);
+          setForm({
+            first_name: p.first_name,
+            last_name: p.last_name,
+            member_id: p.member_id,
+            badge_type: p.badge_type,
+            req_preview: p.req_preview,
+            req_thu: p.req_thu,
+            req_fri: p.req_fri,
+            req_sat: p.req_sat,
+            req_sun: p.req_sun,
+          });
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load');
+      }
     });
   }, [isLoaded, isSignedIn, eventId, getToken, navigate]);
 
@@ -75,11 +97,16 @@ export default function Registration() {
       <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
         <div className="bg-gray-900 border border-green-600 rounded-xl p-8 max-w-sm text-center">
           <div className="text-green-400 text-4xl mb-4">✓</div>
-          <h2 className="text-white text-xl font-bold mb-2">You're registered!</h2>
+          <h2 className="text-white text-xl font-bold mb-2">
+            {alreadyRegistered ? 'Registration updated!' : "You're registered!"}
+          </h2>
           <p className="text-gray-400 text-sm mb-6">
             On purchase day, open the live board — you'll be recognized automatically.
           </p>
-          <Link to="/" className="text-blue-400 hover:text-blue-300 text-sm">← Back to home</Link>
+          <div className="flex flex-col gap-2">
+            <Link to="/dashboard" className="text-blue-400 hover:text-blue-300 text-sm">Go to Dashboard</Link>
+            <Link to="/" className="text-gray-500 hover:text-gray-300 text-sm">← Back to home</Link>
+          </div>
         </div>
       </div>
     );
@@ -186,7 +213,7 @@ export default function Registration() {
             type="submit"
             className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-lg transition-colors"
           >
-            Submit Registration
+            {alreadyRegistered ? 'Update Registration' : 'Submit Registration'}
           </button>
 
           <p className="text-gray-500 text-xs text-center">
