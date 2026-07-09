@@ -6,6 +6,7 @@ import { useBackgroundImage } from '../lib/useBackgrounds';
 import { useTheme } from '../lib/useTheme';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
+const HOME_CONTENT = 'max-w-5xl mx-auto px-6';
 
 type YearStat = { year: number; reg_type: 'return' | 'open'; total: number; purchased_any: number };
 type StatsData = { years: YearStat[] };
@@ -105,7 +106,7 @@ export default function Home() {
         <HomeFeatureBand>
           {active.length > 0 && (
             <section className="border-b-4 border-black dark:border-gray-700 scroll-mt-16">
-              <div className="max-w-4xl mx-auto px-6 py-6 space-y-4">
+              <div className={`${HOME_CONTENT} py-6 space-y-4`}>
                 <h2 className="font-bangers text-2xl text-red-600 tracking-wide">Active Events</h2>
                 {active.map((e) => <EventCard key={e.id} event={e} />)}
               </div>
@@ -114,13 +115,14 @@ export default function Home() {
 
           <AboutSection />
           <HowItWorksSection />
-        </HomeFeatureBand>
-
-        <div className="max-w-3xl mx-auto px-6 py-10 space-y-10">
           <StatsSection />
 
-          {!isSignedIn && <WantInSection onOpen={() => setInviteOpen(true)} />}
-        </div>
+          {!isSignedIn && (
+            <div className={`${HOME_CONTENT} py-10`}>
+              <WantInSection onOpen={() => setInviteOpen(true)} />
+            </div>
+          )}
+        </HomeFeatureBand>
       </main>
 
       <Footer />
@@ -173,7 +175,7 @@ function HeroSection({ isSignedIn, onRequestAccess }: { isSignedIn: boolean; onR
         {/* Caption label */}
         <div className="inline-block bg-yellow-400 border-2 border-black comic-shadow-sm px-4 py-1 mb-6 -rotate-1">
           <span className="font-bangers text-black text-sm tracking-widest uppercase">
-            San Diego Comic-Con · Private Group
+            San Diego Comic-Con · Buying Group
           </span>
         </div>
 
@@ -308,7 +310,7 @@ function InviteEntry({
 function AboutSection() {
   return (
     <section className="border-b-4 border-black dark:border-gray-700">
-      <div className="max-w-5xl mx-auto">
+      <div className={HOME_CONTENT}>
         <div className="border-x-4 border-black dark:border-white grid grid-cols-1 md:grid-cols-3">
           {/* Panel 1 — top-left, 2 cols */}
           <div className="md:col-span-2 border-b-4 md:border-r-4 border-black dark:border-white p-7 bg-amber-50 dark:bg-gray-950 relative overflow-hidden flex flex-col justify-between min-h-[220px]">
@@ -477,12 +479,10 @@ function HowItWorksSection() {
 
   return (
     <section id="how-it-works" className="scroll-mt-16">
-      <div className="max-w-5xl mx-auto pb-8">
-        <div className="px-6 pt-8">
-          <h2 className="font-bangers text-4xl text-red-600 tracking-wide">
-            How It Works
-          </h2>
-        </div>
+      <div className={`${HOME_CONTENT} pb-8 pt-8`}>
+        <h2 className="font-bangers text-4xl text-red-600 tracking-wide">
+          How It Works
+        </h2>
         <div className="mt-6 grid grid-cols-1 md:grid-cols-3 border-t-4 border-black/80">
           {steps.map((step, i) => (
             <div
@@ -699,12 +699,13 @@ function StatsSection() {
   const gap = chartW / years.length;
 
   return (
-    <section>
-      <h2 className="font-bangers text-2xl text-red-600 dark:text-yellow-400 mb-4 tracking-wide">
-        Track Record
-      </h2>
+    <section className="border-t-4 border-black dark:border-gray-700">
+      <div className={`${HOME_CONTENT} py-10`}>
+        <h2 className="font-bangers text-2xl text-red-600 mb-4 tracking-wide">
+          Track Record
+        </h2>
 
-      <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-3 gap-3 mb-6">
         {[
           { value: yearsRunning, label: 'Years Running' },
           { value: totalParticipants, label: 'Badges Coordinated' },
@@ -777,6 +778,7 @@ function StatsSection() {
             <Link to="/stats" className="text-red-500 dark:text-yellow-500 hover:underline">Full stats →</Link>
           </span>
         </div>
+      </div>
       </div>
     </section>
   );
