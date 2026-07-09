@@ -314,6 +314,7 @@ export const api = {
     updateParticipant: (yearId: number, eventId: number, pid: number, clerkToken: string, data: Partial<{
       first_name: string; last_name: string; member_id: string;
       badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean;
+      req_preview: boolean; req_thu: boolean; req_fri: boolean; req_sat: boolean; req_sun: boolean;
     }>) =>
       req<Participant>(`/api/years/${yearId}/events/${eventId}/my-group/participants/${pid}`, {
         method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),

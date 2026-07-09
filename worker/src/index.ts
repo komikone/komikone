@@ -839,16 +839,35 @@ app.patch('/api/years/:yearId/events/:eventId/my-group/participants/:pid', async
   const body = await c.req.json<Partial<{
     first_name: string; last_name: string; member_id: string;
     badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean;
+    req_preview: boolean; req_thu: boolean; req_fri: boolean; req_sat: boolean; req_sun: boolean;
   }>>();
 
+  const event = await getEvent(c.env.DB, eventId);
+  const canEditDays = event?.status === 'registration';
+
+  const reqFields: string[] = [];
+  const reqValues: number[] = [];
+  if (canEditDays) {
+    for (const key of ['req_preview', 'req_thu', 'req_fri', 'req_sat', 'req_sun'] as const) {
+      if (key in body) {
+        reqFields.push(`${key} = ?`);
+        reqValues.push(body[key] ? 1 : 0);
+      }
+    }
+  }
+
+  const setClauses = [
+    'first_name = COALESCE(?, first_name)',
+    'last_name = COALESCE(?, last_name)',
+    'member_id = COALESCE(?, member_id)',
+    'badge_type = COALESCE(?, badge_type)',
+    'return_eligible = COALESCE(?, return_eligible)',
+    ...reqFields,
+    "updated_at = datetime('now')",
+  ];
+
   await c.env.DB.prepare(`
-    UPDATE participants SET
-      first_name = COALESCE(?, first_name),
-      last_name = COALESCE(?, last_name),
-      member_id = COALESCE(?, member_id),
-      badge_type = COALESCE(?, badge_type),
-      return_eligible = COALESCE(?, return_eligible),
-      updated_at = datetime('now')
+    UPDATE participants SET ${setClauses.join(', ')}
     WHERE id = ?
   `).bind(
     body.first_name?.trim() ?? null,
@@ -856,8 +875,33 @@ app.patch('/api/years/:yearId/events/:eventId/my-group/participants/:pid', async
     body.member_id?.trim() ?? null,
     body.badge_type ?? null,
     body.return_eligible != null ? (body.return_eligible ? 1 : 0) : null,
+    ...reqValues,
     pid,
   ).run();
+
+  const pRow = await c.env.DB.prepare(
+    'SELECT clerk_user_id FROM participants WHERE id = ?'
+  ).bind(pid).first<{ clerk_user_id: string | null }>();
+
+  if (pRow?.clerk_user_id === access.userId) {
+    await c.env.DB.prepare(`
+      UPDATE year_members SET
+        first_name = COALESCE(?, first_name),
+        last_name = COALESCE(?, last_name),
+        member_id = COALESCE(?, member_id),
+        badge_type = COALESCE(?, badge_type),
+        return_eligible = COALESCE(?, return_eligible)
+      WHERE year_id = ? AND clerk_user_id = ?
+    `).bind(
+      body.first_name?.trim() ?? null,
+      body.last_name?.trim() ?? null,
+      body.member_id?.trim() ?? null,
+      body.badge_type ?? null,
+      body.return_eligible != null ? (body.return_eligible ? 1 : 0) : null,
+      yearId,
+      access.userId,
+    ).run();
+  }
 
   const updated = await c.env.DB.prepare(
     `${PARTICIPANTS_QUERY} WHERE p.id = ?`
