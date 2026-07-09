@@ -7,6 +7,7 @@ import { useTheme } from '../lib/useTheme';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
 const HOME_CONTENT = 'max-w-5xl mx-auto px-6';
+const TOUCAN_PROGRESS_GIF = '/walking-toucan-progress-bar.gif';
 
 type YearStat = { year: number; reg_type: 'return' | 'open'; total: number; purchased_any: number };
 type StatsData = { years: YearStat[] };
@@ -462,7 +463,7 @@ function HowItWorksSection() {
       items: [
         'Join the Zoom call on purchase day.',
         'Coordinators claim a row → buy → check off days in real time.',
-        'Live board refreshes every 8 seconds. No chaos.',
+        'Live board automatically refreshes. No chaos.',
       ],
     },
     {
@@ -473,6 +474,7 @@ function HowItWorksSection() {
         'The Payment page shows exactly what you owe and to whom.',
         'Send via Venmo, Zelle, or PayPal.',
         'Mark yourself paid. You\'re done.',
+        { label: 'Buy me a coffee ☕', href: 'https://buymeacoffee.com/therealtonynguyen' },
       ],
     },
   ];
@@ -483,13 +485,13 @@ function HowItWorksSection() {
         <h2 className="font-bangers text-4xl text-red-600 tracking-wide">
           How It Works
         </h2>
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 border-t-4 border-black/80">
+        <div className="mt-6 border-4 border-black dark:border-white grid grid-cols-1 md:grid-cols-3 comic-shadow">
           {steps.map((step, i) => (
             <div
               key={step.num}
-              className={`p-6 ${
+              className={`p-6 bg-white dark:bg-gray-900 relative ${
                 i < steps.length - 1
-                  ? 'border-b-4 md:border-b-0 md:border-r-4 border-black/80'
+                  ? 'border-b-4 md:border-b-0 md:border-r-4 border-black dark:border-white'
                   : ''
               }`}
             >
@@ -502,12 +504,26 @@ function HowItWorksSection() {
                 {step.title}
               </h3>
               <ul className="space-y-2">
-                {step.items.map((item) => (
-                  <li key={item} className="text-gray-700 text-sm leading-snug flex gap-2">
-                    <span className="text-red-500 shrink-0 mt-0.5">▸</span>
-                    {item}
-                  </li>
-                ))}
+                {step.items.map((item) => {
+                  const key = typeof item === 'string' ? item : item.label;
+                  return (
+                    <li key={key} className="text-gray-700 text-sm leading-snug flex gap-2">
+                      <span className="text-red-500 shrink-0 mt-0.5">▸</span>
+                      {typeof item === 'string' ? (
+                        item
+                      ) : (
+                        <a
+                          href={item.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-red-600 hover:underline underline-offset-2"
+                        >
+                          {item.label}
+                        </a>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ))}
@@ -659,6 +675,38 @@ function InviteRequestModal({ onClose }: { onClose: () => void }) {
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
+function ComicStatBubble({
+  value,
+  shout,
+  caption,
+  panelClass,
+  tailClass,
+  tilt,
+}: {
+  value: string;
+  shout: string;
+  caption: string;
+  panelClass: string;
+  tailClass: string;
+  tilt: string;
+}) {
+  return (
+    <div className={`relative ${tilt}`}>
+      <div className={`border-4 border-black ${panelClass} px-4 py-6 comic-shadow text-center relative z-10`}>
+        <p className="font-bangers text-5xl md:text-6xl text-red-600 leading-none">{value}</p>
+        <p className="font-bangers text-xl md:text-2xl text-gray-900 tracking-wide leading-tight mt-2">
+          {shout}
+        </p>
+        <p className="text-gray-700 text-xs mt-2 leading-snug font-medium">{caption}</p>
+      </div>
+      <span
+        className={`absolute -bottom-2 left-8 z-0 block w-5 h-5 border-r-4 border-b-4 border-black rotate-45 ${tailClass}`}
+        aria-hidden
+      />
+    </div>
+  );
+}
+
 function StatsSection() {
   const [stats, setStats] = useState<StatsData | null>(null);
 
@@ -681,104 +729,46 @@ function StatsSection() {
   const totalParticipants = complete.reduce((s, y) => s + y.total, 0);
   const totalPurchased = complete.reduce((s, y) => s + y.purchased_any, 0);
   const successRate = Math.round((totalPurchased / totalParticipants) * 100);
-  const years = [...new Set(complete.map((y) => y.year))].sort();
 
-  const yearTotals = years.map((yr) => {
-    const rows = complete.filter((y) => y.year === yr);
-    const total = rows.reduce((s, y) => s + y.total, 0);
-    const bought = rows.reduce((s, y) => s + y.purchased_any, 0);
-    return { yr, total, bought, rate: Math.round((bought / total) * 100) };
-  });
-
-  const maxTotal = Math.max(...yearTotals.map((y) => y.total));
-
-  const W = 560, H = 140, PAD_L = 32, PAD_B = 28, PAD_T = 14;
-  const chartW = W - PAD_L - 8;
-  const chartH = H - PAD_B - PAD_T;
-  const barW = Math.min(52, Math.floor(chartW / years.length) - 10);
-  const gap = chartW / years.length;
+  const bubbles = [
+    {
+      value: String(yearsRunning),
+      shout: 'YEARS STRONG!',
+      caption: 'Same crew, same mission — badge season after badge season!',
+      panelClass: 'bg-amber-50',
+      tailClass: 'bg-amber-50',
+      tilt: '-rotate-2',
+    },
+    {
+      value: String(totalParticipants),
+      shout: 'BADGES COORDINATED!',
+      caption: 'Hundreds of badges bought, tracked, and paid off as a team!',
+      panelClass: 'bg-yellow-300',
+      tailClass: 'bg-yellow-300',
+      tilt: 'rotate-2',
+    },
+    {
+      value: `${successRate}%`,
+      shout: 'SUCCESS RATE!',
+      caption: 'When we go live, the crew gets their badges. BOOM!',
+      panelClass: 'bg-white',
+      tailClass: 'bg-white',
+      tilt: '-rotate-1',
+    },
+  ];
 
   return (
     <section className="border-t-4 border-black dark:border-gray-700">
       <div className={`${HOME_CONTENT} py-10`}>
-        <h2 className="font-bangers text-2xl text-red-600 mb-4 tracking-wide">
+        <h2 className="font-bangers text-2xl text-red-600 mb-6 tracking-wide">
           Track Record
         </h2>
 
-        <div className="grid grid-cols-3 gap-3 mb-6">
-        {[
-          { value: yearsRunning, label: 'Years Running' },
-          { value: totalParticipants, label: 'Badges Coordinated' },
-          { value: `${successRate}%`, label: 'Success Rate' },
-        ].map(({ value, label }) => (
-          <div
-            key={label}
-            className="border-2 border-black dark:border-gray-700 bg-white dark:bg-gray-900 p-4 comic-shadow text-center"
-          >
-            <div className="font-bangers text-4xl text-red-600 dark:text-yellow-400 leading-none">{value}</div>
-            <div className="text-gray-500 dark:text-gray-500 text-xs mt-1 uppercase tracking-widest">{label}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="border-2 border-black dark:border-gray-700 bg-white dark:bg-gray-900 p-4 comic-shadow">
-        <p className="text-xs text-gray-400 dark:text-gray-600 uppercase tracking-widest mb-3">
-          Participants per year · % got badges
-        </p>
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 160 }}>
-          {[0.25, 0.5, 0.75, 1].map((frac) => {
-            const y = PAD_T + chartH * (1 - frac);
-            return (
-              <g key={frac}>
-                <line x1={PAD_L} x2={W - 8} y1={y} y2={y} stroke="currentColor" strokeOpacity={0.07} strokeWidth={1} />
-                <text x={PAD_L - 4} y={y + 4} textAnchor="end" fontSize={8} fill="currentColor" opacity={0.35}>
-                  {Math.round(maxTotal * frac)}
-                </text>
-              </g>
-            );
-          })}
-
-          {yearTotals.map(({ yr, total, bought, rate }, i) => {
-            const cx = PAD_L + gap * i + gap / 2;
-            const totalH = (total / maxTotal) * chartH;
-            const boughtH = (bought / maxTotal) * chartH;
-            const barX = cx - barW / 2;
-            const successColor = rate >= 90 ? '#22c55e' : rate >= 75 ? '#eab308' : '#ef4444';
-            return (
-              <g key={yr}>
-                <rect x={barX} y={PAD_T + chartH - totalH} width={barW} height={totalH} fill="currentColor" opacity={0.08} rx={2} />
-                <rect x={barX} y={PAD_T + chartH - boughtH} width={barW} height={boughtH} fill={successColor} opacity={0.85} rx={2} />
-                <text x={cx} y={PAD_T + chartH - totalH - 4} textAnchor="middle" fontSize={9} fontWeight="bold" fill={successColor}>
-                  {rate}%
-                </text>
-                <text x={cx} y={PAD_T + chartH - 5} textAnchor="middle" fontSize={8} fill="currentColor" opacity={0.5}>
-                  {total}
-                </text>
-                <text x={cx} y={H - 6} textAnchor="middle" fontSize={10} fontWeight="bold" fill="currentColor" opacity={0.7}>
-                  {yr}
-                </text>
-              </g>
-            );
-          })}
-
-          <line x1={PAD_L} x2={W - 8} y1={PAD_T + chartH} y2={PAD_T + chartH} stroke="currentColor" strokeOpacity={0.2} strokeWidth={1} />
-        </svg>
-
-        <div className="flex gap-4 mt-2 text-xs text-gray-400 dark:text-gray-600">
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-3 rounded-sm bg-green-500 opacity-85" /> ≥ 90% success
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-3 rounded-sm bg-yellow-500 opacity-85" /> 75–89%
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-3 rounded-sm bg-red-500 opacity-85" /> &lt; 75%
-          </span>
-          <span className="flex items-center gap-1.5 ml-auto">
-            <Link to="/stats" className="text-red-500 dark:text-yellow-500 hover:underline">Full stats →</Link>
-          </span>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-6">
+          {bubbles.map((bubble) => (
+            <ComicStatBubble key={bubble.shout} {...bubble} />
+          ))}
         </div>
-      </div>
       </div>
     </section>
   );
@@ -788,8 +778,8 @@ function StatsSection() {
 
 function Footer() {
   return (
-    <footer className="border-t-4 border-black dark:border-gray-700 bg-white dark:bg-gray-900 px-6 py-8">
-      <div className="max-w-3xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+    <footer className="border-t-4 border-black dark:border-gray-700 bg-white dark:bg-gray-900 py-8">
+      <div className={`${HOME_CONTENT} flex flex-col sm:flex-row items-center justify-between gap-4`}>
         <div className="text-center sm:text-left">
           <p className="font-bangers text-xl text-gray-900 dark:text-white tracking-wide">komikone</p>
           <p className="text-gray-400 dark:text-gray-600 text-xs mt-0.5">
@@ -810,6 +800,19 @@ function Footer() {
 }
 
 // ─── Event cards ──────────────────────────────────────────────────────────────
+
+function ToucanProgressBar() {
+  return (
+    <div className="mt-4 w-full overflow-hidden">
+      <img
+        src={TOUCAN_PROGRESS_GIF}
+        alt=""
+        className="block w-full h-auto"
+        draggable={false}
+      />
+    </div>
+  );
+}
 
 function StatusBadge({ status }: { status: EventSummary['status'] }) {
   const styles: Record<EventSummary['status'], string> = {
@@ -857,6 +860,8 @@ function EventCard({ event }: { event: EventSummary }) {
         </div>
         <StatusBadge status={event.status} />
       </div>
+
+      <ToucanProgressBar />
 
       <div className="flex gap-3 mt-4 flex-wrap items-center">
         {isRegistration && (
