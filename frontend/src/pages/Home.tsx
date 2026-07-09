@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useClerk, useUser } from '@clerk/clerk-react';
 import { api, type EventSummary } from '../lib/api';
+import { useBackgroundImage } from '../lib/useBackgrounds';
 import { useTheme } from '../lib/useTheme';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
@@ -101,18 +102,19 @@ export default function Home() {
       <HeroSection isSignedIn={!!isSignedIn} onRequestAccess={() => setInviteOpen(true)} />
 
       <main>
-        {active.length > 0 && (
-          <section className="border-y-4 border-black bg-red-50 dark:bg-red-950/20 scroll-mt-16">
-            <div className="max-w-4xl mx-auto px-6 py-6 space-y-4">
-              <h2 className="font-bangers text-2xl text-red-600 dark:text-yellow-400 tracking-wide">Active Events</h2>
-              {active.map((e) => <EventCard key={e.id} event={e} />)}
-            </div>
-          </section>
-        )}
+        <HomeFeatureBand>
+          {active.length > 0 && (
+            <section className="border-b-4 border-black dark:border-gray-700 scroll-mt-16">
+              <div className="max-w-4xl mx-auto px-6 py-6 space-y-4">
+                <h2 className="font-bangers text-2xl text-red-600 tracking-wide">Active Events</h2>
+                {active.map((e) => <EventCard key={e.id} event={e} />)}
+              </div>
+            </section>
+          )}
 
-        <AboutSection />
-
-        <HowItWorksSection />
+          <AboutSection />
+          <HowItWorksSection />
+        </HomeFeatureBand>
 
         <div className="max-w-3xl mx-auto px-6 py-10 space-y-10">
           <StatsSection />
@@ -131,21 +133,13 @@ export default function Home() {
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
 function HeroSection({ isSignedIn, onRequestAccess }: { isSignedIn: boolean; onRequestAccess: () => void }) {
-  const navigate = useNavigate();
   const [offsetY, setOffsetY] = useState(0);
-  const [inviteCode, setInviteCode] = useState('');
 
   useEffect(() => {
     const onScroll = () => setOffsetY(window.scrollY);
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
-
-  const goToJoin = () => {
-    const code = inviteCode.trim().replace(/^\/join\//i, '').split('/').pop()?.split('?')[0] ?? '';
-    if (!code) return;
-    navigate(`/join/${code}`);
-  };
 
   return (
     <section className="relative h-screen overflow-hidden bg-black flex items-center justify-center">
@@ -211,43 +205,14 @@ function HeroSection({ isSignedIn, onRequestAccess }: { isSignedIn: boolean; onR
             </a>
           </div>
         ) : (
-          <div className="max-w-md mx-auto space-y-4">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={inviteCode}
-                onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-                onKeyDown={(e) => e.key === 'Enter' && goToJoin()}
-                placeholder="Invite code"
-                className="flex-1 bg-zinc-900/90 border-2 border-white/30 focus:border-yellow-400 text-white font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider"
-              />
-              <button
-                onClick={goToJoin}
-                disabled={!inviteCode.trim()}
-                className="font-bangers tracking-wide text-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-3 border-2 border-white comic-shadow-sm transition-all"
-              >
-                Continue →
-              </button>
-            </div>
-            <p className="text-gray-500 text-xs">
-              Already joined?{' '}
-              <Link to="/sign-in?redirect=%2Fdashboard" className="text-yellow-400/90 hover:text-yellow-300 underline underline-offset-2">
-                Sign in
-              </Link>
-            </p>
-            <p className="text-gray-600 text-xs">
-              Don&apos;t have a code?{' '}
-              <button type="button" onClick={onRequestAccess} className="text-gray-400 hover:text-white underline underline-offset-2">
-                Request access
-              </button>
-            </p>
+          <InviteEntry onRequestAccess={onRequestAccess}>
             <a
               href="#how-it-works"
               className="inline-block font-bangers tracking-wide text-base text-white/60 hover:text-white transition-colors mt-2"
             >
               How It Works ↓
             </a>
-          </div>
+          </InviteEntry>
         )}
       </div>
 
@@ -267,11 +232,82 @@ function HeroSection({ isSignedIn, onRequestAccess }: { isSignedIn: boolean; onR
   );
 }
 
+// ─── Invite code entry (hero + want in) ───────────────────────────────────────
+
+function InviteEntry({
+  onRequestAccess,
+  variant = 'dark',
+  children,
+}: {
+  onRequestAccess: () => void;
+  variant?: 'dark' | 'light';
+  children?: ReactNode;
+}) {
+  const navigate = useNavigate();
+  const [inviteCode, setInviteCode] = useState('');
+
+  const goToJoin = () => {
+    const code = inviteCode.trim().replace(/^\/join\//i, '').split('/').pop()?.split('?')[0] ?? '';
+    if (!code) return;
+    navigate(`/join/${code}`);
+  };
+
+  const inputCls = variant === 'dark'
+    ? 'flex-1 bg-zinc-900/90 border-2 border-white/30 focus:border-yellow-400 text-white font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider'
+    : 'flex-1 bg-gray-50 dark:bg-gray-800 border-2 border-black dark:border-gray-600 focus:border-red-500 dark:focus:border-yellow-400 text-gray-900 dark:text-white font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider';
+
+  const btnCls = variant === 'dark'
+    ? 'font-bangers tracking-wide text-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-3 border-2 border-white comic-shadow-sm transition-all'
+    : 'font-bangers tracking-wide text-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-3 border-2 border-black dark:border-yellow-400 comic-shadow-sm transition-all';
+
+  const signInCls = variant === 'dark'
+    ? 'text-yellow-400/90 hover:text-yellow-300'
+    : 'text-red-600 dark:text-yellow-400 hover:underline';
+
+  const requestCls = variant === 'dark'
+    ? 'text-gray-400 hover:text-white'
+    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white';
+
+  const mutedCls = variant === 'dark' ? 'text-gray-500' : 'text-gray-500 dark:text-gray-500';
+  const muted2Cls = variant === 'dark' ? 'text-gray-600' : 'text-gray-500 dark:text-gray-500';
+
+  return (
+    <div className="max-w-md mx-auto space-y-4">
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={inviteCode}
+          onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+          onKeyDown={(e) => e.key === 'Enter' && goToJoin()}
+          placeholder="Invite code"
+          className={inputCls}
+        />
+        <button onClick={goToJoin} disabled={!inviteCode.trim()} className={btnCls}>
+          Continue →
+        </button>
+      </div>
+      <p className={`${mutedCls} text-xs`}>
+        Already joined?{' '}
+        <Link to="/sign-in?redirect=%2Fdashboard" className={`${signInCls} underline underline-offset-2`}>
+          Sign in
+        </Link>
+      </p>
+      <p className={`${muted2Cls} text-xs`}>
+        Don&apos;t have a code?{' '}
+        <button type="button" onClick={onRequestAccess} className={`${requestCls} underline underline-offset-2`}>
+          Request access
+        </button>
+      </p>
+      {children}
+    </div>
+  );
+}
+
 // ─── About (comic panels) ─────────────────────────────────────────────────────
 
 function AboutSection() {
   return (
-    <section className="bg-white dark:bg-gray-900 border-b-4 border-black dark:border-gray-700">
+    <section className="border-b-4 border-black dark:border-gray-700">
       <div className="max-w-5xl mx-auto">
         <div className="border-x-4 border-black dark:border-white grid grid-cols-1 md:grid-cols-3">
           {/* Panel 1 — top-left, 2 cols */}
@@ -324,6 +360,85 @@ function AboutSection() {
   );
 }
 
+// ─── Feature band (shared background) ─────────────────────────────────────────
+
+function useScrollReveal(ref: RefObject<HTMLElement | null>) {
+  const [state, setState] = useState({ progress: 0, parallax: 0 });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) {
+      setState({ progress: 1, parallax: 0 });
+      return;
+    }
+
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const revealStart = vh * 0.92;
+      const revealEnd = vh * 0.3;
+      const progress = Math.min(1, Math.max(0, (revealStart - rect.top) / (revealStart - revealEnd)));
+      const parallax = rect.top < vh && rect.bottom > 0 ? (rect.top - vh * 0.45) * 0.18 : 0;
+      setState({ progress, parallax });
+    };
+
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [ref]);
+
+  return state;
+}
+
+function HomeFeatureBand({ children }: { children: ReactNode }) {
+  const sectionRef = useRef<HTMLElement>(null);
+  const { progress, parallax } = useScrollReveal(sectionRef);
+  const background = useBackgroundImage();
+
+  const expand = 0.84 + progress * 0.16;
+  const bgScale = 1.22 - progress * 0.14;
+  const contentLift = (1 - progress) * 32;
+  const contentOpacity = 0.55 + progress * 0.45;
+
+  return (
+    <section
+      ref={sectionRef}
+      className="relative border-y-4 border-black dark:border-gray-700 overflow-hidden"
+    >
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        {background && (
+          <div
+            className="absolute inset-[-12%] bg-cover bg-center will-change-transform"
+            style={{
+              backgroundImage: `url(${background})`,
+              transform: `translate3d(0, ${parallax}px, 0) scale(${bgScale})`,
+            }}
+          />
+        )}
+        <div className="absolute inset-0 bg-white/60" />
+      </div>
+
+      <div
+        className="relative z-10 will-change-transform"
+        style={{
+          transform: `scale(${expand}) translateY(${contentLift}px)`,
+          transformOrigin: 'center center',
+          opacity: contentOpacity,
+        }}
+      >
+        {children}
+      </div>
+    </section>
+  );
+}
+
 // ─── How It Works (comic panels) ─────────────────────────────────────────────
 
 function HowItWorksSection() {
@@ -361,23 +476,20 @@ function HowItWorksSection() {
   ];
 
   return (
-    <section
-      id="how-it-works"
-      className="bg-amber-50 dark:bg-gray-950 border-y-4 border-black dark:border-gray-700 scroll-mt-16"
-    >
-      <div className="max-w-5xl mx-auto">
+    <section id="how-it-works" className="scroll-mt-16">
+      <div className="max-w-5xl mx-auto pb-8">
         <div className="px-6 pt-8">
-          <h2 className="font-bangers text-4xl text-red-600 dark:text-yellow-400 tracking-wide">
+          <h2 className="font-bangers text-4xl text-red-600 tracking-wide">
             How It Works
           </h2>
         </div>
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 border-t-4 border-black dark:border-gray-700">
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 border-t-4 border-black/80">
           {steps.map((step, i) => (
             <div
               key={step.num}
-              className={`p-6 bg-white dark:bg-gray-900 ${
+              className={`p-6 ${
                 i < steps.length - 1
-                  ? 'border-b-4 md:border-b-0 md:border-r-4 border-black dark:border-gray-700'
+                  ? 'border-b-4 md:border-b-0 md:border-r-4 border-black/80'
                   : ''
               }`}
             >
@@ -386,29 +498,19 @@ function HowItWorksSection() {
               >
                 {step.num}
               </div>
-              <h3 className="font-bangers text-3xl text-gray-900 dark:text-white tracking-wide mb-3">
+              <h3 className="font-bangers text-3xl text-gray-900 tracking-wide mb-3">
                 {step.title}
               </h3>
               <ul className="space-y-2">
                 {step.items.map((item) => (
-                  <li key={item} className="text-gray-700 dark:text-gray-400 text-sm leading-snug flex gap-2">
-                    <span className="text-red-500 dark:text-yellow-600 shrink-0 mt-0.5">▸</span>
+                  <li key={item} className="text-gray-700 text-sm leading-snug flex gap-2">
+                    <span className="text-red-500 shrink-0 mt-0.5">▸</span>
                     {item}
                   </li>
                 ))}
               </ul>
             </div>
           ))}
-        </div>
-
-        {/* Badge type notes */}
-        <div className="border-t-4 border-black dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-6 py-4">
-          <p className="text-xs text-gray-500 dark:text-gray-500 uppercase tracking-widest mb-2 font-bold">Badge Type Notes</p>
-          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
-            <span><strong className="text-gray-800 dark:text-gray-200">ADULT</strong> — standard price</span>
-            <span><strong className="text-gray-800 dark:text-gray-200">JUNIOR / MILITARY / SENIOR</strong> — discounted (select JUNIOR when registering)</span>
-            <span><strong className="text-gray-800 dark:text-gray-200">Preview Night</strong> — separate from Thursday, purchased independently</span>
-          </div>
         </div>
       </div>
     </section>
@@ -420,16 +522,10 @@ function HowItWorksSection() {
 function WantInSection({ onOpen }: { onOpen: () => void }) {
   return (
     <section className="border-2 border-black dark:border-yellow-400 bg-white dark:bg-gray-900 p-6 comic-shadow">
-      <h2 className="font-bangers text-3xl text-red-600 dark:text-yellow-400 tracking-wide mb-1">Want In?</h2>
-      <p className="text-gray-600 dark:text-gray-400 text-sm mb-5">
-        This is a private group. If someone referred you, request access and we&apos;ll send you an invite link.
-      </p>
-      <button
-        onClick={onOpen}
-        className="font-bangers tracking-wide text-lg text-red-600 dark:text-yellow-400 hover:underline underline-offset-4"
-      >
-        Request access →
-      </button>
+      <h2 className="font-bangers text-3xl text-red-600 dark:text-yellow-400 tracking-wide mb-5 text-center">
+        Want In?
+      </h2>
+      <InviteEntry onRequestAccess={onOpen} variant="light" />
     </section>
   );
 }
