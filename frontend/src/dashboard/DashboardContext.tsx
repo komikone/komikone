@@ -31,7 +31,9 @@ type DashboardContextValue = {
   activeEvent: EventSummary | undefined;
   registrationOpen: boolean;
   reload: () => Promise<void>;
-  saveSelf: (data: Parameters<typeof api.years.updateParticipant>[4]) => Promise<void>;
+  saveSelf: (data: {
+    req_preview: boolean; req_thu: boolean; req_fri: boolean; req_sat: boolean; req_sun: boolean;
+  }) => Promise<void>;
   saveIdentity: (data: {
     first_name: string; last_name: string; member_id: string;
     badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean;
@@ -154,23 +156,15 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const activeEvent = primaryView?.event;
   const registrationOpen = activeEvent?.status === 'registration';
 
-  const saveSelf = useCallback(async (data: Parameters<typeof api.years.updateParticipant>[4]) => {
+  const saveSelf = useCallback(async (data: {
+    req_preview: boolean; req_thu: boolean; req_fri: boolean; req_sat: boolean; req_sun: boolean;
+  }) => {
     const t = await tok();
     const realYearId = resolveYearId();
     if (!realYearId || !primaryView || !member) throw new Error('Not found');
-    if (selfParticipant) {
-      await api.years.updateParticipant(realYearId, primaryView.event.id, selfParticipant.id, t, data);
-    } else {
-      await api.participants.register(primaryView.event.id, t, {
-        first_name: member.first_name,
-        last_name: member.last_name,
-        member_id: member.member_id,
-        badge_type: member.badge_type,
-        ...data,
-      });
-    }
+    await api.years.updateMyDays(realYearId, primaryView.event.id, t, data);
     if (selectedYearId !== null) await loadYear(selectedYearId, { silent: true });
-  }, [tok, primaryView, member, selfParticipant, selectedYearId, loadYear, yearObj]);
+  }, [tok, primaryView, member, selectedYearId, loadYear, yearObj]);
 
   const saveIdentity = useCallback(async (data: {
     first_name: string; last_name: string; member_id: string;

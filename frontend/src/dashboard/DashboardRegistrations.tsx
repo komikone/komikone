@@ -57,7 +57,10 @@ export default function DashboardRegistrations() {
     <PageShell title="Registrations" subtitle="Badge days and family members for each event.">
       <div className="space-y-8">
         {relevantViews.map((view) => {
-          const self = view.participants.find((p) => p.clerk_user_id === member.clerk_user_id);
+          const self = view.participants.find(
+            (p) => p.clerk_user_id === member.clerk_user_id
+              || (member.member_id && p.member_id && p.member_id.toUpperCase() === member.member_id.toUpperCase())
+          );
           const dayPrefix =
             ['purchasing', 'payment', 'complete'].includes(view.event.status) ? 'pur' : 'req';
           const myDays = self ? selectedDays(self, dayPrefix) : [];

@@ -752,8 +752,7 @@ app.patch('/api/years/:yearId/me', async (c) => {
   const lastName = body.last_name.trim();
   const memberId = body.member_id?.trim() ?? '';
   const badgeType = body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT';
-  const returnEligible =
-    body.return_eligible === true || body.return_eligible === 1 ? 1 : 0;
+  const returnEligible = body.return_eligible ? 1 : 0;
 
   await c.env.DB.prepare(`
     UPDATE year_members SET
@@ -819,13 +818,20 @@ app.get('/api/years/:yearId/events/:eventId/my-group', async (c) => {
     'SELECT * FROM groups WHERE event_id = ? AND owner_clerk_user_id = ?'
   ).bind(eventId, access.userId).first<Group>();
 
+  const event = await getEvent(c.env.DB, eventId);
+
   const participants = group
     ? await c.env.DB.prepare(
         `${PARTICIPANTS_QUERY} WHERE p.event_id = ? AND p.group_id = ? ORDER BY p.sort_order, p.id`
       ).bind(eventId, group.id).all<Participant>()
     : { results: [] };
 
-  return json({ group, participants: participants.results });
+  return json({
+    group,
+    participants: event
+      ? participants.results.map((p) => enrichParticipant(p, event))
+      : participants.results,
+  });
 });
 
 // Add a participant to the current user's group
@@ -893,6 +899,123 @@ app.post('/api/years/:yearId/events/:eventId/my-group/participants', async (c) =
     `${PARTICIPANTS_QUERY} WHERE p.id = ?`
   ).bind(result.meta.last_row_id).first<Participant>();
   return json(created, 201);
+});
+
+// Save current user's badge days for an event (resolves/links self participant in their group)
+app.patch('/api/years/:yearId/events/:eventId/my-group/days', async (c) => {
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access || access.userId === 'admin') return err('Sign in required', 401);
+
+  const yearId = Number(c.req.param('yearId'));
+  const eventId = Number(c.req.param('eventId'));
+
+  const yearMember = await c.env.DB.prepare(
+    'SELECT * FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+  ).bind(yearId, access.userId).first<YearMember>();
+  if (!yearMember) return err('Not a member of this year', 403);
+
+  const event = await getEvent(c.env.DB, eventId);
+  if (!event) return err('Event not found', 404);
+  if (event.status !== 'registration') return err('Registration is not open', 403);
+
+  let group = await c.env.DB.prepare(
+    'SELECT * FROM groups WHERE event_id = ? AND owner_clerk_user_id = ?'
+  ).bind(eventId, access.userId).first<Group>();
+
+  if (!group) {
+    const groupName = [yearMember.first_name, yearMember.last_name].filter(Boolean).join(' ') || 'My Group';
+    await c.env.DB.prepare(`
+      INSERT INTO groups (event_id, name, color, owner_clerk_user_id)
+      VALUES (?, ?, ?, ?)
+    `).bind(eventId, groupName, '#3b82f6', access.userId).run();
+    group = await c.env.DB.prepare(
+      'SELECT * FROM groups WHERE event_id = ? AND owner_clerk_user_id = ?'
+    ).bind(eventId, access.userId).first<Group>();
+  }
+  if (!group) return err('Could not create group', 500);
+
+  const body = await c.req.json<{
+    req_preview?: boolean; req_thu?: boolean; req_fri?: boolean; req_sat?: boolean; req_sun?: boolean;
+  }>();
+
+  const reqPreview = body.req_preview ? 1 : 0;
+  const reqThu = body.req_thu ? 1 : 0;
+  const reqFri = body.req_fri ? 1 : 0;
+  const reqSat = body.req_sat ? 1 : 0;
+  const reqSun = body.req_sun ? 1 : 0;
+
+  // Prefer participant already in this group (clerk, then member_id)
+  let self = await c.env.DB.prepare(
+    'SELECT id FROM participants WHERE event_id = ? AND group_id = ? AND clerk_user_id = ?'
+  ).bind(eventId, group.id, access.userId).first<{ id: number }>();
+
+  if (!self && yearMember.member_id) {
+    self = await c.env.DB.prepare(
+      'SELECT id FROM participants WHERE event_id = ? AND group_id = ? AND UPPER(member_id) = UPPER(?)'
+    ).bind(eventId, group.id, yearMember.member_id).first<{ id: number }>();
+  }
+
+  // Orphan participant with this clerk (e.g. register without group_id) — claim into group
+  if (!self) {
+    self = await c.env.DB.prepare(
+      'SELECT id FROM participants WHERE event_id = ? AND clerk_user_id = ?'
+    ).bind(eventId, access.userId).first<{ id: number }>();
+  }
+
+  // Orphan by member_id
+  if (!self && yearMember.member_id) {
+    self = await c.env.DB.prepare(
+      'SELECT id FROM participants WHERE event_id = ? AND UPPER(member_id) = UPPER(?)'
+    ).bind(eventId, yearMember.member_id).first<{ id: number }>();
+  }
+
+  if (self) {
+    await c.env.DB.prepare(`
+      UPDATE participants SET
+        clerk_user_id = ?,
+        group_id = ?,
+        registered_by_clerk_user_id = COALESCE(registered_by_clerk_user_id, ?),
+        first_name = COALESCE(NULLIF(?, ''), first_name),
+        last_name = COALESCE(NULLIF(?, ''), last_name),
+        member_id = COALESCE(NULLIF(?, ''), member_id),
+        badge_type = COALESCE(NULLIF(?, ''), badge_type),
+        req_preview = ?, req_thu = ?, req_fri = ?, req_sat = ?, req_sun = ?,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).bind(
+      access.userId,
+      group.id,
+      access.userId,
+      yearMember.first_name ?? '',
+      yearMember.last_name ?? '',
+      yearMember.member_id ?? '',
+      yearMember.badge_type ?? 'ADULT',
+      reqPreview, reqThu, reqFri, reqSat, reqSun,
+      self.id,
+    ).run();
+  } else {
+    const result = await c.env.DB.prepare(`
+      INSERT INTO participants
+        (event_id, first_name, last_name, member_id, badge_type,
+         req_preview, req_thu, req_fri, req_sat, req_sun,
+         clerk_user_id, registered_by_clerk_user_id, group_id, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    `).bind(
+      eventId,
+      yearMember.first_name ?? '',
+      yearMember.last_name ?? '',
+      yearMember.member_id ?? '',
+      yearMember.badge_type ?? 'ADULT',
+      reqPreview, reqThu, reqFri, reqSat, reqSun,
+      access.userId, access.userId, group.id,
+    ).run();
+    self = { id: Number(result.meta.last_row_id) };
+  }
+
+  const updated = await c.env.DB.prepare(
+    `${PARTICIPANTS_QUERY} WHERE p.id = ?`
+  ).bind(self.id).first<Participant>();
+  return json(enrichParticipant(updated!, event));
 });
 
 // Update a participant in the current user's group

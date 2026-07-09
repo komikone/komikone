@@ -324,6 +324,12 @@ export const api = {
         `/api/years/${yearId}/events/${eventId}/my-group`,
         { headers: authHeaders(clerkToken) }
       ),
+    updateMyDays: (yearId: number, eventId: number, clerkToken: string, data: {
+      req_preview: boolean; req_thu: boolean; req_fri: boolean; req_sat: boolean; req_sun: boolean;
+    }) =>
+      req<Participant>(`/api/years/${yearId}/events/${eventId}/my-group/days`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),
+      }),
     addParticipant: (yearId: number, eventId: number, clerkToken: string, data: {
       first_name: string; last_name: string; member_id?: string;
       badge_type?: 'ADULT' | 'JUNIOR'; return_eligible?: boolean;
