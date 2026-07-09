@@ -312,6 +312,13 @@ export const api = {
       req<Year[]>('/api/years', { headers: authHeaders(clerkToken) }),
     me: (yearId: number, clerkToken: string) =>
       req<{ member: YearMember }>(`/api/years/${yearId}/me`, { headers: authHeaders(clerkToken) }),
+    updateMe: (yearId: number, clerkToken: string, data: {
+      first_name: string; last_name: string; member_id?: string;
+      badge_type?: 'ADULT' | 'JUNIOR'; return_eligible?: boolean;
+    }) =>
+      req<{ member: YearMember }>(`/api/years/${yearId}/me`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),
+      }),
     myGroup: (yearId: number, eventId: number, clerkToken: string) =>
       req<{ group: Group | null; participants: Participant[] }>(
         `/api/years/${yearId}/events/${eventId}/my-group`,

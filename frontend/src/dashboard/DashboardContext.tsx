@@ -81,8 +81,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, [tok]);
 
-  const loadYear = useCallback(async (conYear: number) => {
-    setLoading(true);
+  const loadYear = useCallback(async (conYear: number, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     setError('');
     try {
       const t = await tok();
@@ -126,7 +126,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, [tok]);
 
@@ -146,6 +146,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const selfParticipant = primaryView?.participants.find(
     (p) => p.clerk_user_id === member?.clerk_user_id
+      || (member?.member_id && p.member_id && p.member_id.toUpperCase() === member.member_id.toUpperCase())
   );
   const familyParticipants = primaryView?.participants.filter(
     (p) => p.clerk_user_id !== member?.clerk_user_id
@@ -168,7 +169,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         ...data,
       });
     }
-    if (selectedYearId !== null) await loadYear(selectedYearId);
+    if (selectedYearId !== null) await loadYear(selectedYearId, { silent: true });
   }, [tok, primaryView, member, selfParticipant, selectedYearId, loadYear, yearObj]);
 
   const saveIdentity = useCallback(async (data: {
@@ -176,18 +177,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean;
   }) => {
     const t = await tok();
-    if (primaryView) {
-      const realYearId = resolveYearId();
-      if (selfParticipant && realYearId) {
-        await api.years.updateParticipant(
-          realYearId, primaryView.event.id, selfParticipant.id, t, data
-        );
-      } else {
-        await api.participants.register(primaryView.event.id, t, data);
-      }
-    }
-    if (selectedYearId !== null) await loadYear(selectedYearId);
-  }, [tok, primaryView, selfParticipant, selectedYearId, loadYear, yearObj]);
+    const realYearId = resolveYearId();
+    if (!realYearId) throw new Error('Year not found');
+    const { member: updated } = await api.years.updateMe(realYearId, t, data);
+    setMember(updated);
+    if (selectedYearId !== null) await loadYear(selectedYearId, { silent: true });
+  }, [tok, selectedYearId, loadYear, yearObj]);
 
   const value: DashboardContextValue = {
     loading,

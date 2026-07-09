@@ -92,6 +92,10 @@ function err(msg: string, status = 400) {
   return Response.json({ error: msg }, { status });
 }
 
+function mapYearMember(row: YearMember) {
+  return { ...row, return_eligible: !!row.return_eligible };
+}
+
 async function getEvent(db: D1Database, id: number): Promise<Event | null> {
   return db.prepare('SELECT * FROM events WHERE id = ?').bind(id).first<Event>();
 }
@@ -715,7 +719,83 @@ app.get('/api/years/:yearId/me', async (c) => {
   ).bind(yearId, access.userId).first<YearMember>();
   if (!member) return err('Not a member of this year', 403);
 
-  return json({ member });
+  return json({ member: mapYearMember(member) });
+});
+
+// Update current user's profile for a year (year_members + linked participants)
+app.patch('/api/years/:yearId/me', async (c) => {
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access || access.userId === 'admin') return err('Sign in required', 401);
+
+  const yearId = Number(c.req.param('yearId'));
+  const body = await c.req.json<{
+    first_name: string;
+    last_name: string;
+    member_id?: string;
+    badge_type?: 'ADULT' | 'JUNIOR';
+    return_eligible?: boolean;
+  }>();
+
+  if (!body.first_name?.trim() || !body.last_name?.trim()) {
+    return err('First and last name required');
+  }
+
+  const existing = await c.env.DB.prepare(
+    'SELECT id FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+  ).bind(yearId, access.userId).first();
+  if (!existing) return err('Not a member of this year', 403);
+
+  const firstName = body.first_name.trim();
+  const lastName = body.last_name.trim();
+  const memberId = body.member_id?.trim() ?? '';
+  const badgeType = body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT';
+  const returnEligible = body.return_eligible ? 1 : 0;
+
+  await c.env.DB.prepare(`
+    UPDATE year_members SET
+      first_name = ?, last_name = ?, member_id = ?, badge_type = ?, return_eligible = ?
+    WHERE year_id = ? AND clerk_user_id = ?
+  `).bind(
+    firstName, lastName, memberId, badgeType, returnEligible,
+    yearId, access.userId,
+  ).run();
+
+  const events = await c.env.DB.prepare(
+    'SELECT id FROM events WHERE year_id = ?'
+  ).bind(yearId).all<{ id: number }>();
+
+  for (const ev of events.results) {
+    await c.env.DB.prepare(`
+      UPDATE participants SET
+        first_name = ?, last_name = ?, member_id = ?, badge_type = ?, return_eligible = ?,
+        updated_at = datetime('now')
+      WHERE event_id = ? AND clerk_user_id = ?
+    `).bind(
+      firstName, lastName, memberId, badgeType, returnEligible,
+      ev.id, access.userId,
+    ).run();
+
+    if (memberId) {
+      await c.env.DB.prepare(`
+        UPDATE participants SET
+          clerk_user_id = ?, first_name = ?, last_name = ?, member_id = ?, badge_type = ?,
+          return_eligible = ?, updated_at = datetime('now')
+        WHERE event_id = ? AND clerk_user_id IS NULL AND UPPER(member_id) = UPPER(?)
+          AND group_id IN (
+            SELECT id FROM groups WHERE event_id = ? AND owner_clerk_user_id = ?
+          )
+      `).bind(
+        access.userId, firstName, lastName, memberId, badgeType, returnEligible,
+        ev.id, memberId, ev.id, access.userId,
+      ).run();
+    }
+  }
+
+  const member = await c.env.DB.prepare(
+    'SELECT * FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+  ).bind(yearId, access.userId).first<YearMember>();
+
+  return json({ member: mapYearMember(member!) });
 });
 
 // Participants in the current user's group for a specific event
@@ -895,7 +975,7 @@ app.patch('/api/years/:yearId/events/:eventId/my-group/participants/:pid', async
     `).bind(
       body.first_name?.trim() ?? null,
       body.last_name?.trim() ?? null,
-      body.member_id?.trim() ?? null,
+      body.member_id !== undefined ? (body.member_id.trim() ?? '') : null,
       body.badge_type ?? null,
       body.return_eligible != null ? (body.return_eligible ? 1 : 0) : null,
       yearId,
