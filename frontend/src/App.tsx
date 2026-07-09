@@ -3,13 +3,17 @@ import { useAuth } from '@clerk/clerk-react';
 import Home from './pages/Home';
 import Registration from './pages/Registration';
 import JoinPage from './pages/Join';
-import Dashboard from './pages/Dashboard';
 import LiveBoard from './pages/LiveBoard';
 import Payment from './pages/Payment';
 import Admin from './pages/Admin';
 import Stats from './pages/Stats';
 import SignIn from './pages/SignIn';
-import ProfilePage from './pages/Profile';
+import DashboardLayout from './dashboard/DashboardLayout';
+import DashboardHome from './dashboard/DashboardHome';
+import DashboardProfile from './dashboard/DashboardProfile';
+import DashboardRegistrations from './dashboard/DashboardRegistrations';
+import DashboardBilling from './dashboard/DashboardBilling';
+import DashboardInvitations from './dashboard/DashboardInvitations';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { isLoaded, isSignedIn } = useAuth();
@@ -30,8 +34,14 @@ export default function App() {
         <Route path="/stats" element={<Stats />} />
         <Route path="/register/:eventId" element={<Registration />} />
         <Route path="/join/:code" element={<JoinPage />} />
-        <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
-        <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
+        <Route path="/dashboard" element={<RequireAuth><DashboardLayout /></RequireAuth>}>
+          <Route index element={<DashboardHome />} />
+          <Route path="profile" element={<DashboardProfile />} />
+          <Route path="registrations" element={<DashboardRegistrations />} />
+          <Route path="billing" element={<DashboardBilling />} />
+          <Route path="invitations" element={<DashboardInvitations />} />
+        </Route>
+        <Route path="/profile" element={<Navigate to="/dashboard/billing" replace />} />
         <Route path="/live/:eventId" element={<RequireAuth><LiveBoard /></RequireAuth>} />
         <Route path="/payment/:eventId" element={<RequireAuth><Payment /></RequireAuth>} />
         <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
