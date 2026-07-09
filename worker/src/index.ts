@@ -1585,7 +1585,125 @@ admin.delete('/invite-requests/:id', async (c) => {
   return json({ ok: true });
 });
 
+type BackgroundRow = {
+  id: number;
+  url: string;
+  label: string;
+  sort_order: number;
+  active: number;
+  created_at: string;
+};
+
+function isValidBackgroundUrl(url: string): boolean {
+  try {
+    const u = new URL(url.trim());
+    return u.protocol === 'https:' || u.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function mapBackground(row: BackgroundRow) {
+  return {
+    id: row.id,
+    url: row.url,
+    label: row.label,
+    sort_order: row.sort_order,
+    active: row.active === 1,
+    created_at: row.created_at,
+  };
+}
+
+admin.get('/backgrounds', async (c) => {
+  const rows = await c.env.DB.prepare(
+    'SELECT * FROM backgrounds ORDER BY sort_order ASC, id ASC'
+  ).all<BackgroundRow>();
+  return json(rows.results.map(mapBackground));
+});
+
+admin.post('/backgrounds', async (c) => {
+  const body = await c.req.json<{ url: string; label?: string }>();
+  const url = body.url?.trim() ?? '';
+  if (!isValidBackgroundUrl(url)) return err('A valid http(s) URL is required');
+
+  const maxOrder = await c.env.DB.prepare(
+    'SELECT COALESCE(MAX(sort_order), -1) AS m FROM backgrounds'
+  ).first<{ m: number }>();
+
+  try {
+    const result = await c.env.DB.prepare(`
+      INSERT INTO backgrounds (url, label, sort_order) VALUES (?, ?, ?)
+    `).bind(url, body.label?.trim() ?? '', (maxOrder?.m ?? -1) + 1).run();
+
+    const row = await c.env.DB.prepare(
+      'SELECT * FROM backgrounds WHERE id = ?'
+    ).bind(result.meta.last_row_id).first<BackgroundRow>();
+    return json(mapBackground(row!), 201);
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('UNIQUE')) return err('This URL is already added', 409);
+    throw e;
+  }
+});
+
+admin.patch('/backgrounds/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  const body = await c.req.json<Partial<{ url: string; label: string; active: boolean; sort_order: number }>>();
+
+  const fields: string[] = [];
+  const values: (string | number)[] = [];
+
+  if ('url' in body) {
+    const url = body.url?.trim() ?? '';
+    if (!isValidBackgroundUrl(url)) return err('A valid http(s) URL is required');
+    fields.push('url = ?');
+    values.push(url);
+  }
+  if ('label' in body) {
+    fields.push('label = ?');
+    values.push(body.label?.trim() ?? '');
+  }
+  if ('active' in body) {
+    fields.push('active = ?');
+    values.push(body.active ? 1 : 0);
+  }
+  if ('sort_order' in body && body.sort_order != null) {
+    fields.push('sort_order = ?');
+    values.push(body.sort_order);
+  }
+
+  if (fields.length === 0) return err('No fields to update');
+
+  values.push(id);
+  try {
+    await c.env.DB.prepare(
+      `UPDATE backgrounds SET ${fields.join(', ')} WHERE id = ?`
+    ).bind(...values).run();
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('UNIQUE')) return err('This URL is already added', 409);
+    throw e;
+  }
+
+  const row = await c.env.DB.prepare('SELECT * FROM backgrounds WHERE id = ?').bind(id).first<BackgroundRow>();
+  if (!row) return err('Not found', 404);
+  return json(mapBackground(row));
+});
+
+admin.delete('/backgrounds/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  await c.env.DB.prepare('DELETE FROM backgrounds WHERE id = ?').bind(id).run();
+  return json({ ok: true });
+});
+
 app.route('/api/admin', admin);
+
+// ── Public backgrounds ────────────────────────────────────────────────────────
+
+app.get('/api/backgrounds', async (c) => {
+  const rows = await c.env.DB.prepare(
+    'SELECT url FROM backgrounds WHERE active = 1 ORDER BY sort_order ASC, id ASC'
+  ).all<{ url: string }>();
+  return json({ urls: rows.results.map((r) => r.url) });
+});
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 

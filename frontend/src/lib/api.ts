@@ -87,6 +87,15 @@ export type InviteRequest = {
   updated_at: string;
 };
 
+export type Background = {
+  id: number;
+  url: string;
+  label: string;
+  sort_order: number;
+  active: boolean;
+  created_at: string;
+};
+
 export type Participant = {
   id: number;
   event_id: number;
@@ -272,6 +281,10 @@ export const api = {
       req<{ ok: boolean }>('/api/profile', {
         method: 'PUT', headers: authHeaders(clerkToken), body: JSON.stringify(data),
       }),
+  },
+
+  backgrounds: {
+    list: () => req<{ urls: string[] }>('/api/backgrounds'),
   },
 
   invites: {
@@ -484,6 +497,22 @@ export const api = {
       }),
     exportUrl: (id: number, authToken: string) =>
       `${BASE}/api/admin/events/${id}/export.csv?token=${encodeURIComponent(authToken)}`,
+    backgrounds: {
+      list: (authToken: string) =>
+        req<Background[]>('/api/admin/backgrounds', { headers: authHeaders(undefined, authToken) }),
+      create: (authToken: string, data: { url: string; label?: string }) =>
+        req<Background>('/api/admin/backgrounds', {
+          method: 'POST', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
+        }),
+      update: (authToken: string, id: number, data: Partial<Pick<Background, 'url' | 'label' | 'active' | 'sort_order'>>) =>
+        req<Background>(`/api/admin/backgrounds/${id}`, {
+          method: 'PATCH', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
+        }),
+      delete: (authToken: string, id: number) =>
+        req<{ ok: boolean }>(`/api/admin/backgrounds/${id}`, {
+          method: 'DELETE', headers: authHeaders(undefined, authToken),
+        }),
+    },
   },
 };
 

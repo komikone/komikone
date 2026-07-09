@@ -1,12 +1,10 @@
-import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useDashboard } from './DashboardContext';
 import { badgeTypeLabel } from './styles';
-import { pickWallpaper } from './wallpapers';
+import BackgroundLayer from '../components/BackgroundLayer';
 
 export default function DashboardHome() {
   const { member, primaryView } = useDashboard();
-  const wallpaper = useMemo(() => pickWallpaper(), []);
 
   if (!member) {
     return (
@@ -25,14 +23,8 @@ export default function DashboardHome() {
   }
 
   return (
-    <div className="flex-1 relative min-h-[calc(100vh)]">
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{ backgroundImage: `url(${wallpaper})` }}
-      />
-      <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/70 to-gray-950/30" />
-
-      <div className="relative z-10 flex flex-col justify-end min-h-[calc(100vh)] p-8 md:p-12">
+    <BackgroundLayer className="flex-1" minHeight="min-h-[calc(100vh)]">
+      <div className="flex flex-col justify-end min-h-[calc(100vh)] p-8 md:p-12">
         <div className="max-w-lg">
           <div className="bg-gray-900/90 backdrop-blur-md border border-gray-700/80 rounded-2xl p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4 mb-4">
@@ -96,6 +88,6 @@ export default function DashboardHome() {
           </div>
         </div>
       </div>
-    </div>
+    </BackgroundLayer>
   );
 }

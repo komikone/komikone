@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, useUser } from '@clerk/clerk-react';
+import { invalidateBackgroundCache } from '../lib/useBackgrounds';
 import {
   api,
   type EventDetail,
@@ -11,6 +12,7 @@ import {
   type YearMember,
   type Invite,
   type InviteRequest,
+  type Background,
   formatDollars,
   DAY_KEYS,
   dayLabel,
@@ -39,7 +41,7 @@ export default function Admin() {
 
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<'overview' | 'participants' | 'prices' | 'dates' | 'invites' | 'members'>('overview');
-  const [adminView, setAdminView] = useState<'year' | 'requests'>('year');
+  const [adminView, setAdminView] = useState<'year' | 'requests' | 'backgrounds'>('year');
   const [accessRequests, setAccessRequests] = useState<InviteRequest[]>([]);
 
   // Derived
@@ -247,6 +249,14 @@ export default function Admin() {
           {/* Invites */}
           <div className="border-t border-gray-800 pt-3 space-y-0.5">
             <button
+              onClick={() => setAdminView('backgrounds')}
+              className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
+                adminView === 'backgrounds' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+              }`}
+            >
+              Backgrounds
+            </button>
+            <button
               onClick={() => setAdminView('requests')}
               className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium flex items-center justify-between ${
                 adminView === 'requests' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
@@ -289,6 +299,10 @@ export default function Admin() {
               inviteYear={activeYear ?? yearsData[0] ?? null}
               onUpdate={loadAccessRequests}
             />
+          </div>
+        ) : adminView === 'backgrounds' ? (
+          <div className="flex-1 overflow-auto p-6">
+            <BackgroundsPanel secret={secret} />
           </div>
         ) : selectedYear === null ? (
           <div className="flex items-center justify-center h-full text-gray-500">
@@ -2062,6 +2076,165 @@ function MembersTab({ members }: { members: YearMember[] }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ─── Backgrounds Panel ────────────────────────────────────────────────────────
+
+function BackgroundsPanel({ secret }: { secret: string }) {
+  const [items, setItems] = useState<Background[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [url, setUrl] = useState('');
+  const [label, setLabel] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await api.admin.backgrounds.list(secret);
+      setItems(list);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to load');
+    } finally {
+      setLoading(false);
+    }
+  }, [secret]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+    setAdding(true);
+    setErr('');
+    try {
+      await api.admin.backgrounds.create(secret, { url: url.trim(), label: label.trim() || undefined });
+      setUrl('');
+      setLabel('');
+      invalidateBackgroundCache();
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to add');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleToggle = async (bg: Background) => {
+    try {
+      await api.admin.backgrounds.update(secret, bg.id, { active: !bg.active });
+      invalidateBackgroundCache();
+      await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to update');
+    }
+  };
+
+  const handleDelete = async (bg: Background) => {
+    if (!confirm('Remove this background URL?')) return;
+    try {
+      await api.admin.backgrounds.delete(secret, bg.id);
+      invalidateBackgroundCache();
+      await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to delete');
+    }
+  };
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white">Background Images</h2>
+        <p className="text-gray-500 text-sm mt-1">
+          Add image URLs to rotate on the dashboard and other pages. Use direct links (https) to hosted photos.
+        </p>
+      </div>
+
+      {err && <p className="text-red-400 text-sm">{err}</p>}
+
+      <form onSubmit={handleAdd} className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Image URL *</label>
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://…"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Label (optional)</label>
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. SDCC hall"
+            className={inputCls}
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={adding || !url.trim()}
+          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
+        >
+          {adding ? 'Adding…' : 'Add background'}
+        </button>
+      </form>
+
+      {loading ? (
+        <p className="text-gray-500 text-sm">Loading…</p>
+      ) : items.length === 0 ? (
+        <p className="text-gray-500 text-sm">
+          No backgrounds yet. Add URLs above — until you do, the app uses built-in fallbacks.
+        </p>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {items.map((bg) => (
+            <div
+              key={bg.id}
+              className={`bg-gray-900 border rounded-xl overflow-hidden ${
+                bg.active ? 'border-gray-700' : 'border-gray-800 opacity-60'
+              }`}
+            >
+              <div className="aspect-video bg-gray-800 relative">
+                <img
+                  src={bg.url}
+                  alt={bg.label || 'Background'}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              </div>
+              <div className="p-3 space-y-2">
+                {bg.label && <p className="text-white text-sm font-medium truncate">{bg.label}</p>}
+                <p className="text-gray-500 text-xs font-mono break-all line-clamp-2">{bg.url}</p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={() => handleToggle(bg)}
+                    className={`text-xs px-2.5 py-1 rounded ${
+                      bg.active
+                        ? 'bg-green-950 text-green-400 border border-green-800'
+                        : 'bg-gray-800 text-gray-400 border border-gray-700'
+                    }`}
+                  >
+                    {bg.active ? 'Active' : 'Inactive'}
+                  </button>
+                  <button
+                    onClick={() => handleDelete(bg)}
+                    className="text-xs text-red-500 hover:text-red-400 px-2"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
