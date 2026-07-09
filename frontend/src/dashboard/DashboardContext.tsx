@@ -147,8 +147,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [member, returnView, openView]);
 
   const selfParticipant = primaryView?.participants.find(
-    (p) => p.clerk_user_id === member?.clerk_user_id
-      || (member?.member_id && p.member_id && p.member_id.toUpperCase() === member.member_id.toUpperCase())
+    (p) => p.clerk_user_id === member?.clerk_user_id,
+  ) ?? primaryView?.participants.find(
+    (p) => !!(member?.member_id && p.member_id && p.member_id.toUpperCase() === member.member_id.toUpperCase()),
   );
   const familyParticipants = primaryView?.participants.filter(
     (p) => p.clerk_user_id !== member?.clerk_user_id

@@ -17,6 +17,7 @@ export default function Payment() {
   const [myCoordName, setMyCoordName] = useState('');
   const [coordForm, setCoordForm] = useState({ venmo: '', zelle: '', paypal: '', phone_last4: '' });
   const [coordSaved, setCoordSaved] = useState(false);
+  const [profilePrefill, setProfilePrefill] = useState(false);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -31,13 +32,23 @@ export default function Payment() {
         api.events.get(Number(eventId), tok),
         api.participants.list(Number(eventId), tok),
         api.coordinators.list(Number(eventId), tok),
-      ]).then(([ev, ps, cs]) => {
+        api.profile.get(tok).catch(() => null),
+      ]).then(([ev, ps, cs, profile]) => {
         setEvent(ev);
         setParticipants(ps);
         setCoordinators(cs);
+        if (profile && !profilePrefill) {
+          setCoordForm((f) => ({
+            ...f,
+            venmo: f.venmo || profile.venmo || '',
+            zelle: f.zelle || profile.zelle || '',
+            paypal: f.paypal || profile.paypal || '',
+          }));
+          setProfilePrefill(true);
+        }
       }).catch((e) => setError(e.message));
     });
-  }, [isLoaded, isSignedIn, eventId, getToken, navigate]);
+  }, [isLoaded, isSignedIn, eventId, getToken, navigate, profilePrefill]);
 
   // Group participants by who_purchased
   const byCoordinator: Record<string, Participant[]> = {};
@@ -56,6 +67,12 @@ export default function Payment() {
       const tok = await getToken({ template: 'komikone' });
       if (!tok) return;
       await api.coordinators.upsert(Number(eventId), myCoordName, tok, coordForm);
+      // Keep dashboard billing profile in sync so handles aren't siloed
+      await api.profile.update(tok, {
+        venmo: coordForm.venmo,
+        zelle: coordForm.zelle,
+        paypal: coordForm.paypal,
+      }).catch(() => {});
       const cs = await api.coordinators.list(Number(eventId), tok);
       setCoordinators(cs);
       setCoordSaved(true);

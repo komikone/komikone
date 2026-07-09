@@ -76,12 +76,13 @@ export function FamilySection({
                     onSave={async (data) => {
                       const t = await tok();
                       const yearId = resolveYearId();
-                      if (!yearId) return;
+                      if (!yearId) throw new Error('Year not found');
                       await api.years.updateParticipant(yearId, view.event.id, p.id, t, data);
                       setEditingId(null);
                       await reload();
                     }}
                     onCancel={() => setEditingId(null)}
+                    onError={(msg) => alert(msg)}
                   />
                 ) : (
                   <tr key={p.id} className="group hover:bg-gray-800/40">
@@ -197,11 +198,12 @@ function AddParticipantForm({
 }
 
 function EditParticipantRow({
-  participant, onSave, onCancel,
+  participant, onSave, onCancel, onError,
 }: {
   participant: { id: number; first_name: string; last_name: string; member_id: string; badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean };
   onSave: (data: Partial<ParticipantFormData>) => Promise<void>;
   onCancel: () => void;
+  onError?: (msg: string) => void;
 }) {
   const [form, setForm] = useState({
     first_name: participant.first_name,
@@ -230,7 +232,20 @@ function EditParticipantRow({
             <input type="checkbox" checked={form.return_eligible} onChange={(e) => set('return_eligible', e.target.checked)} className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-blue-500" />
             Return eligible
           </label>
-          <button onClick={async () => { setSaving(true); try { await onSave(form); } finally { setSaving(false); } }} disabled={saving} className="text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1 rounded">
+          <button
+            onClick={async () => {
+              setSaving(true);
+              try {
+                await onSave(form);
+              } catch (e) {
+                onError?.(e instanceof Error ? e.message : 'Failed to save');
+              } finally {
+                setSaving(false);
+              }
+            }}
+            disabled={saving}
+            className="text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1 rounded"
+          >
             {saving ? 'Saving…' : 'Save'}
           </button>
           <button onClick={onCancel} className="text-xs text-gray-400 hover:text-white">Cancel</button>

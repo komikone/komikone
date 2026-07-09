@@ -46,9 +46,9 @@ export default function DashboardBilling() {
   };
 
   return (
-    <PageShell
+      <PageShell
       title="Billing"
-      subtitle="Payment info used when settling badge costs after purchase day."
+      subtitle="Payment info used when settling badge costs after purchase day. These handles also prefill the Payment page coordinator form."
     >
       {err && <p className="text-red-400 text-sm mb-4">{err}</p>}
       {saved && <p className="text-green-400 text-sm mb-4">Saved.</p>}
