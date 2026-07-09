@@ -1811,9 +1811,47 @@ function InvitesTab({
   const [label, setLabel] = useState('');
   const [creating, setCreating] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [bulkCount, setBulkCount] = useState(50);
+  const [bulkPrefix, setBulkPrefix] = useState('');
+  const [bulkCreating, setBulkCreating] = useState(false);
 
   const origin = window.location.origin;
   const inviteUrl = (code: string) => `${origin}/join/${code}`;
+
+  const downloadCsv = (rows: Invite[], filename: string) => {
+    const header = ['label', 'code', 'url'];
+    const lines = [
+      header.join(','),
+      ...rows.map((inv) => {
+        const url = inviteUrl(inv.code);
+        return [inv.label, inv.code, url]
+          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+          .join(',');
+      }),
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const handleBulkCreate = async () => {
+    setBulkCreating(true);
+    try {
+      const { invites: created } = await api.admin.invites.bulkCreate(secret, year.id, {
+        count: bulkCount,
+        label_prefix: bulkPrefix.trim() || undefined,
+      });
+      onUpdate();
+      downloadCsv(created, `${year.name.replace(/\s+/g, '-')}-invites.csv`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to bulk create');
+    } finally {
+      setBulkCreating(false);
+    }
+  };
 
   const handleCreate = async () => {
     setCreating(true);
@@ -1851,11 +1889,59 @@ function InvitesTab({
     <div className="max-w-2xl space-y-6">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-gray-200">Invite Codes — {year.name}</h3>
-        <div className="text-xs text-gray-500">{unused.length} unused · {used.length} used</div>
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-gray-500">{unused.length} unused · {used.length} used</div>
+          {unused.length > 0 && (
+            <button
+              onClick={() => downloadCsv(unused, `${year.name.replace(/\s+/g, '-')}-unused-invites.csv`)}
+              className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2.5 py-1 rounded transition-colors"
+            >
+              Download CSV
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 space-y-3">
+        <h4 className="text-xs text-gray-400 uppercase tracking-wide">Bulk Generate</h4>
+        <p className="text-xs text-gray-500">
+          Create many single-use codes at once. A CSV downloads automatically for mail merge.
+        </p>
+        <div className="flex flex-wrap gap-2 items-end">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Count</label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={bulkCount}
+              onChange={(e) => setBulkCount(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
+              className="w-20 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div className="flex-1 min-w-[12rem]">
+            <label className="block text-xs text-gray-500 mb-1">Label prefix (optional)</label>
+            <input
+              type="text"
+              value={bulkPrefix}
+              onChange={(e) => setBulkPrefix(e.target.value)}
+              placeholder="e.g. Return 2027"
+              className={inputCls}
+            />
+          </div>
+          <button
+            onClick={handleBulkCreate}
+            disabled={bulkCreating}
+            className="bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm px-4 py-2 rounded whitespace-nowrap transition-colors"
+          >
+            {bulkCreating ? 'Generating…' : `Generate ${bulkCount}`}
+          </button>
+        </div>
+        <p className="text-xs text-gray-600">Labels: &quot;{bulkPrefix.trim() || 'Invite'} 1&quot;, &quot;{bulkPrefix.trim() || 'Invite'} 2&quot;, … — rename in your spreadsheet before sending.</p>
       </div>
 
       <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-        <h4 className="text-xs text-gray-400 uppercase tracking-wide mb-3">Create New Invite</h4>
+        <h4 className="text-xs text-gray-400 uppercase tracking-wide mb-3">Create One Invite</h4>
         <div className="flex gap-2">
           <input
             type="text"

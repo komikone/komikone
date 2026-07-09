@@ -432,6 +432,10 @@ export const api = {
         req<Invite>(`/api/admin/years/${yearId}/invites`, {
           method: 'POST', headers: authHeaders(undefined, authToken), body: JSON.stringify({ label }),
         }),
+      bulkCreate: (authToken: string, yearId: number, data: { count: number; label_prefix?: string }) =>
+        req<{ invites: Invite[] }>(`/api/admin/years/${yearId}/invites/bulk`, {
+          method: 'POST', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
+        }),
       delete: (authToken: string, yearId: number, inviteId: number) =>
         req<{ ok: boolean }>(`/api/admin/years/${yearId}/invites/${inviteId}`, {
           method: 'DELETE', headers: authHeaders(undefined, authToken),

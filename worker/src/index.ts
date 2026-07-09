@@ -109,6 +109,24 @@ function generateInviteCode(): string {
   return Array.from(bytes).map(b => INVITE_CHARS[b % INVITE_CHARS.length]).join('');
 }
 
+async function createUniqueInvite(
+  db: D1Database, yearId: number, label: string, invitedBy: string,
+): Promise<Invite> {
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code = generateInviteCode();
+    const existing = await db.prepare('SELECT id FROM invites WHERE code = ?').bind(code).first();
+    if (!existing) break;
+    if (i === 7) throw new Error('Failed to generate unique invite code');
+  }
+  await db.prepare(
+    'INSERT INTO invites (year_id, code, label, invited_by_clerk_user_id) VALUES (?, ?, ?, ?)'
+  ).bind(yearId, code, label, invitedBy).run();
+  const invite = await db.prepare('SELECT * FROM invites WHERE code = ?').bind(code).first<Invite>();
+  if (!invite) throw new Error('Failed to create invite');
+  return invite;
+}
+
 const GROUP_COLORS = [
   '#6366f1', '#10b981', '#f43f5e', '#f59e0b',
   '#0ea5e9', '#a855f7', '#f97316', '#14b8a6',
@@ -677,9 +695,12 @@ app.get('/api/years', async (c) => {
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
   if (!access || access.userId === 'admin') return err('Sign in required', 401);
 
-  const rows = await c.env.DB.prepare(
-    'SELECT * FROM years ORDER BY con_year DESC'
-  ).all<Year>();
+  const rows = await c.env.DB.prepare(`
+    SELECT y.* FROM years y
+    JOIN year_members ym ON ym.year_id = y.id
+    WHERE ym.clerk_user_id = ?
+    ORDER BY y.con_year DESC
+  `).bind(access.userId).all<Year>();
   return json(rows.results);
 });
 
@@ -1450,19 +1471,26 @@ admin.post('/years/:yearId/invites', async (c) => {
   const body = await c.req.json<{ label?: string }>();
   const invitedBy = access?.userId === 'admin' ? 'admin' : (access?.userId ?? 'admin');
 
-  let code: string = generateInviteCode();
-  for (let i = 0; i < 5; i++) {
-    const existing = await c.env.DB.prepare('SELECT id FROM invites WHERE code = ?').bind(code).first();
-    if (!existing) break;
-    code = generateInviteCode();
-  }
-
-  await c.env.DB.prepare(
-    'INSERT INTO invites (year_id, code, label, invited_by_clerk_user_id) VALUES (?, ?, ?, ?)'
-  ).bind(yearId, code, body.label?.trim() ?? '', invitedBy).run();
-
-  const invite = await c.env.DB.prepare('SELECT * FROM invites WHERE code = ?').bind(code).first<Invite>();
+  const invite = await createUniqueInvite(
+    c.env.DB, yearId, body.label?.trim() ?? '', invitedBy,
+  );
   return json(invite, 201);
+});
+
+admin.post('/years/:yearId/invites/bulk', async (c) => {
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  const yearId = Number(c.req.param('yearId'));
+  const body = await c.req.json<{ count: number; label_prefix?: string }>();
+  const count = Math.min(Math.max(Math.floor(body.count || 0), 1), 100);
+  const invitedBy = access?.userId === 'admin' ? 'admin' : (access?.userId ?? 'admin');
+  const prefix = body.label_prefix?.trim() ?? '';
+
+  const invites: Invite[] = [];
+  for (let i = 0; i < count; i++) {
+    const label = prefix ? `${prefix} ${i + 1}` : `Invite ${i + 1}`;
+    invites.push(await createUniqueInvite(c.env.DB, yearId, label, invitedBy));
+  }
+  return json({ invites }, 201);
 });
 
 admin.delete('/years/:yearId/invites/:inviteId', async (c) => {

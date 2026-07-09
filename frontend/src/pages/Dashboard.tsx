@@ -33,10 +33,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     tok()
-      .then((t) => api.years.list(t))
-      .then((ys) => {
+      .then(async (t) => {
+        const ys = await api.years.list(t);
         setYears(ys);
-        if (ys.length > 0) setSelectedYearId((prev) => prev ?? ys[0].con_year);
+        if (ys.length > 0) {
+          setSelectedYearId((prev) =>
+            prev && ys.some((y) => y.con_year === prev) ? prev : ys[0].con_year
+          );
+        } else {
+          setSelectedYearId(null);
+        }
       })
       .catch(() => {});
   }, [tok]);
@@ -46,7 +52,7 @@ export default function Dashboard() {
     setError('');
     try {
       const t = await tok();
-      const yearList = await api.years.list(t);
+      const [yearList, events] = await Promise.all([api.years.list(t), api.events.list()]);
       setYears(yearList);
 
       const yearObj = yearList.find((y) => y.con_year === conYear);
@@ -57,9 +63,8 @@ export default function Dashboard() {
         return;
       }
 
-      const [memberRes, events] = await Promise.all([
+      const [memberRes] = await Promise.all([
         api.years.me(yearObj.id, t).catch(() => null),
-        api.events.list(),
       ]);
 
       if (!memberRes) {
@@ -142,7 +147,7 @@ export default function Dashboard() {
       <div className="max-w-3xl mx-auto px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <Link to="/" className="text-gray-500 hover:text-gray-300 text-sm">← Home</Link>
-          {years.length > 1 && (
+          {years.length > 1 ? (
             <select
               value={selectedYearId ?? ''}
               onChange={e => setSelectedYearId(Number(e.target.value))}
@@ -150,15 +155,21 @@ export default function Dashboard() {
             >
               {years.map(y => <option key={y.con_year} value={y.con_year}>{y.name}</option>)}
             </select>
-          )}
+          ) : yearObj ? (
+            <span className="text-gray-400 text-sm">{yearObj.name}</span>
+          ) : null}
         </div>
 
         {error && <p className="text-red-400 mb-4">{error}</p>}
 
         {!member ? (
           <div className="bg-gray-900 border border-gray-700 rounded-xl p-8 text-center">
-            <p className="text-gray-400">You are not registered for this year.</p>
-            <p className="text-gray-500 text-sm mt-2">Ask for an invite link to join.</p>
+            <p className="text-gray-400">
+              {years.length === 0
+                ? 'You are not registered for any active year yet.'
+                : 'You are not registered for this year.'}
+            </p>
+            <p className="text-gray-500 text-sm mt-2">Use your invite link to join, or request access from the homepage.</p>
           </div>
         ) : (
           <>
