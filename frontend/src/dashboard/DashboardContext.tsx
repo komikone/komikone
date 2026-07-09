@@ -178,11 +178,21 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }) => {
     const t = await tok();
     const realYearId = resolveYearId();
-    if (!realYearId) throw new Error('Year not found');
+    if (!realYearId || selectedYearId === null) throw new Error('Year not found');
     const { member: updated } = await api.years.updateMe(realYearId, t, data);
     setMember(updated);
-    if (selectedYearId !== null) await loadYear(selectedYearId, { silent: true });
-  }, [tok, selectedYearId, loadYear, yearObj]);
+
+    // Refresh group views (return eligibility changes which event is primary)
+    const events = await api.events.list();
+    const yearEvents = events.filter((e) => e.year === selectedYearId);
+    const views = await Promise.all(
+      yearEvents.map(async (e) => {
+        const { group, participants } = await api.years.myGroup(realYearId, e.id, t);
+        return { group, participants, event: e };
+      })
+    );
+    setGroupViews(views);
+  }, [tok, selectedYearId, yearObj]);
 
   const value: DashboardContextValue = {
     loading,

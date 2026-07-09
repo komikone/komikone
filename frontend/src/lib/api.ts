@@ -8,7 +8,7 @@ function authHeaders(clerkToken?: string, adminToken?: string): HeadersInit {
 }
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, opts);
+  const res = await fetch(`${BASE}${path}`, { cache: 'no-store', ...opts });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     const msg = (body as { error?: string }).error || res.statusText || `HTTP ${res.status}`;

@@ -51,7 +51,7 @@ export default function DashboardProfile() {
       last_name: member.last_name,
       member_id: member.member_id ?? '',
       badge_type: member.badge_type,
-      return_eligible: member.return_eligible,
+      return_eligible: !!member.return_eligible,
     });
   }, [member]);
 

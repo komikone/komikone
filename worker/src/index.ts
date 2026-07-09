@@ -85,11 +85,14 @@ app.use('*', async (c, next) => {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function json<T>(data: T, status = 200) {
-  return Response.json(data, { status });
+  return Response.json(data, {
+    status,
+    headers: { 'Cache-Control': 'no-store' },
+  });
 }
 
 function err(msg: string, status = 400) {
-  return Response.json({ error: msg }, { status });
+  return Response.json({ error: msg }, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
 function mapYearMember(row: YearMember) {
@@ -749,7 +752,8 @@ app.patch('/api/years/:yearId/me', async (c) => {
   const lastName = body.last_name.trim();
   const memberId = body.member_id?.trim() ?? '';
   const badgeType = body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT';
-  const returnEligible = body.return_eligible ? 1 : 0;
+  const returnEligible =
+    body.return_eligible === true || body.return_eligible === 1 ? 1 : 0;
 
   await c.env.DB.prepare(`
     UPDATE year_members SET
