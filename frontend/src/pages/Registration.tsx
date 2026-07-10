@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
 import { api, type EventDetail, DAY_KEYS, dayLabel } from '../lib/api';
+import { AppPage } from '../components/AppPage';
 import { normalizeMemberIdInput } from '../components/MemberId';
 
 export default function Registration() {
@@ -91,40 +92,47 @@ export default function Registration() {
 
   if (needsInvite) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center px-6">
-        <div className="bg-gray-900 border border-gray-700 rounded-xl p-8 max-w-sm text-center">
-          <h2 className="text-xl font-bold text-white mb-2">Invite required</h2>
+      <AppPage title="Registration" backTo={{ to: '/', label: '← Home' }}>
+        <div className="flex-1 flex items-center justify-center px-6">
+        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-8 max-w-sm text-center">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white dark:text-white mb-2">Invite required</h2>
           <p className="text-gray-400 text-sm mb-6">
             You need an invite link before you can select badge days. Check your email or request access from the homepage.
           </p>
           <Link to="/" className="text-blue-400 hover:text-blue-300 text-sm">← Back to home</Link>
         </div>
-      </div>
+        </div>
+      </AppPage>
     );
   }
 
   if (!isLoaded || (!event && !error && !needsInvite)) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+      <AppPage title="Registration">
+        <div className="flex-1 flex items-center justify-center">
         <div className="text-gray-500">Loading…</div>
-      </div>
+        </div>
+      </AppPage>
     );
   }
 
   if (error && !event) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+      <AppPage title="Registration">
+        <div className="flex-1 flex items-center justify-center">
         <div className="text-red-400">{error}</div>
-      </div>
+        </div>
+      </AppPage>
     );
   }
 
   if (submitted) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-        <div className="bg-gray-900 border border-green-600 rounded-xl p-8 max-w-sm text-center">
+      <AppPage title="Registration">
+        <div className="flex-1 flex items-center justify-center">
+        <div className="bg-white dark:bg-gray-900 border border-green-600 rounded-xl p-8 max-w-sm text-center">
           <div className="text-green-400 text-4xl mb-4">✓</div>
-          <h2 className="text-white text-xl font-bold mb-2">
+          <h2 className="text-gray-900 dark:text-white text-xl font-bold mb-2">
             {alreadyRegistered ? 'Registration updated!' : "You're registered!"}
           </h2>
           <p className="text-gray-400 text-sm mb-6">
@@ -132,29 +140,25 @@ export default function Registration() {
           </p>
           <div className="flex flex-col gap-2">
             <Link to="/dashboard" className="text-blue-400 hover:text-blue-300 text-sm">Go to Dashboard</Link>
-            <Link to="/" className="text-gray-500 hover:text-gray-300 text-sm">← Back to home</Link>
+            <Link to="/" className="text-gray-500 hover:text-gray-700 text-sm">← Back to home</Link>
           </div>
         </div>
-      </div>
+        </div>
+      </AppPage>
     );
   }
 
   const isReturn = event?.reg_type === 'return';
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
-      <div className="max-w-lg mx-auto px-6 py-10">
-        <Link to="/" className="text-gray-500 hover:text-gray-300 text-sm">← Home</Link>
-
-        <h1 className="text-2xl font-bold text-white mt-4 mb-1">
-          {event?.name ?? 'Registration'}
-        </h1>
+    <AppPage title={event?.name ?? 'Registration'} backTo={{ to: '/', label: '← Home' }}>
+      <div className="max-w-lg mx-auto px-6 py-10 flex-1">
         <p className="text-gray-400 text-sm mb-8">
           {isReturn ? 'Return Member Registration' : 'Open Registration'}
         </p>
 
         {error && (
-          <div className="bg-red-900/40 border border-red-600 rounded p-3 mb-6 text-red-300 text-sm">
+          <div className="bg-red-900/40 border border-red-600 rounded p-3 mb-6 text-red-700 text-sm">
             {error}
           </div>
         )}
@@ -162,29 +166,29 @@ export default function Registration() {
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm text-gray-300 mb-1">First Name *</label>
+              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">First Name *</label>
               <input
                 type="text"
                 required
                 value={form.first_name}
                 onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))}
-                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm text-gray-300 mb-1">Last Name *</label>
+              <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">Last Name *</label>
               <input
                 type="text"
                 required
                 value={form.last_name}
                 onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))}
-                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 focus:outline-none focus:border-blue-500"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm text-gray-300 mb-1">
+            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">
               Comic-Con Member ID
               {isReturn && <span className="text-red-400 ml-1">* (required for return reg)</span>}
             </label>
@@ -194,14 +198,14 @@ export default function Registration() {
               value={form.member_id}
               onChange={(e) => setForm((f) => ({ ...f, member_id: normalizeMemberIdInput(e.target.value) }))}
               placeholder="e.g. AB12CD34"
-              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono uppercase tracking-wide"
+              className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 font-mono uppercase tracking-wide"
               autoCapitalize="characters"
               spellCheck={false}
             />
           </div>
 
           <div>
-            <label className="block text-sm text-gray-300 mb-2">Badge Type</label>
+            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">Badge Type</label>
             <div className="flex gap-4">
               {(['ADULT', 'JUNIOR'] as const).map((type) => (
                 <label key={type} className="flex items-center gap-2 cursor-pointer">
@@ -213,7 +217,7 @@ export default function Registration() {
                     onChange={() => setForm((f) => ({ ...f, badge_type: type }))}
                     className="accent-blue-500"
                   />
-                  <span className="text-gray-300 text-sm">
+                  <span className="text-gray-700 text-sm">
                     {type === 'JUNIOR' ? 'Junior / Military / Senior' : 'Adult'}
                   </span>
                 </label>
@@ -222,7 +226,7 @@ export default function Registration() {
           </div>
 
           <div>
-            <label className="block text-sm text-gray-300 mb-2">Which days do you want?</label>
+            <label className="block text-sm text-gray-700 dark:text-gray-300 mb-2">Which days do you want?</label>
             <div className="space-y-2">
               {DAY_KEYS.map((day) => (
                 <label key={day} className="flex items-center gap-3 cursor-pointer group">
@@ -232,7 +236,7 @@ export default function Registration() {
                     onChange={(e) => setDay(day, e.target.checked)}
                     className="w-4 h-4 rounded accent-blue-500 cursor-pointer"
                   />
-                  <span className="text-gray-300 group-hover:text-white text-sm">{dayLabel(day)}</span>
+                  <span className="text-gray-700 group-hover:text-gray-900 text-sm">{dayLabel(day)}</span>
                 </label>
               ))}
             </div>
@@ -250,6 +254,6 @@ export default function Registration() {
           </p>
         </form>
       </div>
-    </div>
+    </AppPage>
   );
 }

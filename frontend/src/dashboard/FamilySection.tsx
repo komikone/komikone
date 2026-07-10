@@ -30,7 +30,7 @@ export function FamilySection({
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium text-gray-300">Family & group</h3>
+        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Family & group</h3>
         <button
           onClick={() => setAddOpen(true)}
           className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg transition-colors"
@@ -53,7 +53,7 @@ export function FamilySection({
         />
       )}
 
-      <div className="border border-gray-800 rounded-lg overflow-hidden">
+      <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
         {family.length === 0 && !addOpen ? (
           <p className="text-gray-500 text-sm p-4 text-center">
             No family members yet. Add anyone who does not need their own account.
@@ -61,7 +61,7 @@ export function FamilySection({
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-800 text-gray-500 text-xs bg-gray-950/50">
+              <tr className="border-b border-gray-200 dark:border-gray-700 text-gray-500 text-xs bg-gray-50/80 dark:bg-gray-800/80">
                 <th className="text-left px-4 py-2">Name</th>
                 <th className="text-left px-4 py-2">Member ID</th>
                 <th className="text-left px-4 py-2">Type</th>
@@ -69,7 +69,7 @@ export function FamilySection({
                 <th className="px-4 py-2" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-800">
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {family.map((p) =>
                 editingId === p.id ? (
                   <EditParticipantRow
@@ -87,8 +87,8 @@ export function FamilySection({
                     onError={(msg) => alert(msg)}
                   />
                 ) : (
-                  <tr key={p.id} className="group hover:bg-gray-800/40">
-                    <td className="px-4 py-2.5 text-white font-medium">
+                  <tr key={p.id} className="group hover:bg-gray-100 dark:hover:bg-gray-800/40">
+                    <td className="px-4 py-2.5 text-gray-900 dark:text-white font-medium">
                       {p.first_name} {p.last_name}
                     </td>
                     <td className="px-4 py-2.5">
@@ -110,7 +110,7 @@ export function FamilySection({
                       <div className="flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={() => setEditingId(p.id)}
-                          className="text-xs text-gray-400 hover:text-white"
+                          className="text-xs text-gray-400 hover:text-gray-900"
                         >
                           Edit
                         </button>
@@ -154,7 +154,7 @@ function AddParticipantForm({
   const set = (k: keyof ParticipantFormData, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
-    <div className="bg-gray-950 border border-gray-800 rounded-lg p-4 mb-3">
+    <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-3">
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div>
           <label className={labelCls}>First name *</label>
@@ -203,7 +203,7 @@ function AddParticipantForm({
         >
           {saving ? 'Saving…' : 'Add'}
         </button>
-        <button onClick={onCancel} className="text-sm text-gray-400 hover:text-white px-3">Cancel</button>
+        <button onClick={onCancel} className="text-sm text-gray-400 hover:text-gray-900 px-3">Cancel</button>
       </div>
     </div>
   );
@@ -228,7 +228,7 @@ function EditParticipantRow({
   const set = (k: keyof typeof form, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
-    <tr className="bg-gray-800/50">
+    <tr className="bg-gray-100/50">
       <td colSpan={5} className="px-4 py-3">
         <div className="grid grid-cols-2 gap-2 mb-2">
           <input type="text" value={form.first_name} onChange={(e) => set('first_name', e.target.value)} placeholder="First name" className={inputCls} />
@@ -270,7 +270,7 @@ function EditParticipantRow({
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
-          <button onClick={onCancel} className="text-xs text-gray-400 hover:text-white">Cancel</button>
+          <button onClick={onCancel} className="text-xs text-gray-400 hover:text-gray-900">Cancel</button>
         </div>
       </td>
     </tr>

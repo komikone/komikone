@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
+import { ThemeProvider } from './lib/useTheme';
 import Home from './pages/Home';
 import Registration from './pages/Registration';
 import JoinPage from './pages/Join';
@@ -28,7 +29,8 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
+      <ThemeProvider>
+        <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/sign-in" element={<SignIn />} />
         <Route path="/stats" element={<Stats />} />
@@ -45,7 +47,8 @@ export default function App() {
         <Route path="/live/:eventId" element={<RequireAuth><LiveBoard /></RequireAuth>} />
         <Route path="/payment/:eventId" element={<RequireAuth><Payment /></RequireAuth>} />
         <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
-      </Routes>
+        </Routes>
+      </ThemeProvider>
     </BrowserRouter>
   );
 }

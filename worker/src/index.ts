@@ -250,7 +250,7 @@ async function sendInviteClerkEmail(
   email: string,
 ): Promise<{ emailSent: boolean; emailError?: string }> {
   if (!env.CLERK_SECRET_KEY) {
-    return { emailSent: false, emailError: 'Email sending is not configured (missing CLERK_SECRET_KEY)' };
+    return { emailSent: false, emailError: 'Email sending is not configured on the server' };
   }
 
   const result = await sendClerkInvitationEmail({
@@ -1902,6 +1902,20 @@ admin.patch('/years/:yearId', async (c) => {
   return json({ ok: true });
 });
 
+admin.delete('/years/:yearId', async (c) => {
+  const yearId = Number(c.req.param('yearId'));
+  const year = await c.env.DB.prepare('SELECT * FROM years WHERE id = ?').bind(yearId).first<Year>();
+  if (!year) return err('Year not found', 404);
+
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM events WHERE year_id = ?').bind(yearId),
+    c.env.DB.prepare('DELETE FROM year_meta WHERE year = ?').bind(year.con_year),
+    c.env.DB.prepare('DELETE FROM years WHERE id = ?').bind(yearId),
+  ]);
+
+  return json({ ok: true });
+});
+
 // ── Admin: Invites ────────────────────────────────────────────────────────────
 
 admin.get('/years/:yearId/invites', async (c) => {
@@ -1915,13 +1929,30 @@ admin.get('/years/:yearId/invites', async (c) => {
 admin.post('/years/:yearId/invites', async (c) => {
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
   const yearId = Number(c.req.param('yearId'));
-  const body = await c.req.json<{ label?: string }>();
+  const body = await c.req.json<{ label?: string; email?: string }>();
   const invitedBy = access?.userId === 'admin' ? 'admin' : (access?.userId ?? 'admin');
 
   const invite = await createUniqueInvite(
     c.env.DB, yearId, body.label?.trim() ?? '', invitedBy,
   );
-  return json(invite, 201);
+
+  const joinUrl = inviteJoinUrl(c.env.FRONTEND_URL, invite.code);
+
+  let emailSent = false;
+  let emailError: string | undefined;
+  let finalInvite = invite;
+
+  const email = body.email?.trim();
+  if (email) {
+    const result = await sendInviteClerkEmail(c.env, invite, email);
+    emailSent = result.emailSent;
+    emailError = result.emailError;
+    if (result.emailSent) {
+      finalInvite = await c.env.DB.prepare('SELECT * FROM invites WHERE id = ?').bind(invite.id).first<Invite>() ?? invite;
+    }
+  }
+
+  return json({ invite: finalInvite, join_url: joinUrl, email_sent: emailSent, email_error: emailError }, 201);
 });
 
 admin.post('/years/:yearId/invites/bulk', async (c) => {

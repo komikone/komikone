@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth, SignIn } from '@clerk/clerk-react';
 import { api, type Year } from '../lib/api';
+import { AppPage } from '../components/AppPage';
 import { normalizeMemberIdInput } from '../components/MemberId';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 
@@ -10,7 +11,7 @@ type InviteInfo = {
   year: Pick<Year, 'id' | 'name' | 'con_year'>;
 };
 
-const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500';
+const inputCls = 'w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500';
 const labelCls = 'block text-xs text-gray-400 mb-1';
 
 export default function JoinPage() {
@@ -96,7 +97,7 @@ export default function JoinPage() {
     return (
       <Screen>
         <div className="bg-red-950/40 border border-red-700 rounded-xl p-6 text-center">
-          <p className="text-red-300 font-medium mb-1">
+          <p className="text-red-700 font-medium mb-1">
             {inviteUsed ? 'Invite already used' : 'Invalid invite'}
           </p>
           <p className="text-gray-400 text-sm">{inviteError}</p>
@@ -109,7 +110,7 @@ export default function JoinPage() {
             </p>
           )}
         </div>
-        <Link to="/" className="text-gray-500 hover:text-gray-300 text-sm mt-6 block text-center">← Home</Link>
+        <Link to="/" className="text-gray-500 hover:text-gray-700 text-sm mt-6 block text-center">← Home</Link>
       </Screen>
     );
   }
@@ -119,7 +120,7 @@ export default function JoinPage() {
       <Screen>
         <div className="bg-green-950/40 border border-green-700 rounded-xl p-8 text-center">
           <div className="text-4xl mb-3">🎉</div>
-          <h2 className="text-xl font-bold text-white mb-2">You're in!</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">You're in!</h2>
           <p className="text-gray-400 text-sm mb-6">
             Welcome to {inviteInfo?.year.name}.
             {regEventId ? ' Select your badge days next, or head to your dashboard.' : ' Head to your dashboard to manage your group.'}
@@ -137,7 +138,7 @@ export default function JoinPage() {
               onClick={() => navigate('/dashboard')}
               className={`font-medium px-6 py-2.5 rounded-lg transition-colors ${
                 regEventId
-                  ? 'bg-gray-800 hover:bg-gray-700 text-gray-200'
+                  ? 'bg-gray-100 hover:bg-gray-300 text-gray-800'
                   : 'bg-blue-600 hover:bg-blue-500 text-white'
               }`}
             >
@@ -154,7 +155,7 @@ export default function JoinPage() {
       <Screen>
         <div className="mb-6 text-center">
           <p className="text-gray-400 text-sm">
-            You've been invited to <span className="text-white font-medium">{inviteInfo?.year.name ?? 'KomikOne'}</span>.
+            You've been invited to <span className="text-gray-900 dark:text-white font-medium">{inviteInfo?.year.name ?? 'KomikOne'}</span>.
             Sign in to continue.
           </p>
         </div>
@@ -168,11 +169,11 @@ export default function JoinPage() {
   return (
     <Screen>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">Join {inviteInfo?.year.name}</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Join {inviteInfo?.year.name}</h1>
         <p className="text-gray-400 text-sm mt-1">Complete your registration below.</p>
       </div>
 
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 space-y-4">
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-6 space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={labelCls}>First Name *</label>
@@ -234,8 +235,10 @@ export default function JoinPage() {
 
 function Screen({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md">{children}</div>
-    </div>
+    <AppPage backTo={{ to: '/', label: '← Home' }}>
+      <div className="flex-1 flex flex-col items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md">{children}</div>
+      </div>
+    </AppPage>
   );
 }

@@ -116,12 +116,14 @@ export default function DashboardInvitations() {
     <div
       key={inv.id}
       className={`flex items-center gap-3 rounded-lg px-4 py-3 border ${
-        joined ? 'bg-gray-900/60 border-gray-800 opacity-80' : 'bg-gray-900 border-gray-800'
+        joined
+          ? 'bg-gray-100 dark:bg-gray-800/60 border-gray-200 dark:border-gray-700 opacity-80'
+          : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700'
       }`}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          {inv.label && <p className="text-white text-sm truncate">{inv.label}</p>}
+          {inv.label && <p className="text-gray-900 dark:text-white text-sm truncate">{inv.label}</p>}
           {joined ? (
             <span className="text-xs bg-green-900/50 text-green-300 border border-green-800 px-1.5 py-0.5 rounded shrink-0">
               JOINED
@@ -152,7 +154,7 @@ export default function DashboardInvitations() {
           <button
             onClick={() => handleResend(inv.id, inv.invited_email)}
             disabled={busyId === inv.id}
-            className="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-50"
+            className="text-xs text-gray-400 hover:text-gray-800 disabled:opacity-50"
           >
             {busyId === inv.id ? '…' : 'Resend email'}
           </button>
@@ -171,30 +173,30 @@ export default function DashboardInvitations() {
   return (
     <PageShell
       title="Invitations"
-      subtitle="Create a Komikone invite link. Add an email to have Clerk send the invitation for you."
+      subtitle="Create a Komikone invite link. Add an email to send the invitation automatically."
     >
       <div className="max-w-lg">
-        <h2 className="text-sm font-medium text-gray-300 mb-3">Invite someone</h2>
+        <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Invite someone</h2>
         <div className="space-y-3 mb-6">
           <input
             type="text"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="Name (for your reference)"
-            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 dark:border-gray-700 rounded-lg px-3 py-2.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
           />
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email (optional)"
-            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 dark:border-gray-700 rounded-lg px-3 py-2.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
           <button
             onClick={handleCreate}
             disabled={creating}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white dark:text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
           >
             {creating
               ? 'Working…'
@@ -211,7 +213,7 @@ export default function DashboardInvitations() {
         )}
 
         <p className="text-xs text-gray-500 mb-4">
-          Email uses Clerk&apos;s invitation (no Organizations). After sign-up, they land on your join link to complete Komikone registration.
+          After sign-up, they land on your join link to complete Komikone registration.
         </p>
 
         {invites.length > 0 ? (

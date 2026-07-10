@@ -462,14 +462,19 @@ export const api = {
         req<{ ok: boolean }>(`/api/admin/years/${yearId}`, {
           method: 'PATCH', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
         }),
+      delete: (authToken: string, yearId: number) =>
+        req<{ ok: boolean }>(`/api/admin/years/${yearId}`, {
+          method: 'DELETE', headers: authHeaders(undefined, authToken),
+        }),
     },
     invites: {
       list: (authToken: string, yearId: number) =>
         req<Invite[]>(`/api/admin/years/${yearId}/invites`, { headers: authHeaders(undefined, authToken) }),
-      create: (authToken: string, yearId: number, label?: string) =>
-        req<Invite>(`/api/admin/years/${yearId}/invites`, {
-          method: 'POST', headers: authHeaders(undefined, authToken), body: JSON.stringify({ label }),
-        }),
+      create: (authToken: string, yearId: number, data?: { label?: string; email?: string }) =>
+        req<{ invite: Invite; join_url: string; email_sent: boolean; email_error?: string }>(
+          `/api/admin/years/${yearId}/invites`,
+          { method: 'POST', headers: authHeaders(undefined, authToken), body: JSON.stringify(data ?? {}) },
+        ),
       bulkCreate: (authToken: string, yearId: number, data: { count: number; label_prefix?: string }) =>
         req<{ invites: Invite[] }>(`/api/admin/years/${yearId}/invites/bulk`, {
           method: 'POST', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),

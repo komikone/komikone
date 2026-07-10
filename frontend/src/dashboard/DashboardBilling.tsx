@@ -54,7 +54,7 @@ export default function DashboardBilling() {
       {saved && <p className="text-green-400 text-sm mb-4">Saved.</p>}
 
       <form onSubmit={handleSave} className="max-w-lg space-y-4">
-        <h2 className="text-sm font-medium text-gray-300 mb-2">Payment info</h2>
+        <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Payment info</h2>
         <div>
           <label className={labelCls}>Venmo</label>
           <input type="text" value={form.venmo} onChange={set('venmo')} placeholder="@username" className={inputCls} />

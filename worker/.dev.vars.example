@@ -1,1 +1,7 @@
 ADMIN_SECRET=your-secret-here
+# Match your Clerk instance (Development → API keys → Frontend API / JWKS)
+# Dev example: https://your-instance.clerk.accounts.dev/.well-known/jwks.json
+# Prod example: https://clerk.komikone.com/.well-known/jwks.json
+CLERK_JWKS_URL=https://your-instance.clerk.accounts.dev/.well-known/jwks.json
+# Optional — enables invite-by-email via Clerk
+CLERK_SECRET_KEY=sk_test_...

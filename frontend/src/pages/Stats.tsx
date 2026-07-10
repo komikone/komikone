@@ -50,7 +50,7 @@ function Bar({ value, max, color = 'bg-blue-500', label }: { value: number; max:
   const w = max ? Math.round((value / max) * 100) : 0;
   return (
     <div className="flex items-center gap-2">
-      <div className="flex-1 bg-gray-800 rounded-full h-2.5 overflow-hidden">
+      <div className="flex-1 bg-gray-100 rounded-full h-2.5 overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${w}%` }} />
       </div>
       {label !== undefined && <span className="text-xs text-gray-400 w-8 text-right">{label}</span>}
@@ -70,13 +70,13 @@ export default function Stats() {
   }, []);
 
   if (error) return (
-    <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+    <div className="min-h-screen bg-gray-50 text-gray-900 flex items-center justify-center">
       <div className="text-red-400">{error}</div>
     </div>
   );
 
   if (!stats) return (
-    <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+    <div className="min-h-screen bg-gray-50 text-gray-900 flex items-center justify-center">
       <div className="text-gray-500">Loading…</div>
     </div>
   );
@@ -98,18 +98,18 @@ export default function Stats() {
   const totalPurchased = allComplete.reduce((s, y) => s + y.purchased_any, 0);
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="min-h-screen bg-gray-50 text-gray-900">
       <div className="max-w-5xl mx-auto px-6 py-10">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <Link to="/" className="text-gray-500 hover:text-gray-300 text-sm">← Home</Link>
+            <Link to="/" className="text-gray-500 hover:text-gray-700 text-sm">← Home</Link>
             <h1 className="font-bangers text-4xl text-yellow-400 tracking-wide mt-1">SDCC Stats</h1>
             <p className="text-gray-500 text-sm mt-1">Purchase train history · 2020 – 2026</p>
           </div>
           <Link
             to="/admin"
-            className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 px-3 py-1.5 rounded"
+            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-300 px-3 py-1.5 rounded"
           >
             Admin →
           </Link>
@@ -122,7 +122,7 @@ export default function Stats() {
             { label: 'Participants served', value: totalParticipants },
             { label: 'Purchase success rate', value: `${pct(totalPurchased, totalParticipants)}%` },
           ].map(({ label, value }) => (
-            <div key={label} className="bg-gray-900 border border-gray-800 rounded-xl p-5 text-center">
+            <div key={label} className="bg-white border border-gray-200 rounded-xl p-5 text-center">
               <div className="text-4xl font-bold font-mono text-yellow-400">{value}</div>
               <div className="text-gray-500 text-sm mt-1">{label}</div>
             </div>
@@ -131,10 +131,10 @@ export default function Stats() {
 
         {/* Year-by-year table */}
         <section className="mb-10">
-          <h2 className="text-lg font-bold text-white mb-4">Year by Year</h2>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <h2 className="text-lg font-bold text-gray-900 mb-4">Year by Year</h2>
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="text-xs text-gray-500 border-b border-gray-800">
+              <thead className="text-xs text-gray-500 border-b border-gray-200">
                 <tr>
                   <th className="px-4 py-3 text-left">Year</th>
                   <th className="px-4 py-3 text-left">Type</th>
@@ -148,8 +148,8 @@ export default function Stats() {
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {stats.years.map((y) => (
-                  <tr key={`${y.year}-${y.reg_type}`} className="hover:bg-gray-800/50">
-                    <td className="px-4 py-3 font-bold text-white">{y.year}</td>
+                  <tr key={`${y.year}-${y.reg_type}`} className="hover:bg-gray-100/50">
+                    <td className="px-4 py-3 font-bold text-gray-900">{y.year}</td>
                     <td className="px-4 py-3">
                       <span className={`text-xs font-medium px-2 py-0.5 rounded ${
                         y.reg_type === 'return'
@@ -180,10 +180,10 @@ export default function Stats() {
 
         {/* Day popularity heatmap */}
         <section className="mb-10">
-          <h2 className="text-lg font-bold text-white mb-4">Day Popularity</h2>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <h2 className="text-lg font-bold text-gray-900 mb-4">Day Popularity</h2>
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="text-xs text-gray-500 border-b border-gray-800">
+              <thead className="text-xs text-gray-500 border-b border-gray-200">
                 <tr>
                   <th className="px-4 py-3 text-left">Year / Type</th>
                   {DAYS.map((d) => (
@@ -193,8 +193,8 @@ export default function Stats() {
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {stats.years.map((y) => (
-                  <tr key={`${y.year}-${y.reg_type}-days`} className="hover:bg-gray-800/50">
-                    <td className="px-4 py-3 text-gray-300">
+                  <tr key={`${y.year}-${y.reg_type}-days`} className="hover:bg-gray-100/50">
+                    <td className="px-4 py-3 text-gray-700">
                       {y.year} {y.reg_type === 'return' ? 'Return' : 'Open'}
                     </td>
                     {DAYS.map((d) => {
@@ -224,14 +224,14 @@ export default function Stats() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Top buyers */}
           <section>
-            <h2 className="text-lg font-bold text-white mb-4">Top Buyers</h2>
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-3">
+            <h2 className="text-lg font-bold text-gray-900 mb-4">Top Buyers</h2>
+            <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-3">
               {stats.top_buyers.slice(0, 15).map((b, i) => (
                 <div key={b.name} className="flex items-center gap-3">
                   <span className="text-gray-600 text-sm w-5 text-right">{i + 1}</span>
                   <div className="flex-1">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-white text-sm font-medium">{b.name}</span>
+                      <span className="text-gray-900 text-sm font-medium">{b.name}</span>
                       <span className="text-gray-400 text-xs">{b.participants_served} people · {b.years_active}yr</span>
                     </div>
                     <Bar
@@ -247,13 +247,13 @@ export default function Stats() {
 
           {/* Retention */}
           <section>
-            <h2 className="text-lg font-bold text-white mb-4">Multi-Year Members</h2>
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h2 className="text-lg font-bold text-gray-900 mb-4">Multi-Year Members</h2>
+            <div className="bg-white border border-gray-200 rounded-xl p-5">
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {stats.retention.map((m) => (
-                  <div key={m.member_id} className="flex items-center justify-between py-1.5 border-b border-gray-800 last:border-0">
+                  <div key={m.member_id} className="flex items-center justify-between py-1.5 border-b border-gray-200 last:border-0">
                     <div>
-                      <span className="text-white text-sm">{m.first_name} {m.last_name}</span>
+                      <span className="text-gray-900 text-sm">{m.first_name} {m.last_name}</span>
                       <span className="ml-2">
                         <MemberId
                           value={m.member_id}
@@ -265,7 +265,7 @@ export default function Stats() {
                     <div className="flex items-center gap-2">
                       <div className="flex gap-0.5">
                         {m.years.split(',').map((yr) => (
-                          <span key={yr} className="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">
+                          <span key={yr} className="text-xs bg-gray-300 text-gray-700 px-1.5 py-0.5 rounded">
                             {yr}
                           </span>
                         ))}

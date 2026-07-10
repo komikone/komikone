@@ -4,13 +4,13 @@ export type ClerkInviteResult =
   | { ok: true; invitationId: string }
   | { ok: false; error: string };
 
-function parseClerkError(body: unknown, status: number): string {
+function parseInviteEmailError(body: unknown, status: number): string {
   if (body && typeof body === 'object') {
     const errs = (body as { errors?: { message?: string; long_message?: string }[] }).errors;
-    if (errs?.[0]?.long_message) return errs[0].long_message;
-    if (errs?.[0]?.message) return errs[0].message;
+    const raw = errs?.[0]?.long_message ?? errs?.[0]?.message;
+    if (raw) return raw.replace(/\bClerk\b/gi, '').replace(/\s{2,}/g, ' ').trim();
   }
-  return `Clerk invitation failed (${status})`;
+  return `Could not send invitation email (${status})`;
 }
 
 export async function sendClerkInvitationEmail(opts: {
@@ -40,7 +40,7 @@ export async function sendClerkInvitationEmail(opts: {
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
-    return { ok: false, error: parseClerkError(body, res.status) };
+    return { ok: false, error: parseInviteEmailError(body, res.status) };
   }
 
   const id = body && typeof body === 'object' && 'id' in body
@@ -79,7 +79,7 @@ export async function revokeClerkInvitation(opts: {
   }
 
   const body = await res.json().catch(() => null);
-  const message = parseClerkError(body, res.status);
+  const message = parseInviteEmailError(body, res.status);
   // Already revoked or accepted — treat as non-fatal for delete/resend prep
   if (res.status === 404 || /revoked|not found|already/i.test(message)) {
     return { ok: true, invitationId };

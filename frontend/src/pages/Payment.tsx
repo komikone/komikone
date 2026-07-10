@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
 import { api, type EventDetail, type Participant, type Coordinator, formatDollars } from '../lib/api';
+import { AppPage } from '../components/AppPage';
 
 export default function Payment() {
   const { eventId } = useParams<{ eventId: string }>();
@@ -95,17 +96,21 @@ export default function Payment() {
 
   if (!isLoaded || (!event && !error)) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-        <div className="text-gray-500">Loading…</div>
-      </div>
+      <AppPage title="Payment">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-gray-500">Loading…</div>
+        </div>
+      </AppPage>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-        <div className="text-red-400">{error}</div>
-      </div>
+      <AppPage title="Payment">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-red-400">{error}</div>
+        </div>
+      </AppPage>
     );
   }
 
@@ -114,16 +119,13 @@ export default function Payment() {
     .reduce((sum, p) => sum + p.purchase_total, 0);
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
-      <div className="max-w-3xl mx-auto px-6 py-8">
-        <Link to="/" className="text-gray-500 hover:text-gray-300 text-sm">← Home</Link>
-
-        <h1 className="text-2xl font-bold mt-4 mb-1">{event?.name ?? 'Payment'}</h1>
+    <AppPage title={event?.name ?? 'Payment'} backTo={{ to: '/', label: '← Home' }}>
+      <div className="max-w-3xl mx-auto px-6 py-8 flex-1">
         <p className="text-gray-400 text-sm mb-8">Payment Settlement</p>
 
         {/* Coordinator self-entry */}
-        <section className="bg-gray-900 border border-gray-700 rounded-xl p-5 mb-8">
-          <h2 className="font-semibold text-gray-200 mb-1">Are you a coordinator?</h2>
+        <section className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-5 mb-8">
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100 mb-1">Are you a coordinator?</h2>
           <p className="text-gray-400 text-sm mb-4">
             Enter your payment handles so participants know how to pay you.
           </p>
@@ -135,7 +137,7 @@ export default function Payment() {
                 value={myCoordName}
                 onChange={(e) => setMyCoordName(e.target.value)}
                 placeholder="e.g. Tony"
-                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
@@ -146,7 +148,7 @@ export default function Payment() {
                 maxLength={4}
                 onChange={(e) => setCoordForm((f) => ({ ...f, phone_last4: e.target.value }))}
                 placeholder="1234"
-                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
@@ -156,7 +158,7 @@ export default function Payment() {
                 value={coordForm.venmo}
                 onChange={(e) => setCoordForm((f) => ({ ...f, venmo: e.target.value }))}
                 placeholder="@handle"
-                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
@@ -166,7 +168,7 @@ export default function Payment() {
                 value={coordForm.zelle}
                 onChange={(e) => setCoordForm((f) => ({ ...f, zelle: e.target.value }))}
                 placeholder="phone or email"
-                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
@@ -176,13 +178,13 @@ export default function Payment() {
                 value={coordForm.paypal}
                 onChange={(e) => setCoordForm((f) => ({ ...f, paypal: e.target.value }))}
                 placeholder="@handle"
-                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
               />
             </div>
           </div>
           <button
             onClick={handleCoordSave}
-            className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded transition-colors"
+            className="bg-blue-600 hover:bg-blue-500 text-white dark:text-white text-sm font-medium px-4 py-2 rounded transition-colors"
           >
             Save Payment Info
           </button>
@@ -192,8 +194,8 @@ export default function Payment() {
         {/* Summary */}
         {unpaidTotal > 0 && (
           <div className="bg-red-950/40 border border-red-700 rounded-lg px-4 py-3 mb-6 text-sm">
-            <span className="text-red-300 font-medium">Outstanding: </span>
-            <span className="text-white font-mono">{formatDollars(unpaidTotal)}</span>
+            <span className="text-red-700 dark:text-red-300 font-medium">Outstanding: </span>
+            <span className="text-gray-900 dark:text-white font-mono">{formatDollars(unpaidTotal)}</span>
             <span className="text-gray-400 ml-2">total unpaid across all participants</span>
           </div>
         )}
@@ -207,23 +209,23 @@ export default function Payment() {
             const unpaid = ps.filter((p) => !p.paid && p.purchase_total > 0).reduce((s, p) => s + p.purchase_total, 0);
 
             return (
-              <div key={name} className="bg-gray-900 border border-gray-700 rounded-xl p-5 mb-4">
+              <div key={name} className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-5 mb-4">
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <h3 className="font-bold text-white text-lg">{name}</h3>
+                    <h3 className="font-bold text-gray-900 text-lg">{name}</h3>
                     {info && (
                       <div className="flex flex-wrap gap-3 mt-1 text-sm text-gray-400">
                         {info.venmo && (
-                          <span>Venmo: <span className="text-white">{info.venmo}</span></span>
+                          <span>Venmo: <span className="text-gray-900">{info.venmo}</span></span>
                         )}
                         {info.zelle && (
-                          <span>Zelle: <span className="text-white">{info.zelle}</span></span>
+                          <span>Zelle: <span className="text-gray-900">{info.zelle}</span></span>
                         )}
                         {info.paypal && (
-                          <span>PayPal: <span className="text-white">{info.paypal}</span></span>
+                          <span>PayPal: <span className="text-gray-900">{info.paypal}</span></span>
                         )}
                         {info.phone_last4 && (
-                          <span>Phone: <span className="text-white">...{info.phone_last4}</span></span>
+                          <span>Phone: <span className="text-gray-900">...{info.phone_last4}</span></span>
                         )}
                       </div>
                     )}
@@ -234,7 +236,7 @@ export default function Payment() {
                     )}
                   </div>
                   <div className="text-right">
-                    <div className="text-white font-mono font-semibold">{formatDollars(total)}</div>
+                    <div className="text-gray-900 font-mono font-semibold">{formatDollars(total)}</div>
                     <div className="text-xs text-gray-400">total paid out</div>
                     {unpaid > 0 && (
                       <div className="text-red-400 text-xs font-mono">{formatDollars(unpaid)} owed</div>
@@ -254,7 +256,7 @@ export default function Payment() {
                   <tbody className="divide-y divide-gray-800">
                     {ps.filter((p) => p.purchase_total > 0).map((p) => (
                       <tr key={p.id} className={p.paid ? 'opacity-50' : ''}>
-                        <td className="py-2 text-white">
+                        <td className="py-2 text-gray-900">
                           {p.first_name} {p.last_name}
                         </td>
                         <td className="py-2 text-gray-400 text-xs">
@@ -266,7 +268,7 @@ export default function Payment() {
                             p.pur_sun && 'Sun',
                           ].filter(Boolean).join(', ')}
                         </td>
-                        <td className="py-2 text-right font-mono text-white">
+                        <td className="py-2 text-right font-mono text-gray-900">
                           {formatDollars(p.purchase_total)}
                         </td>
                         <td className="py-2 text-center">
@@ -275,7 +277,7 @@ export default function Payment() {
                             className={`text-xs px-2 py-0.5 rounded font-medium transition-colors ${
                               p.paid
                                 ? 'bg-green-800 text-green-300 hover:bg-green-700'
-                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                : 'bg-gray-300 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-600 dark:hover:bg-gray-600'
                             }`}
                           >
                             {p.paid ? 'Paid ✓' : 'Mark Paid'}
@@ -295,6 +297,6 @@ export default function Payment() {
           </div>
         )}
       </div>
-    </div>
+    </AppPage>
   );
 }

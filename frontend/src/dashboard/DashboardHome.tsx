@@ -10,7 +10,7 @@ export default function DashboardHome() {
   if (!member) {
     return (
       <div className="flex-1 flex items-center justify-center p-8">
-        <div className="bg-gray-900 border border-gray-700 rounded-xl p-8 text-center max-w-md">
+        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-8 text-center max-w-md">
           <p className="text-gray-400">You are not registered for this year yet.</p>
           <p className="text-gray-500 text-sm mt-2">
             Use your invite link to join, or request access from the homepage.
@@ -27,11 +27,11 @@ export default function DashboardHome() {
     <BackgroundLayer className="flex-1" minHeight="min-h-[calc(100vh)]">
       <div className="flex flex-col justify-end min-h-[calc(100vh)] p-8 md:p-12">
         <div className="max-w-lg">
-          <div className="bg-gray-900/90 backdrop-blur-md border border-gray-700/80 rounded-2xl p-6 shadow-2xl">
+          <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-300/80 dark:border-gray-700/80 rounded-2xl p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4 mb-4">
               <div>
                 <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">Welcome back</p>
-                <h1 className="text-2xl font-bold text-white">
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
                   {member.first_name} {member.last_name}
                 </h1>
               </div>
@@ -50,14 +50,14 @@ export default function DashboardHome() {
                   <MemberId
                     value={member.member_id}
                     className="font-mono text-sm tracking-wide"
-                    letterClassName="text-gray-200"
+                    letterClassName="text-gray-800 dark:text-gray-200"
                     digitClassName="text-amber-400"
                   />
                 </dd>
               </div>
               <div>
                 <dt className="text-gray-500 text-xs">Badge type</dt>
-                <dd className="text-gray-200 mt-0.5">{badgeTypeLabel(member.badge_type)}</dd>
+                <dd className="text-gray-800 dark:text-gray-200 mt-0.5">{badgeTypeLabel(member.badge_type)}</dd>
               </div>
               <div>
                 <dt className="text-gray-500 text-xs">Return eligible</dt>
@@ -68,7 +68,7 @@ export default function DashboardHome() {
               {primaryView?.group && (
                 <div>
                   <dt className="text-gray-500 text-xs">Group</dt>
-                  <dd className="text-gray-200 mt-0.5 inline-flex items-center gap-1.5">
+                  <dd className="text-gray-800 mt-0.5 inline-flex items-center gap-1.5">
                     <span
                       className="w-2.5 h-2.5 rounded-full shrink-0"
                       style={{ backgroundColor: primaryView.group.color }}
@@ -79,16 +79,16 @@ export default function DashboardHome() {
               )}
             </dl>
 
-            <div className="mt-5 pt-4 border-t border-gray-800 flex gap-3">
+            <div className="mt-5 pt-4 border-t border-gray-200 dark:border-gray-800 flex gap-3">
               <Link
                 to="/dashboard/registrations"
-                className="text-xs text-gray-400 hover:text-white transition-colors"
+                className="text-xs text-gray-400 hover:text-gray-900 transition-colors"
               >
                 Registrations →
               </Link>
               <Link
                 to="/dashboard/invitations"
-                className="text-xs text-gray-400 hover:text-white transition-colors"
+                className="text-xs text-gray-400 hover:text-gray-900 transition-colors"
               >
                 Invitations →
               </Link>

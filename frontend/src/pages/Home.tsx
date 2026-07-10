@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useClerk, useUser } from '@clerk/clerk-react';
+import { useUser } from '@clerk/clerk-react';
 import { api, type EventSummary } from '../lib/api';
+import { HeaderUserMenu } from '../components/HeaderUserMenu';
 import { useBackgroundImage } from '../lib/useBackgrounds';
-import { useTheme } from '../lib/useTheme';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
 const HOME_CONTENT = 'max-w-5xl mx-auto px-6';
@@ -14,23 +14,8 @@ type StatsData = { years: YearStat[] };
 
 export default function Home() {
   const [events, setEvents] = useState<EventSummary[]>([]);
-  const { toggle, isDark } = useTheme();
   const [inviteOpen, setInviteOpen] = useState(false);
-  const { user, isSignedIn } = useUser();
-  const { signOut } = useClerk();
-  const [avatarOpen, setAvatarOpen] = useState(false);
-  const avatarRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!avatarOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (avatarRef.current && !avatarRef.current.contains(e.target as Node)) {
-        setAvatarOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [avatarOpen]);
+  const { isSignedIn } = useUser();
 
   useEffect(() => {
     api.events.list().then(setEvents).catch(() => {});
@@ -39,64 +24,13 @@ export default function Home() {
   const active = events.filter((e) => e.status !== 'complete');
 
   return (
-    <div className="min-h-screen bg-amber-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+    <div className="min-h-screen bg-amber-50 text-gray-900">
       {/* Fixed nav */}
       <header className="fixed top-0 left-0 right-0 z-40 bg-black/90 backdrop-blur-sm border-b-2 border-white/10">
         <div className="px-6 py-3 flex items-center justify-between max-w-6xl mx-auto">
           <span className="font-bangers text-2xl text-white tracking-wide">komikone</span>
           <div className="flex items-center gap-5">
-            <button
-              onClick={toggle}
-              className="text-xs text-gray-400 hover:text-yellow-400 transition-colors"
-            >
-              {isDark ? '☀ Day' : '◑ Night'}
-            </button>
-            {isSignedIn && user && (
-              <div className="relative" ref={avatarRef}>
-                <button
-                  onClick={() => setAvatarOpen((o) => !o)}
-                  className="flex items-center justify-center w-8 h-8 rounded-full overflow-hidden border-2 border-white/20 hover:border-yellow-400 transition-colors focus:outline-none"
-                >
-                  {user.imageUrl ? (
-                    <img src={user.imageUrl} alt={user.fullName ?? ''} className="w-full h-full object-cover" />
-                  ) : (
-                    <span className="bg-zinc-700 w-full h-full flex items-center justify-center text-white text-xs font-bold">
-                      {(user.firstName?.[0] ?? user.emailAddresses[0]?.emailAddress[0] ?? '?').toUpperCase()}
-                    </span>
-                  )}
-                </button>
-                {avatarOpen && (
-                  <div className="absolute right-0 top-10 w-48 bg-zinc-900 border border-zinc-700 shadow-xl z-50">
-                    <div className="px-3 py-2 border-b border-zinc-700">
-                      <p className="text-white text-xs font-medium truncate">{user.fullName ?? user.firstName}</p>
-                      <p className="text-zinc-400 text-xs truncate">{user.emailAddresses[0]?.emailAddress}</p>
-                    </div>
-                    {user.publicMetadata?.role === 'admin' && (
-                      <Link
-                        to="/admin"
-                        onClick={() => setAvatarOpen(false)}
-                        className="block px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
-                      >
-                        Admin
-                      </Link>
-                    )}
-                    <Link
-                      to="/dashboard"
-                      onClick={() => setAvatarOpen(false)}
-                      className="block px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
-                    >
-                      Dashboard
-                    </Link>
-                    <button
-                      onClick={() => signOut({ redirectUrl: '/' })}
-                      className="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
-                    >
-                      Sign out
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+            {isSignedIn && <HeaderUserMenu />}
           </div>
         </div>
       </header>
@@ -106,7 +40,7 @@ export default function Home() {
       <main>
         <HomeFeatureBand>
           {active.length > 0 && (
-            <section className="border-b-4 border-black dark:border-gray-700 scroll-mt-16">
+            <section className="border-b-4 border-black dark:border-gray-300 scroll-mt-16">
               <div className={`${HOME_CONTENT} py-6 space-y-4`}>
                 <h2 className="font-bangers text-2xl text-red-600 tracking-wide">Active Events</h2>
                 {active.map((e) => <EventCard key={e.id} event={e} />)}
@@ -188,7 +122,7 @@ function HeroSection({ isSignedIn, onRequestAccess }: { isSignedIn: boolean; onR
           komikone
         </h1>
 
-        <p className="text-red-300 text-sm md:text-base uppercase tracking-[0.3em] mb-10 font-medium">
+        <p className="text-red-700 text-sm md:text-base uppercase tracking-[0.3em] mb-10 font-medium">
           Badge Coordination · Est. 2017
         </p>
 
@@ -211,7 +145,7 @@ function HeroSection({ isSignedIn, onRequestAccess }: { isSignedIn: boolean; onR
           <InviteEntry onRequestAccess={onRequestAccess}>
             <a
               href="#how-it-works"
-              className="inline-block font-bangers tracking-wide text-base text-white/60 hover:text-white transition-colors mt-2"
+              className="inline-block font-bangers tracking-wide text-base text-white/60 hover:text-gray-900 transition-colors mt-2"
             >
               How It Works ↓
             </a>
@@ -256,8 +190,8 @@ function InviteEntry({
   };
 
   const inputCls = variant === 'dark'
-    ? 'flex-1 bg-zinc-900/90 border-2 border-white/30 focus:border-yellow-400 text-white font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider'
-    : 'flex-1 bg-gray-50 dark:bg-gray-800 border-2 border-black dark:border-gray-600 focus:border-red-500 dark:focus:border-yellow-400 text-gray-900 dark:text-white font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider';
+    ? 'flex-1 bg-white/90 border-2 border-white/30 focus:border-yellow-400 text-white font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider'
+    : 'flex-1 bg-gray-50 dark:bg-gray-100 border-2 border-black dark:border-gray-300 focus:border-red-500 dark:focus:border-yellow-400 text-gray-900 dark:text-white font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider';
 
   const btnCls = variant === 'dark'
     ? 'font-bangers tracking-wide text-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-3 border-2 border-white comic-shadow-sm transition-all'
@@ -268,8 +202,8 @@ function InviteEntry({
     : 'text-red-600 dark:text-yellow-400 hover:underline';
 
   const requestCls = variant === 'dark'
-    ? 'text-gray-400 hover:text-white'
-    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white';
+    ? 'text-gray-400 hover:text-gray-900'
+    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-900';
 
   const mutedCls = variant === 'dark' ? 'text-gray-500' : 'text-gray-500 dark:text-gray-500';
   const muted2Cls = variant === 'dark' ? 'text-gray-600' : 'text-gray-500 dark:text-gray-500';
@@ -310,11 +244,11 @@ function InviteEntry({
 
 function AboutSection() {
   return (
-    <section className="border-b-4 border-black dark:border-gray-700">
+    <section className="border-b-4 border-black dark:border-gray-300">
       <div className={HOME_CONTENT}>
         <div className="border-x-4 border-black dark:border-white grid grid-cols-1 md:grid-cols-3">
           {/* Panel 1 — top-left, 2 cols */}
-          <div className="md:col-span-2 border-b-4 md:border-r-4 border-black dark:border-white p-7 bg-amber-50 dark:bg-gray-950 relative overflow-hidden flex flex-col justify-between min-h-[220px]">
+          <div className="md:col-span-2 border-b-4 md:border-r-4 border-black dark:border-white p-7 bg-amber-50 dark:bg-gray-50 relative overflow-hidden flex flex-col justify-between min-h-[220px]">
             <div className="bg-yellow-400 border border-black px-2 py-0.5 inline-block text-xs font-bold uppercase tracking-wider text-black self-start">
               The Challenge
             </div>
@@ -341,7 +275,7 @@ function AboutSection() {
           </div>
 
           {/* Panel 3 — bottom-left */}
-          <div className="border-b-4 md:border-b-0 md:border-r-4 border-black dark:border-white p-5 bg-white dark:bg-gray-900 flex flex-col gap-2 min-h-[140px]">
+          <div className="border-b-4 md:border-b-0 md:border-r-4 border-black dark:border-white p-5 bg-white dark:bg-white flex flex-col gap-2 min-h-[140px]">
             <span className="text-2xl">🎯</span>
             <p className="font-bangers text-xl text-gray-900 dark:text-white leading-tight">
               Multiple coordinators buying simultaneously
@@ -350,7 +284,7 @@ function AboutSection() {
           </div>
 
           {/* Panel 4 — bottom-middle */}
-          <div className="md:border-r-4 border-black dark:border-white p-5 bg-white dark:bg-gray-900 flex flex-col gap-2 min-h-[140px]">
+          <div className="md:border-r-4 border-black dark:border-white p-5 bg-white dark:bg-white flex flex-col gap-2 min-h-[140px]">
             <span className="text-2xl">⚡</span>
             <p className="font-bangers text-xl text-gray-900 dark:text-white leading-tight">
               Live board tracks every badge in real time
@@ -413,7 +347,7 @@ function HomeFeatureBand({ children }: { children: ReactNode }) {
   return (
     <section
       ref={sectionRef}
-      className="relative border-y-4 border-black dark:border-gray-700 overflow-hidden"
+      className="relative border-y-4 border-black dark:border-gray-300 overflow-hidden"
     >
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         {background && (
@@ -489,7 +423,7 @@ function HowItWorksSection() {
           {steps.map((step, i) => (
             <div
               key={step.num}
-              className={`p-6 bg-white dark:bg-gray-900 relative ${
+              className={`p-6 bg-white dark:bg-white relative ${
                 i < steps.length - 1
                   ? 'border-b-4 md:border-b-0 md:border-r-4 border-black dark:border-white'
                   : ''
@@ -537,7 +471,7 @@ function HowItWorksSection() {
 
 function WantInSection({ onOpen }: { onOpen: () => void }) {
   return (
-    <section className="border-2 border-black dark:border-yellow-400 bg-white dark:bg-gray-900 p-6 comic-shadow">
+    <section className="border-2 border-black dark:border-yellow-400 bg-white dark:bg-white p-6 comic-shadow">
       <h2 className="font-bangers text-3xl text-red-600 dark:text-yellow-400 tracking-wide mb-5 text-center">
         Want In?
       </h2>
@@ -571,19 +505,19 @@ function InviteRequestModal({ onClose }: { onClose: () => void }) {
       setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const inputCls =
-    'w-full bg-gray-50 dark:bg-gray-800 border-2 border-black dark:border-gray-600 px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-red-500 dark:focus:border-yellow-400';
+    'w-full bg-gray-50 dark:bg-gray-100 border-2 border-black dark:border-gray-300 px-3 py-2 text-gray-900 dark:text-gray-900 text-sm focus:outline-none focus:border-red-500 dark:focus:border-yellow-400';
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-md border-2 border-black dark:border-yellow-400 bg-white dark:bg-gray-900 comic-shadow">
-        <div className="flex items-center justify-between border-b-2 border-black dark:border-gray-700 px-5 py-3">
+      <div className="w-full max-w-md border-2 border-black dark:border-yellow-400 bg-white dark:bg-white comic-shadow">
+        <div className="flex items-center justify-between border-b-2 border-black dark:border-gray-300 px-5 py-3">
           <h2 className="font-bangers text-2xl text-red-600 dark:text-yellow-400 tracking-wide">
             Request Access
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-900 dark:hover:text-white text-xl leading-none">
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-900 dark:hover:text-gray-900 text-xl leading-none">
             ✕
           </button>
         </div>
@@ -599,7 +533,7 @@ function InviteRequestModal({ onClose }: { onClose: () => void }) {
             </p>
             <button
               onClick={onClose}
-              className="mt-5 text-sm text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline"
+              className="mt-5 text-sm text-gray-400 hover:text-gray-700 dark:hover:text-gray-800 underline"
             >
               Close
             </button>
@@ -661,7 +595,7 @@ function InviteRequestModal({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 onClick={onClose}
-                className="text-sm text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                className="text-sm text-gray-400 hover:text-gray-700 dark:hover:text-gray-800"
               >
                 Cancel
               </button>
@@ -758,7 +692,7 @@ function StatsSection() {
   ];
 
   return (
-    <section className="border-t-4 border-black dark:border-gray-700">
+    <section className="border-t-4 border-black dark:border-gray-300">
       <div className={`${HOME_CONTENT} py-10`}>
         <h2 className="font-bangers text-2xl text-red-600 mb-6 tracking-wide">
           Track Record
@@ -778,7 +712,7 @@ function StatsSection() {
 
 function Footer() {
   return (
-    <footer className="border-t-4 border-black dark:border-gray-700 bg-white dark:bg-gray-900 py-8">
+    <footer className="border-t-4 border-black dark:border-gray-300 bg-white dark:bg-white py-8">
       <div className={`${HOME_CONTENT} flex flex-col sm:flex-row items-center justify-between gap-4`}>
         <div className="text-center sm:text-left">
           <p className="font-bangers text-xl text-gray-900 dark:text-white tracking-wide">komikone</p>
@@ -816,7 +750,7 @@ function ToucanProgressBar() {
 
 function StatusBadge({ status }: { status: EventSummary['status'] }) {
   const styles: Record<EventSummary['status'], string> = {
-    setup:        'bg-gray-200 text-gray-600 border border-gray-400 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600',
+    setup:        'bg-gray-200 text-gray-600 border border-gray-400 dark:bg-gray-100 dark:text-gray-400 dark:border-gray-300',
     registration: 'bg-blue-600 text-white border border-blue-400',
     purchasing:   'bg-red-600 text-white border-2 border-black dark:bg-yellow-400 dark:text-black dark:border-black animate-pulse',
     payment:      'bg-purple-600 text-white border border-purple-400',
@@ -846,7 +780,7 @@ function EventCard({ event }: { event: EventSummary }) {
       className={`border-2 p-5 comic-shadow ${
         isPurchasing
           ? 'border-red-600 bg-red-50 dark:border-yellow-400 dark:bg-yellow-950/20'
-          : 'border-black bg-white dark:border-gray-600 dark:bg-gray-900'
+          : 'border-black bg-white dark:border-gray-300 dark:bg-white'
       }`}
     >
       <div className="flex items-start justify-between gap-3">

@@ -3,16 +3,12 @@ import {
 } from 'react';
 import { useAuth } from '@clerk/clerk-react';
 import {
-  api, DAY_KEYS,
+  api,
   type YearMember, type Year, type Participant, type Group,
-  type EventSummary, type Invite, type Profile, type DayKey,
+  type EventSummary, type Invite, type Profile,
 } from '../lib/api';
 
 export type GroupView = { group: Group | null; participants: Participant[]; event: EventSummary };
-
-export function selectedDays(p: Participant, prefix: 'req' | 'pur'): DayKey[] {
-  return DAY_KEYS.filter((d) => p[`${prefix}_${d}` as keyof Participant]);
-}
 
 type DashboardContextValue = {
   loading: boolean;
@@ -62,15 +58,21 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const tok = useCallback(async () => {
-    const t = await getToken({ template: 'komikone' });
+    const t = await getToken({ template: 'komikone' }) ?? await getToken();
     if (!t) throw new Error('Not signed in');
     return t;
   }, [getToken]);
 
+  const [yearsReady, setYearsReady] = useState(false);
+
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
     tok()
       .then(async (t) => {
         const ys = await api.years.list(t);
+        if (cancelled) return;
         setYears(ys);
         if (ys.length > 0) {
           setSelectedYearId((prev) =>
@@ -78,9 +80,24 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           );
         } else {
           setSelectedYearId(null);
+          setMember(null);
+          setGroupViews([]);
+          setInvites([]);
+          setLoading(false);
         }
       })
-      .catch(() => {});
+      .catch((e) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Failed to load years');
+          setYears([]);
+          setSelectedYearId(null);
+          setLoading(false);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setYearsReady(true);
+      });
+    return () => { cancelled = true; };
   }, [tok]);
 
   const loadYear = useCallback(async (conYear: number, opts?: { silent?: boolean }) => {
@@ -133,8 +150,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [tok]);
 
   useEffect(() => {
-    if (selectedYearId !== null) loadYear(selectedYearId);
-  }, [selectedYearId, loadYear]);
+    if (!yearsReady || selectedYearId === null) return;
+    loadYear(selectedYearId);
+  }, [selectedYearId, loadYear, yearsReady]);
 
   const yearObj = years.find((y) => y.con_year === selectedYearId);
   const resolveYearId = () => yearObj?.id ?? null;

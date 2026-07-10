@@ -26,7 +26,7 @@ export function ToggleSwitch({
           : 'flex-col items-start gap-2'
       } ${className}`}
     >
-      <span className="text-sm text-gray-300">{label}</span>
+      <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
       <button
         type="button"
         role="switch"
@@ -34,7 +34,7 @@ export function ToggleSwitch({
         aria-label={label}
         onClick={() => onChange(!checked)}
         className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${
-          checked ? 'bg-blue-600' : 'bg-gray-700'
+          checked ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
         }`}
       >
         <span

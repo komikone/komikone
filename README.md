@@ -32,18 +32,24 @@ Apply incremental migrations as needed:
 ```bash
 npx wrangler d1 execute komikone --local --file=./migrations/006_years_members_invites.sql
 npx wrangler d1 execute komikone --local --file=./migrations/007_backfill_year_members.sql
+npx wrangler d1 execute komikone --local --file=./migrations/008_backgrounds.sql
 npx wrangler d1 execute komikone --local --file=./migrations/009_invite_email_tracking.sql
 # Add --remote for production
 ```
 
 ### 3. Set secrets
 
-Local dev: create `worker/.dev.vars` with:
+Local dev: create `worker/.dev.vars` from `.dev.vars.example`:
 
 ```
 ADMIN_SECRET=...
+CLERK_JWKS_URL=https://your-instance.clerk.accounts.dev/.well-known/jwks.json
 CLERK_SECRET_KEY=sk_test_...   # optional — enables invite-by-email via Clerk
 ```
+
+`CLERK_JWKS_URL` is **required** for signed-in API calls. Find it in Clerk Dashboard → Configure → API keys (same instance as your frontend `VITE_CLERK_PUBLISHABLE_KEY`).
+
+Frontend: copy `frontend/.env.example` to `frontend/.env.local` and set `VITE_CLERK_PUBLISHABLE_KEY` to the matching `pk_test_...` key.
 
 Production:
 

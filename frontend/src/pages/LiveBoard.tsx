@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useAuth, useUser, UserButton } from '@clerk/clerk-react';
+import { useAuth, useUser } from '@clerk/clerk-react';
 import { api, type EventDetail, type Participant, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
+import { HeaderUserMenu } from '../components/HeaderUserMenu';
 import { useTheme } from '../lib/useTheme';
 import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
 
@@ -113,10 +114,10 @@ function priorityScore(p: Participant, me: Participant | null, identityId: numbe
 export default function LiveBoard() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
-  const { toggle, isDark } = useTheme();
 
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { user } = useUser();
+  const { toggle, isDark } = useTheme();
 
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -480,7 +481,7 @@ export default function LiveBoard() {
 
       {/* ── Top bar ── */}
       <div className="bg-zinc-950 dark:bg-zinc-900 border-b-[5px] border-yellow-400 dark:border-yellow-500 px-4 py-2.5 flex items-center gap-3 shrink-0">
-        <span className="font-bangers text-yellow-400 text-xl tracking-wide shrink-0">komikone</span>
+        <Link to="/" className="font-bangers text-yellow-400 text-xl tracking-wide shrink-0 hover:text-yellow-300 transition-colors">komikone</Link>
         <span className="text-zinc-600 dark:text-zinc-500 shrink-0 text-base">·</span>
         <div className="flex-1 min-w-0">
           <div className="font-bangers text-white text-lg tracking-wide leading-tight">{event?.name}</div>
@@ -492,11 +493,15 @@ export default function LiveBoard() {
           <span className="text-zinc-500 dark:text-zinc-400 text-xs hidden sm:block">
             {lastUpdated ? lastUpdated.toLocaleTimeString() : '…'}
           </span>
-          <button onClick={toggle} className="text-zinc-400 dark:text-zinc-300 hover:text-yellow-400 text-xs border border-zinc-700 dark:border-zinc-600 px-2 py-0.5 rounded transition-colors">
+          <button
+            type="button"
+            onClick={toggle}
+            className="text-zinc-400 dark:text-zinc-300 hover:text-yellow-400 text-xs border border-zinc-700 dark:border-zinc-600 px-2 py-0.5 rounded transition-colors"
+          >
             {isDark ? '☀ Day' : '◑ Night'}
           </button>
           {me && <IdentityAvatar me={me} myDisplayName={myDisplayName} onChangeIdentity={() => setShowLinkModal(true)} />}
-          <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: 'w-7 h-7' } }} />
+          <HeaderUserMenu />
         </div>
       </div>
 
@@ -504,8 +509,8 @@ export default function LiveBoard() {
       <div className="bg-black dark:bg-zinc-950 border-b-2 border-zinc-800 dark:border-yellow-950 px-4 py-1 flex items-center gap-5 shrink-0">
         <span className="text-green-400 dark:text-green-300 text-xs font-mono">{purchased} <span className="text-zinc-600 dark:text-zinc-500">done</span></span>
         <span className="text-yellow-400 dark:text-yellow-300 text-xs font-mono">{inProgress} <span className="text-zinc-600 dark:text-zinc-500">claiming</span></span>
-        <span className="text-zinc-300 dark:text-zinc-400 text-xs font-mono">{remaining} <span className="text-zinc-600 dark:text-zinc-500">left</span></span>
-        {withGaps > 0 && <span className="text-red-400 dark:text-red-300 text-xs font-mono font-bold">{withGaps} gaps</span>}
+        <span className="text-gray-700 dark:text-gray-600 text-xs font-mono">{remaining} <span className="text-zinc-600 dark:text-zinc-500">left</span></span>
+        {withGaps > 0 && <span className="text-red-400 dark:text-red-700 text-xs font-mono font-bold">{withGaps} gaps</span>}
         {event?.status === 'purchasing' && priorityQueue.length > 0 && (
           <button
             onClick={() => setShowNextUp((v) => !v)}
@@ -542,13 +547,13 @@ export default function LiveBoard() {
       )}
 
       {/* ── Filter bar ── */}
-      <div className="border-b-2 border-yellow-200 dark:border-zinc-700 bg-amber-50 dark:bg-zinc-900 px-4 py-2 flex items-center gap-3 flex-wrap shrink-0">
+      <div className="border-b-2 border-yellow-200 dark:border-gray-300 bg-amber-50 dark:bg-gray-900 px-4 py-2 flex items-center gap-3 flex-wrap shrink-0">
         <input
           type="search"
           placeholder="Search… (* wildcard)"
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
-          className="bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-zinc-100 w-52 focus:outline-none focus:border-yellow-400 dark:focus:border-yellow-400 placeholder:text-gray-400 dark:placeholder:text-zinc-500"
+          className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-white w-52 focus:outline-none focus:border-yellow-400 dark:focus:border-yellow-400 placeholder:text-gray-400 dark:placeholder:text-gray-500"
         />
         <div className="flex gap-1.5 flex-wrap">
           {([
@@ -563,8 +568,8 @@ export default function LiveBoard() {
               onClick={() => setFilterStatus(s)}
               className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
                 filterStatus === s
-                  ? 'bg-zinc-900 dark:bg-yellow-400 text-white dark:text-black border-transparent'
-                  : 'bg-white dark:bg-zinc-800 text-gray-600 dark:text-zinc-300 border-gray-300 dark:border-zinc-600 hover:border-gray-400 dark:hover:border-zinc-400'
+                  ? 'bg-yellow-400 text-black border-transparent'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
               }`}
             >
               {label}
@@ -647,9 +652,9 @@ export default function LiveBoard() {
                     }
                     className={[
                       'px-3 py-2 text-left text-xs uppercase tracking-wide select-none align-top',
-                      'bg-zinc-950 dark:bg-zinc-900 text-yellow-500/70 dark:text-yellow-400/60',
-                      'border-b-2 border-yellow-900 dark:border-zinc-700',
-                      isSorted ? 'text-yellow-400 dark:text-yellow-300' : 'hover:text-white dark:hover:text-yellow-200 cursor-pointer',
+                      'bg-gray-50 dark:bg-gray-800 text-yellow-500/70 dark:text-yellow-400/60',
+                      'border-b-2 border-yellow-900 dark:border-gray-300',
+                      isSorted ? 'text-yellow-400 dark:text-yellow-300' : 'hover:text-gray-900 dark:hover:text-yellow-200 cursor-pointer',
                       isMovable ? 'cursor-grab' : '',
                       isDropTarget ? 'bg-blue-900 text-white' : '',
                     ].join(' ')}
@@ -702,16 +707,16 @@ export default function LiveBoard() {
               const frozenBg = isFlashing
                 ? 'bg-blue-100 dark:bg-blue-900/30'
                 : evenRow
-                  ? 'bg-white dark:bg-zinc-950'
-                  : 'bg-gray-50 dark:bg-zinc-900/60';
+                  ? 'bg-white dark:bg-gray-900'
+                  : 'bg-gray-50 dark:bg-gray-800/60';
 
               const rowBg = isFlashing
                 ? 'bg-blue-100 dark:bg-blue-900/30'
                 : isRowDragTarget
                   ? 'bg-blue-100 dark:bg-blue-900/20'
                   : evenRow
-                    ? 'bg-white dark:bg-zinc-950'
-                    : 'bg-gray-50 dark:bg-zinc-900/60';
+                    ? 'bg-white dark:bg-gray-900'
+                    : 'bg-gray-50 dark:bg-gray-800/60';
 
               return (
                 <tr
@@ -731,7 +736,7 @@ export default function LiveBoard() {
                           : { width: w, minWidth: w }
                         }
                         className={[
-                          'px-3 py-1.5 border-b border-gray-100 dark:border-zinc-800/70 align-middle',
+                          'px-3 py-1.5 border-b border-gray-100 dark:border-gray-200/70 align-middle',
                           isFrozen ? frozenBg : '',
                           col === 'idx' ? statusAccentCls(status) : '',
                           isRowDragTarget ? 'border-t-2 border-t-blue-400' : '',
@@ -743,7 +748,7 @@ export default function LiveBoard() {
                               draggable
                               onDragStart={(e) => onRowDragStart(e, p.id)}
                               onDragEnd={onRowDragEnd}
-                              className="text-gray-300 dark:text-gray-700 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity text-xs leading-none select-none"
+                              className="text-gray-700 dark:text-gray-700 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity text-xs leading-none select-none"
                             >
                               ⠿
                             </span>
@@ -807,7 +812,7 @@ function CopyCell({ value, children }: { value: string; children?: React.ReactNo
       {children ?? <span>{value}</span>}
       <button
         onClick={handleCopy}
-        className={`transition-opacity text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 ${hovered || copied ? 'opacity-100' : 'opacity-0'}`}
+        className={`transition-opacity text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-800 ${hovered || copied ? 'opacity-100' : 'opacity-0'}`}
         title="Copy"
       >
         {copied ? (
@@ -919,7 +924,7 @@ function CellContent({
                   <div title="Purchased — locked" className={`w-4 h-4 rounded-sm border-2 cursor-not-allowed opacity-60 ${
                     req
                       ? 'bg-gray-400 border-gray-500 dark:bg-gray-500 dark:border-gray-400'
-                      : 'border-gray-200 dark:border-gray-700'
+                      : 'border-gray-200 dark:border-gray-300'
                   }`} />
                 ) : (
                   <button
@@ -927,7 +932,7 @@ function CellContent({
                     className={`w-4 h-4 rounded-sm border-2 transition-colors ${
                       req
                         ? 'bg-gray-400 border-gray-500 dark:bg-gray-500 dark:border-gray-400'
-                        : 'bg-transparent border-gray-300 hover:border-gray-400 dark:border-gray-600 dark:hover:border-gray-500'
+                        : 'bg-transparent border-gray-300 hover:border-gray-400 dark:border-gray-300 dark:hover:border-gray-500'
                     }`}
                   />
                 )}
@@ -952,11 +957,11 @@ function CellContent({
                     className={`w-4 h-4 rounded-sm border-2 transition-colors ${
                       bought
                         ? 'bg-green-500 border-green-600 dark:bg-green-500 dark:border-green-400'
-                        : 'bg-transparent border-gray-300 hover:border-green-400 hover:bg-green-50 dark:border-gray-600 dark:hover:border-green-500'
+                        : 'bg-transparent border-gray-300 hover:border-green-400 hover:bg-green-50 dark:border-gray-300 dark:hover:border-green-500'
                     }`}
                   />
                 ) : (
-                  <div className="w-4 h-4 rounded-sm border border-gray-200 dark:border-gray-700" />
+                  <div className="w-4 h-4 rounded-sm border border-gray-200 dark:border-gray-300" />
                 )}
                 <span className="text-[7px] text-gray-400 dark:text-gray-600 leading-none">{DAY_SHORT[day]}</span>
               </div>
@@ -975,7 +980,7 @@ function CellContent({
                 <div className={`w-4 h-4 rounded-sm border-2 ${
                   isGap
                     ? 'bg-red-500 border-red-600 dark:bg-red-500 dark:border-red-400'
-                    : 'border-gray-200 dark:border-gray-700'
+                    : 'border-gray-200 dark:border-gray-300'
                 }`} />
                 <span className="text-[7px] text-gray-400 dark:text-gray-600 leading-none">{DAY_SHORT[day]}</span>
               </div>
@@ -1014,7 +1019,7 @@ function CellContent({
 
     case 'total':
       return (
-        <span className="font-mono text-xs text-gray-800 dark:text-gray-200">
+        <span className="font-mono text-xs text-gray-800 dark:text-gray-800">
           {p.purchase_total > 0 ? formatDollars(p.purchase_total) : '—'}
         </span>
       );
@@ -1029,7 +1034,7 @@ function CellContent({
       ) : (
         <button
           onClick={() => setEditingRow(p.id)}
-          className="text-xs text-left text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+          className="text-xs text-left text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-900"
         >
           {p.who_purchased || <span className="italic text-gray-400 dark:text-gray-600">tap to set</span>}
         </button>
@@ -1063,8 +1068,8 @@ function IdentityAvatar({
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-9 z-50 bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-4 min-w-[180px]">
-            <div className="text-white font-semibold text-sm">{myDisplayName}</div>
+          <div className="absolute right-0 top-9 z-50 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg shadow-xl p-4 min-w-[180px]">
+            <div className="text-gray-900 dark:text-white font-semibold text-sm">{myDisplayName}</div>
             {me.member_id && (
               <div className="mt-0.5">
                 <MemberId value={me.member_id} className="font-mono text-xs tracking-wide" letterClassName="text-gray-400" digitClassName="text-amber-400" />
@@ -1082,7 +1087,7 @@ function IdentityAvatar({
             )}
             <button
               onClick={() => { setOpen(false); onChangeIdentity(); }}
-              className="mt-3 text-xs text-gray-400 hover:text-white underline block"
+              className="mt-3 text-xs text-gray-400 hover:text-gray-900 dark:hover:text-white underline block"
             >
               Change identity
             </button>
@@ -1114,15 +1119,15 @@ function LinkIdentityModal({
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-sm shadow-2xl">
-        <div className="px-5 pt-5 pb-3 border-b border-gray-800">
-          <h2 className="text-white font-bold text-lg">
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl w-full max-w-sm shadow-2xl">
+        <div className="px-5 pt-5 pb-3 border-b border-gray-200 dark:border-gray-700">
+          <h2 className="text-gray-900 dark:text-white font-bold text-lg">
             {isReLinking ? 'Change your identity' : 'Link your account'}
           </h2>
           <p className="text-gray-400 text-sm mt-0.5">
             {isReLinking
               ? 'Pick a different participant to link to your account'
-              : 'Select yourself from the list — this links your Clerk account to your participant slot'}
+              : 'Select yourself from the list — this links your account to your participant slot'}
           </p>
           <input
             autoFocus
@@ -1130,7 +1135,7 @@ function LinkIdentityModal({
             placeholder="Search by name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full mt-3 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-yellow-500 placeholder-gray-500"
+            className="w-full mt-3 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-yellow-500 placeholder-gray-500"
           />
         </div>
         <div className="overflow-y-auto max-h-72 py-1">
@@ -1139,10 +1144,10 @@ function LinkIdentityModal({
               key={p.id}
               disabled={linking !== null}
               onClick={async () => { setLinking(p.id); await onLink(p.id); setLinking(null); }}
-              className="w-full text-left px-5 py-2.5 hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center justify-between"
+              className="w-full text-left px-5 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center justify-between"
             >
               <span>
-                <span className="text-white font-medium text-sm">{p.first_name} {p.last_name}</span>
+                <span className="text-gray-900 dark:text-white font-medium text-sm">{p.first_name} {p.last_name}</span>
                 {p.group_name && (
                   <span className="ml-2 text-xs text-gray-500">{p.group_name}</span>
                 )}
@@ -1154,8 +1159,8 @@ function LinkIdentityModal({
             <p className="text-gray-500 text-sm px-5 py-4 text-center">No match</p>
           )}
         </div>
-        <div className="px-5 py-3 border-t border-gray-800 flex items-center justify-between">
-          <Link to={registerUrl} className="text-gray-500 hover:text-gray-300 text-sm underline">
+        <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between">
+          <Link to={registerUrl} className="text-gray-500 hover:text-gray-700 text-sm underline">
             Not on the list? Register here
           </Link>
           <button onClick={onDismiss} className="text-gray-600 hover:text-gray-400 text-xs">
@@ -1199,7 +1204,7 @@ function EditParticipantModal({
           ...f,
           [key]: key === 'member_id' ? normalizeMemberIdInput(e.target.value) : e.target.value,
         }))}
-        className={`w-full mt-1 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 ${mono ? 'font-mono uppercase tracking-wide' : ''}`}
+        className={`w-full mt-1 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500 ${mono ? 'font-mono uppercase tracking-wide' : ''}`}
         autoCapitalize={key === 'member_id' ? 'characters' : undefined}
         spellCheck={key === 'member_id' ? false : undefined}
       />
@@ -1208,9 +1213,9 @@ function EditParticipantModal({
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-sm shadow-2xl">
-        <div className="px-5 pt-5 pb-3 border-b border-gray-800">
-          <h2 className="text-white font-bold text-lg">Edit Participant</h2>
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl w-full max-w-sm shadow-2xl">
+        <div className="px-5 pt-5 pb-3 border-b border-gray-200 dark:border-gray-700">
+          <h2 className="text-gray-900 dark:text-white font-bold text-lg">Edit Participant</h2>
           <p className="text-gray-500 text-xs mt-0.5">{participant.first_name} {participant.last_name}</p>
         </div>
         <form onSubmit={handleSubmit} className="px-5 py-4 space-y-3">
@@ -1224,7 +1229,7 @@ function EditParticipantModal({
             <select
               value={form.badge_type}
               onChange={(e) => setForm((f) => ({ ...f, badge_type: e.target.value as 'ADULT' | 'JUNIOR' }))}
-              className="w-full mt-1 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+              className="w-full mt-1 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
             >
               <option value="ADULT">Adult</option>
               <option value="JUNIOR">Junior</option>
@@ -1232,7 +1237,7 @@ function EditParticipantModal({
           </div>
           {field('Notes', 'notes')}
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-1.5 text-sm text-gray-400 hover:text-white">
+            <button type="button" onClick={onClose} className="px-4 py-1.5 text-sm text-gray-400 hover:text-gray-900 dark:hover:text-white">
               Cancel
             </button>
             <button
@@ -1284,12 +1289,12 @@ function NextUpPanel({
   };
 
   return (
-    <div className="bg-zinc-900 border-b-4 border-yellow-400 px-4 py-3 shrink-0">
+    <div className="bg-white dark:bg-gray-900 border-b-4 border-yellow-400 px-4 py-3 shrink-0">
       <div className="flex items-center justify-between mb-2">
         <span className="text-yellow-400 text-[10px] font-bold uppercase tracking-widest">
           Buy for next — up to 3
         </span>
-        <button onClick={onDismiss} className="text-zinc-500 hover:text-zinc-300 text-xs px-1">✕</button>
+        <button onClick={onDismiss} className="text-zinc-500 hover:text-gray-700 text-xs px-1">✕</button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         {slots.map((p) => (
@@ -1315,7 +1320,7 @@ function NextUpCard({
   const reason = priorityReason(p, me, identityId);
 
   return (
-    <div className={`border rounded-lg px-3 py-2.5 flex flex-col gap-2 transition-colors ${claimed ? 'bg-green-950/40 border-green-700' : 'bg-zinc-800 border-zinc-700'}`}>
+    <div className={`border rounded-lg px-3 py-2.5 flex flex-col gap-2 transition-colors ${claimed ? 'bg-green-950/40 border-green-700' : 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600'}`}>
       <div className="flex items-start gap-2">
         <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center border ${claimed ? 'bg-green-600 border-green-400' : 'bg-yellow-400 border-yellow-300'}`}>
           <span className="font-bangers text-black text-sm leading-none">
@@ -1324,7 +1329,7 @@ function NextUpCard({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="font-bangers text-white text-base tracking-wide leading-tight">
+            <span className="font-bangers text-gray-900 dark:text-white text-base tracking-wide leading-tight">
               {p.first_name} {p.last_name}
             </span>
             {(isSelf || isGroup) && (
@@ -1333,7 +1338,7 @@ function NextUpCard({
               </span>
             )}
           </div>
-          <div className="text-zinc-400 text-[10px] mt-0.5 leading-tight">{reason}</div>
+          <div className="text-gray-600 text-[10px] mt-0.5 leading-tight">{reason}</div>
         </div>
       </div>
       <div className="flex gap-1 flex-wrap">

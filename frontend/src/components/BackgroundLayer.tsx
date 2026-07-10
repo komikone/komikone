@@ -23,7 +23,7 @@ export default function BackgroundLayer({
             style={{ backgroundImage: `url(${url})` }}
           />
           {overlay && (
-            <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/70 to-gray-950/30" />
+            <div className="absolute inset-0 bg-gradient-to-t from-white/90 via-white/60 to-white/20 dark:from-gray-950 dark:via-gray-950/70 dark:to-gray-950/30" />
           )}
         </>
       )}

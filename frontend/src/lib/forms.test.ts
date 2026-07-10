@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DAY_KEYS, dayLabel, type DayKey, type Participant } from './api';
-
-/** Mirrors DashboardContext.selectedDays — keep in sync. */
-function selectedDays(p: Participant, prefix: 'req' | 'pur'): DayKey[] {
-  return DAY_KEYS.filter((d) => p[`${prefix}_${d}` as keyof Participant]);
-}
+import { DAY_KEYS, dayLabel, type Participant } from './api';
+import { selectedDays } from '../dashboard/participantDays';
 
 function emptyParticipant(overrides: Partial<Participant> = {}): Participant {
   return {

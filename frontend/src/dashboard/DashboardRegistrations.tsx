@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DAY_KEYS, dayLabel, type Participant } from '../lib/api';
-import { useDashboard, selectedDays } from './DashboardContext';
+import { useDashboard } from './DashboardContext';
+import { selectedDays } from './participantDays';
 import { PageShell, EmptyState } from './DashboardProfile';
 import { FamilySection } from './FamilySection';
 
@@ -68,10 +69,10 @@ export default function DashboardRegistrations() {
           const canEditDays = isPrimary && view.event.status === 'registration';
 
           return (
-            <section key={view.event.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-              <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between gap-4">
+            <section key={view.event.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 dark:border-gray-800 flex items-center justify-between gap-4">
                 <div>
-                  <h2 className="font-semibold text-white">{view.event.name}</h2>
+                  <h2 className="font-semibold text-gray-900 dark:text-white">{view.event.name}</h2>
                   <EventStatusBadge status={view.event.status} />
                 </div>
                 {view.event.status === 'purchasing' || view.event.status === 'payment' ? (
@@ -88,7 +89,7 @@ export default function DashboardRegistrations() {
                 {/* Badge days */}
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-medium text-gray-300">Badge days desired</h3>
+                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Badge days desired</h3>
                     {canEditDays && !editingDays && (
                       <button
                         onClick={() => startEditDays(self)}
@@ -110,9 +111,9 @@ export default function DashboardRegistrations() {
                               onChange={(e) =>
                                 setDays((d) => ({ ...d, [`req_${day}`]: e.target.checked }))
                               }
-                              className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-blue-500"
+                              className="w-4 h-4 rounded border-gray-300 bg-gray-100 accent-blue-500"
                             />
-                            <span className="text-gray-300 text-sm">{dayLabel(day)}</span>
+                            <span className="text-gray-700 text-sm">{dayLabel(day)}</span>
                           </label>
                         ))}
                       </div>
@@ -127,7 +128,7 @@ export default function DashboardRegistrations() {
                         </button>
                         <button
                           onClick={() => setEditingDays(false)}
-                          className="text-sm text-gray-400 hover:text-white px-3"
+                          className="text-sm text-gray-400 hover:text-gray-900 px-3"
                         >
                           Cancel
                         </button>

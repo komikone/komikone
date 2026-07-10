@@ -18,6 +18,7 @@ import {
   dayLabel,
 } from '../lib/api';
 import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
+import { AppHeader } from '../components/AppHeader';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 
 const STATUS_OPTIONS: EventDetail['status'][] = ['setup', 'registration', 'purchasing', 'payment', 'complete'];
@@ -32,6 +33,7 @@ export default function Admin() {
   const [events, setEvents] = useState<EventDetail[]>([]);
   const [yearsData, setYearsData] = useState<Year[]>([]);
   const [yearInvites, setYearInvites] = useState<Invite[]>([]);
+  const [invitePanelInvites, setInvitePanelInvites] = useState<Invite[]>([]);
   const [yearMembers, setYearMembers] = useState<YearMember[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [activeRegType, setActiveRegType] = useState<'return' | 'open'>('return');
@@ -42,8 +44,9 @@ export default function Admin() {
   const [yearMeta, setYearMeta] = useState<YearMeta | null>(null);
 
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'overview' | 'participants' | 'prices' | 'dates' | 'invites' | 'members'>('overview');
-  const [adminView, setAdminView] = useState<'year' | 'requests' | 'backgrounds'>('year');
+  const [tab, setTab] = useState<'overview' | 'people' | 'prices' | 'dates' | 'settings'>('overview');
+  const [adminView, setAdminView] = useState<'year' | 'requests' | 'backgrounds' | 'invites'>('year');
+  const [invitePanelYearId, setInvitePanelYearId] = useState<number | null>(null);
   const [accessRequests, setAccessRequests] = useState<InviteRequest[]>([]);
 
   // Derived
@@ -128,6 +131,13 @@ export default function Admin() {
     setYearMembers(mems);
   }, [getAuth]);
 
+  const loadInvitePanel = useCallback(async (yearObj: Year) => {
+    const tok = await getAuth();
+    if (!tok) return;
+    const invs = await api.admin.invites.list(tok, yearObj.id).catch(() => []);
+    setInvitePanelInvites(invs);
+  }, [getAuth]);
+
   const loadAccessRequests = useCallback(async () => {
     const tok = await getAuth();
     if (!tok) return;
@@ -149,11 +159,44 @@ export default function Admin() {
     }
   }, [loadEvents, loadYearsData, loadYearData, loadYearExtras, selectedYear]);
 
+  const handleYearDeleted = useCallback(async (deletedConYear: number) => {
+    const [freshEvents, freshYears] = await Promise.all([loadEvents(), loadYearsData()]);
+    const remaining = [...new Set(freshEvents.map((e) => e.year))].sort((a, b) => b - a);
+    const nextYear = remaining.find((y) => y !== deletedConYear) ?? remaining[0] ?? null;
+    setSelectedYear(nextYear);
+    setTab('overview');
+    if (nextYear !== null) {
+      loadYearData(nextYear, freshEvents);
+      const yearObj = freshYears.find((y) => y.con_year === nextYear);
+      if (yearObj) loadYearExtras(yearObj);
+    } else {
+      setReturnParticipants([]);
+      setOpenParticipants([]);
+      setYearInvites([]);
+      setYearMembers([]);
+      setYearMeta(null);
+    }
+  }, [loadEvents, loadYearsData, loadYearData, loadYearExtras]);
+
   const isAdmin = userLoaded && user?.publicMetadata?.role === 'admin';
 
   useEffect(() => {
     if (isAdmin) { loadEvents(); loadYearsData(); loadAccessRequests(); }
   }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Default invite panel year when years load
+  useEffect(() => {
+    if (yearsData.length === 0 || invitePanelYearId !== null) return;
+    setInvitePanelYearId(yearsData[0].id);
+  }, [yearsData, invitePanelYearId]);
+
+  useEffect(() => {
+    if (adminView !== 'invites' || invitePanelYearId === null) return;
+    const yearObj = yearsData.find((y) => y.id === invitePanelYearId);
+    if (yearObj) loadInvitePanel(yearObj);
+  }, [adminView, invitePanelYearId, yearsData, loadInvitePanel]);
+
+  const invitePanelYear = yearsData.find((y) => y.id === invitePanelYearId) ?? null;
 
   const pendingRequestCount = accessRequests.filter((r) => r.status === 'pending').length;
 
@@ -193,31 +236,39 @@ export default function Admin() {
 
   if (!userLoaded) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-gray-500 text-sm">Loading…</div>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
+        <AppHeader title="Admin" />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-gray-500 text-sm">Loading…</div>
+        </div>
       </div>
     );
   }
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center halftone-bg">
-        <div className="bg-gray-950 border-2 border-red-500 comic-shadow p-8 w-80 text-center">
+      <div className="min-h-screen bg-amber-50 text-gray-900 flex flex-col">
+        <AppHeader title="Admin" />
+        <div className="flex-1 flex items-center justify-center halftone-bg">
+        <div className="bg-gray-50 border-2 border-red-500 comic-shadow p-8 w-80 text-center">
           <h1 className="font-bangers text-4xl text-yellow-400 tracking-wide leading-none mb-4">komikone</h1>
           <p className="text-red-400 text-sm mb-4">Access denied — admin role required.</p>
-          <Link to="/" className="text-gray-400 hover:text-white text-sm underline">← Back to home</Link>
+          <Link to="/" className="text-gray-400 hover:text-gray-900 text-sm underline">← Back to home</Link>
+        </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white flex flex-col">
+      <AppHeader title="Admin" />
+
+      <div className="flex flex-1 min-h-0">
       {/* Sidebar — years only */}
-      <aside className="w-44 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
-        <div className="px-4 py-4 border-b border-gray-800">
-          <Link to="/" className="text-gray-500 hover:text-yellow-400 text-xs uppercase tracking-wider">← Public site</Link>
-          <h1 className="font-bangers text-yellow-400 text-xl tracking-wide mt-1">komikone</h1>
+      <aside className="w-44 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0">
+        <div className="px-4 py-4 border-b border-gray-200 dark:border-gray-700 dark:border-gray-800">
+          <p className="text-gray-500 text-xs uppercase tracking-wider">Years &amp; tools</p>
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-4">
@@ -235,7 +286,7 @@ export default function Admin() {
                   key={year}
                   onClick={() => handleYearSelect(year)}
                   className={`w-full text-left px-2 py-2 rounded mb-0.5 transition-colors ${
-                    selectedYear === year ? 'bg-blue-700 text-white' : 'text-gray-300 hover:bg-gray-800'
+                    selectedYear === year ? 'bg-blue-700 text-white' : 'text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800'
                   }`}
                 >
                   <div className="font-bold text-sm">{year}</div>
@@ -249,11 +300,11 @@ export default function Admin() {
           </div>
 
           {/* Invites */}
-          <div className="border-t border-gray-800 pt-3 space-y-0.5">
+          <div className="border-t border-gray-200 dark:border-gray-800 pt-3 space-y-0.5">
             <button
               onClick={() => setAdminView('backgrounds')}
               className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
-                adminView === 'backgrounds' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                adminView === 'backgrounds' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-800 dark:hover:text-gray-200'
               }`}
             >
               Backgrounds
@@ -261,7 +312,7 @@ export default function Admin() {
             <button
               onClick={() => setAdminView('requests')}
               className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium flex items-center justify-between ${
-                adminView === 'requests' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                adminView === 'requests' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-800 dark:hover:text-gray-200'
               }`}
             >
               <span>Access Requests</span>
@@ -272,20 +323,15 @@ export default function Admin() {
               )}
             </button>
             <button
-              onClick={() => { setAdminView('year'); setTab('invites'); if (activeYear) loadYearExtras(activeYear); }}
+              onClick={() => {
+                setAdminView('invites');
+                if (invitePanelYearId === null && yearsData[0]) setInvitePanelYearId(yearsData[0].id);
+              }}
               className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
-                tab === 'invites' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                adminView === 'invites' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-800 dark:hover:text-gray-200'
               }`}
             >
               Invite Codes
-            </button>
-            <button
-              onClick={() => { setAdminView('year'); setTab('members'); if (activeYear) loadYearExtras(activeYear); }}
-              className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
-                tab === 'members' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
-              }`}
-            >
-              Members
             </button>
           </div>
         </div>
@@ -306,6 +352,40 @@ export default function Admin() {
           <div className="flex-1 overflow-auto p-6">
             <BackgroundsPanel secret={secret} />
           </div>
+        ) : adminView === 'invites' ? (
+          <div className="flex-1 overflow-auto p-6">
+            <div className="max-w-2xl space-y-4 mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Invite Codes</h2>
+                <p className="text-gray-500 text-sm mt-1">
+                  Codes are scoped to a con year. Pick which year the invite grants access to.
+                </p>
+              </div>
+              {yearsData.length > 1 ? (
+                <select
+                  value={invitePanelYearId ?? ''}
+                  onChange={(e) => setInvitePanelYearId(Number(e.target.value))}
+                  className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 text-sm rounded-lg px-3 py-2"
+                >
+                  {yearsData.map((y) => (
+                    <option key={y.id} value={y.id}>{y.name}</option>
+                  ))}
+                </select>
+              ) : invitePanelYear ? (
+                <p className="text-gray-400 text-sm">{invitePanelYear.name}</p>
+              ) : null}
+            </div>
+            {invitePanelYear ? (
+              <InvitesTab
+                year={invitePanelYear}
+                invites={invitePanelInvites}
+                secret={secret}
+                onUpdate={() => loadInvitePanel(invitePanelYear)}
+              />
+            ) : (
+              <p className="text-gray-500 text-sm">Create a year first to manage invite codes.</p>
+            )}
+          </div>
         ) : selectedYear === null ? (
           <div className="flex items-center justify-center h-full text-gray-500">
             {loading ? 'Loading…' : 'Select or initialize a year'}
@@ -313,10 +393,10 @@ export default function Admin() {
         ) : (
           <>
             {/* Detail header + tab bar */}
-            <div className="border-b border-gray-800 bg-gray-900/50 px-6 pt-5 pb-0">
+            <div className="border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 px-6 pt-5 pb-0">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h2 className="text-2xl font-bold text-white">SDCC {selectedYear}</h2>
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">SDCC {selectedYear}</h2>
                   <p className="text-sm text-gray-500">
                     {[returnEvent && 'Return Reg', openEvent && 'Open Reg'].filter(Boolean).join(' + ')}
                   </p>
@@ -325,7 +405,7 @@ export default function Admin() {
                   <div className="flex gap-2">
                     <a
                       href={api.admin.exportUrl(activeEvent.id, secret)}
-                      className="text-sm bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded transition-colors"
+                      className="text-sm bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white px-3 py-1.5 rounded transition-colors"
                       download
                     >
                       Export CSV
@@ -342,17 +422,26 @@ export default function Admin() {
               </div>
               {/* Tabs */}
               <div className="flex gap-1">
-                {(['overview', 'participants', 'prices', 'dates', 'invites', 'members'] as const).map((t) => (
+                {([
+                  ['overview', 'Overview'],
+                  ['people', 'People'],
+                  ['prices', 'Prices'],
+                  ['dates', 'Dates'],
+                  ['settings', 'Settings'],
+                ] as const).map(([t, label]) => (
                   <button
                     key={t}
-                    onClick={() => setTab(t)}
-                    className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors ${
+                    onClick={() => {
+                      setTab(t);
+                      if (t === 'people' && activeYear) loadYearExtras(activeYear);
+                    }}
+                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                       tab === t
-                        ? 'border-blue-500 text-white'
-                        : 'border-transparent text-gray-400 hover:text-gray-200'
+                        ? 'border-blue-500 text-gray-900 dark:text-white'
+                        : 'border-transparent text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
                     }`}
                   >
-                    {t}
+                    {label}
                   </button>
                 ))}
               </div>
@@ -371,8 +460,9 @@ export default function Admin() {
                 onUpdate={() => reloadAll()}
               />
             )}
-            {tab === 'participants' && (
-              <ParticipantsTab
+            {tab === 'people' && (
+              <PeopleTab
+                members={yearMembers}
                 event={activeEvent}
                 activeRegType={activeRegType}
                 returnEvent={returnEvent}
@@ -403,24 +493,24 @@ export default function Admin() {
                 onUpdate={() => selectedYear !== null && api.admin.yearMeta.get(secret, selectedYear).then(setYearMeta).catch(() => {})}
               />
             )}
-            {tab === 'invites' && activeYear && (
-              <InvitesTab
+            {tab === 'settings' && activeYear && (
+              <SettingsTab
                 year={activeYear}
-                invites={yearInvites}
+                eventCount={yearEvents.length}
+                memberCount={yearMembers.length}
+                inviteCount={yearInvites.length}
                 secret={secret}
-                onUpdate={() => loadYearExtras(activeYear)}
+                onDeleted={() => handleYearDeleted(activeYear.con_year)}
               />
             )}
-            {tab === 'invites' && !activeYear && (
-              <div className="text-gray-500 text-sm">Select a year to manage invite codes.</div>
-            )}
-            {tab === 'members' && (
-              <MembersTab members={yearMembers} />
+            {tab === 'settings' && !activeYear && (
+              <div className="text-gray-500 text-sm">Select a year to manage settings.</div>
             )}
             </div>
           </>
         )}
       </main>
+      </div>
     </div>
   );
 }
@@ -461,7 +551,7 @@ function CreateYearButton({ secret, onCreated }: { secret: string; onCreated: ()
     return (
       <button
         onClick={() => setOpen(true)}
-        className="w-full text-left px-2 py-1.5 rounded text-sm text-blue-400 hover:bg-gray-800 mt-1"
+        className="w-full text-left px-2 py-1.5 rounded text-sm text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-800 mt-1"
       >
         + New Year
       </button>
@@ -470,10 +560,10 @@ function CreateYearButton({ secret, onCreated }: { secret: string; onCreated: ()
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-80">
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-6 w-80">
         <div className="flex justify-between items-center mb-5">
-          <h3 className="font-bold text-white">New Year</h3>
-          <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-white">✕</button>
+          <h3 className="font-bold text-gray-900">New Year</h3>
+          <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-900">✕</button>
         </div>
         <div className="mb-5">
           <label className="block text-xs text-gray-400 mb-1">Con Year</label>
@@ -481,7 +571,7 @@ function CreateYearButton({ secret, onCreated }: { secret: string; onCreated: ()
             type="number"
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
-            className="w-28 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+            className="w-28 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
           />
           <p className="text-xs text-gray-600 mt-2">
             Creates Return &amp; Open Reg events with default prices. Customize prices in the Prices tab.
@@ -495,7 +585,7 @@ function CreateYearButton({ secret, onCreated }: { secret: string; onCreated: ()
           >
             {loading ? 'Creating…' : `Create ${year}`}
           </button>
-          <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-white px-4 text-sm">Cancel</button>
+          <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-900 px-4 text-sm">Cancel</button>
         </div>
       </div>
     </div>
@@ -526,8 +616,8 @@ function EventToggle({
               active === t
                 ? 'bg-blue-600 text-white'
                 : exists
-                ? 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700'
-                : 'bg-gray-900 text-gray-600 cursor-not-allowed'
+                ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-300 dark:hover:bg-gray-700'
+                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 cursor-not-allowed'
             }`}
           >
             {t === 'return' ? 'Return Reg' : 'Open Reg'}
@@ -576,12 +666,12 @@ function OverviewTab({
           />
         )}
         {!returnEvent && (
-          <div className="bg-gray-900/50 border border-dashed border-gray-700 rounded-xl p-8 flex items-center justify-center text-gray-600 text-sm">
+          <div className="bg-white/80 border border-dashed border-gray-300 rounded-xl p-8 flex items-center justify-center text-gray-600 text-sm">
             No Return Reg event
           </div>
         )}
         {!openEvent && (
-          <div className="bg-gray-900/50 border border-dashed border-gray-700 rounded-xl p-8 flex items-center justify-center text-gray-600 text-sm">
+          <div className="bg-white/80 border border-dashed border-gray-300 rounded-xl p-8 flex items-center justify-center text-gray-600 text-sm">
             No Open Reg event
           </div>
         )}
@@ -633,7 +723,7 @@ function EventCard({
   const origin = window.location.origin;
 
   return (
-    <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 space-y-4">
+    <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-5 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <span className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
@@ -644,7 +734,7 @@ function EventCard({
         <div className="flex gap-1.5">
           <a
             href={api.admin.exportUrl(event.id, secret)}
-            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded transition-colors"
+            className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white px-2 py-1 rounded transition-colors"
             download
           >
             CSV
@@ -658,7 +748,7 @@ function EventCard({
           </Link>
           <button
             onClick={() => setCopyOpen(true)}
-            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded transition-colors"
+            className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white px-2 py-1 rounded transition-colors"
           >
             Copy →
           </button>
@@ -671,7 +761,7 @@ function EventCard({
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+          className="flex-1 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
         />
         <button
           onClick={handleNameSave}
@@ -688,7 +778,7 @@ function EventCard({
             key={s}
             onClick={() => handleStatusChange(s)}
             className={`px-3 py-1 rounded text-xs font-medium transition-colors capitalize ${
-              status === s ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+              status === s ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-300 hover:text-gray-900'
             }`}
           >
             {s}
@@ -699,13 +789,13 @@ function EventCard({
       {/* Stats */}
       <div className="grid grid-cols-3 gap-2 text-center">
         {[
-          { label: 'Total', value: participants.length, color: 'text-white' },
+          { label: 'Total', value: participants.length, color: 'text-gray-900' },
           { label: 'Complete', value: complete, color: 'text-green-400' },
           { label: 'Remaining', value: remaining, color: 'text-yellow-400' },
           { label: 'Paid', value: paid, color: 'text-green-400' },
           { label: 'Unpaid', value: participants.length - paid, color: 'text-red-400' },
         ].map(({ label: lbl, value, color }) => (
-          <div key={lbl} className="bg-gray-800 rounded-lg p-2">
+          <div key={lbl} className="bg-gray-100 rounded-lg p-2">
             <div className={`text-xl font-bold font-mono ${color}`}>{value}</div>
             <div className="text-gray-500 text-xs">{lbl}</div>
           </div>
@@ -715,12 +805,12 @@ function EventCard({
       {/* Registration link */}
       <div className="space-y-1.5">
         <div className="flex gap-2 items-center">
-          <code className="bg-gray-800 text-green-400 text-xs px-2 py-1.5 rounded flex-1 break-all">
+          <code className="bg-gray-100 text-green-400 text-xs px-2 py-1.5 rounded flex-1 break-all">
             {origin}/register/{event.id}
           </code>
           <button
             onClick={() => navigator.clipboard.writeText(`${origin}/register/${event.id}`)}
-            className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1.5 rounded shrink-0"
+            className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white px-2 py-1.5 rounded shrink-0"
           >
             Copy
           </button>
@@ -742,10 +832,69 @@ function EventCard({
 
 // ─── Participants Tab ─────────────────────────────────────────────────────────
 
-function ParticipantsTab({
+// ─── People Tab (members + event participants) ────────────────────────────────
+
+function AccountMembersTable({ members }: { members: YearMember[] }) {
+  if (members.length === 0) {
+    return <p className="text-gray-500 text-sm">No account members for this year yet.</p>;
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[700px]">
+        <thead className="text-gray-400 text-xs border-b border-gray-300">
+          <tr>
+            <th className="px-3 py-2 text-left">Name</th>
+            <th className="px-3 py-2 text-left">Member ID</th>
+            <th className="px-3 py-2 text-center">Badge</th>
+            <th className="px-3 py-2 text-center">Return</th>
+            <th className="px-3 py-2 text-left">Role</th>
+            <th className="px-3 py-2 text-left">Joined</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-800">
+          {members.map((m) => (
+            <tr key={m.id} className="hover:bg-white/80 dark:hover:bg-gray-800/60">
+              <td className="px-3 py-2 text-gray-900 dark:text-white font-medium">{m.first_name} {m.last_name}</td>
+              <td className="px-3 py-2">
+                <MemberId
+                  value={m.member_id}
+                  letterClassName="text-gray-700 dark:text-gray-300"
+                  digitClassName="text-amber-400"
+                />
+              </td>
+              <td className="px-3 py-2 text-center text-xs">
+                <span className={m.badge_type === 'JUNIOR' ? 'text-blue-400' : 'text-gray-700 dark:text-gray-300'}>{m.badge_type}</span>
+              </td>
+              <td className="px-3 py-2 text-center text-xs">
+                <span className={m.return_eligible ? 'text-green-400' : 'text-gray-600'}>
+                  {m.return_eligible ? '✓' : '—'}
+                </span>
+              </td>
+              <td className="px-3 py-2">
+                <span className={`text-xs px-2 py-0.5 rounded ${
+                  m.role === 'owner' ? 'bg-yellow-900/50 text-yellow-300' :
+                  m.role === 'admin' ? 'bg-blue-900/50 text-blue-300' :
+                  'bg-gray-100 text-gray-400'
+                }`}>{m.role}</span>
+              </td>
+              <td className="px-3 py-2 text-xs text-gray-400">
+                {new Date(m.joined_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PeopleTab({
+  members,
   event, activeRegType, returnEvent, openEvent, onRegTypeChange,
   secret, participants, allEvents, onUpdate,
 }: {
+  members: YearMember[];
   event: EventDetail | null;
   activeRegType: 'return' | 'open';
   returnEvent: EventDetail | null;
@@ -788,10 +937,9 @@ function ParticipantsTab({
     ? (localParticipantOrder.map((id) => participants.find((p) => p.id === id)).filter(Boolean) as Participant[])
     : participants;
 
-  if (!event) return <div className="text-gray-500">No event for this registration type.</div>;
-
   const handleDelete = async (p: Participant) => {
-    if (!confirm(`Delete ${p.first_name} ${p.last_name}?`)) return;
+    if (!event) return;
+    if (!window.confirm(`Delete ${p.first_name} ${p.last_name}?`)) return;
     try {
       await api.admin.participants.delete(secret, event.id, p.id);
       onUpdate();
@@ -801,6 +949,7 @@ function ParticipantsTab({
   };
 
   const handleAdd = async () => {
+    if (!event) return;
     if (!newParticipant.first_name?.trim() || !newParticipant.last_name?.trim()) {
       alert('First and last name required');
       return;
@@ -844,15 +993,35 @@ function ParticipantsTab({
   const onDragEndP = () => { dragSrcP.current = null; setDragTargetP(null); };
 
   return (
-    <div>
-      <EventToggle returnEvent={returnEvent} openEvent={openEvent} active={activeRegType} onChange={onRegTypeChange} />
+    <div className="space-y-10">
+      <section>
+        <div className="mb-3">
+          <h3 className="font-semibold text-gray-800 dark:text-gray-100">Account members</h3>
+          <p className="text-gray-500 text-xs mt-1">
+            Signed-in Komikone users for this year ({members.length})
+          </p>
+        </div>
+        <AccountMembersTable members={members} />
+      </section>
 
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="font-semibold text-gray-200">{participants.length} participants</h3>
+      <section>
+        <EventToggle returnEvent={returnEvent} openEvent={openEvent} active={activeRegType} onChange={onRegTypeChange} />
+
+        {!event ? (
+          <p className="text-gray-500 text-sm mt-4">No event for this registration type.</p>
+        ) : (
+        <>
+        <div className="flex justify-between items-center mb-4 mt-4">
+          <div>
+            <h3 className="font-semibold text-gray-800 dark:text-gray-100">Event roster</h3>
+            <p className="text-gray-500 text-xs mt-1">
+              Badge participants for {activeRegType === 'return' ? 'Return' : 'Open'} registration ({participants.length})
+            </p>
+          </div>
         <div className="flex gap-2">
           <button
             onClick={() => setCopyOpen(true)}
-            className="bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-1.5 rounded transition-colors"
+            className="bg-gray-300 hover:bg-gray-600 text-gray-900 text-sm px-3 py-1.5 rounded transition-colors"
           >
             Copy / Transfer →
           </button>
@@ -873,24 +1042,25 @@ function ParticipantsTab({
       />
 
       {addOpen && (
-        <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-4">
-          <h4 className="font-medium text-gray-200 mb-3">New Participant</h4>
+        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-4 mb-4">
+          <h4 className="font-medium text-gray-800 dark:text-gray-100 mb-3">New Participant</h4>
           <ParticipantForm value={newParticipant} onChange={setNewParticipant} groups={groups} />
           <div className="flex gap-2 mt-3">
             <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-1.5 rounded">
               Add
             </button>
-            <button onClick={() => setAddOpen(false)} className="text-gray-400 hover:text-white text-sm">Cancel</button>
+            <button onClick={() => setAddOpen(false)} className="text-gray-400 hover:text-gray-900 text-sm">Cancel</button>
           </div>
         </div>
       )}
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm min-w-[800px]">
-          <thead className="text-gray-400 text-xs border-b border-gray-700">
+          <thead className="text-gray-400 text-xs border-b border-gray-300">
             <tr>
               <th className="px-2 py-2 text-left w-8"></th>
               <th className="px-2 py-2 text-left">Name</th>
+              <th className="px-2 py-2 text-left">Kind</th>
               <th className="px-2 py-2 text-left">Member ID</th>
               <th className="px-2 py-2 text-center">Type</th>
               <th className="px-2 py-2 text-center">Ret.</th>
@@ -910,7 +1080,7 @@ function ParticipantsTab({
                 onDragOver={(e) => onDragOverP(e, p.id)}
                 onDrop={(e) => onDropP(e, p.id)}
                 onDragEnd={onDragEndP}
-                className={`hover:bg-gray-900/50 ${p.all_purchased ? 'opacity-70' : ''} ${dragTargetP === p.id ? 'ring-2 ring-inset ring-blue-400' : ''}`}
+                className={`hover:bg-white/80 dark:hover:bg-gray-800/60 ${p.all_purchased ? 'opacity-70' : ''} ${dragTargetP === p.id ? 'ring-2 ring-inset ring-blue-400' : ''}`}
               >
                 <td className="px-2 py-2 cursor-grab active:cursor-grabbing">
                   <div className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-gray-400 select-none">
@@ -923,7 +1093,7 @@ function ParticipantsTab({
                   </div>
                 </td>
                 <td className="px-2 py-2">
-                  <div className="text-white font-medium flex items-center gap-1.5 flex-wrap">
+                  <div className="text-gray-900 dark:text-white font-medium flex items-center gap-1.5 flex-wrap">
                     {p.first_name} {p.last_name}
                     {p.group_name && (
                       <span
@@ -937,14 +1107,23 @@ function ParticipantsTab({
                   {p.notes && <div className="text-xs text-gray-500 italic">{p.notes}</div>}
                 </td>
                 <td className="px-2 py-2">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                    p.clerk_user_id
+                      ? 'bg-blue-900/50 text-blue-300 border border-blue-800'
+                      : 'bg-gray-100 text-gray-400 border border-gray-300'
+                  }`}>
+                    {p.clerk_user_id ? 'Account' : 'Family'}
+                  </span>
+                </td>
+                <td className="px-2 py-2">
                   <MemberId
                     value={p.member_id}
-                    letterClassName="text-gray-300"
+                    letterClassName="text-gray-700 dark:text-gray-300"
                     digitClassName="text-amber-400"
                   />
                 </td>
                 <td className="px-2 py-2 text-center text-xs">
-                  <span className={p.badge_type === 'JUNIOR' ? 'text-blue-400' : 'text-gray-300'}>
+                  <span className={p.badge_type === 'JUNIOR' ? 'text-blue-400' : 'text-gray-700 dark:text-gray-300'}>
                     {p.badge_type}
                   </span>
                 </td>
@@ -977,13 +1156,13 @@ function ParticipantsTab({
                   <div className="flex gap-1">
                     <button
                       onClick={() => setEditingId(p.id)}
-                      className="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded hover:bg-gray-700"
+                      className="text-xs text-gray-400 hover:text-gray-900 px-1.5 py-0.5 rounded hover:bg-gray-300"
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => handleDelete(p)}
-                      className="text-xs text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded hover:bg-gray-700"
+                      className="text-xs text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded hover:bg-gray-300"
                     >
                       Del
                     </button>
@@ -1005,7 +1184,7 @@ function ParticipantsTab({
         />
       )}
 
-      {editingId !== null && (
+      {editingId !== null && event && (
         <EditParticipantModal
           participant={participants.find((p) => p.id === editingId)!}
           secret={secret}
@@ -1015,6 +1194,9 @@ function ParticipantsTab({
           onClose={() => setEditingId(null)}
         />
       )}
+        </>
+        )}
+      </section>
     </div>
   );
 }
@@ -1119,12 +1301,12 @@ function GroupsPanel({
   const onDragEnd = () => { dragSrc.current = null; setDragTarget(null); };
 
   return (
-    <div className="mb-4 p-3 bg-gray-900 border border-gray-700 rounded-xl">
+    <div className="mb-4 p-3 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl">
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs text-gray-400 uppercase tracking-wider font-medium">Groups</span>
         <button
           onClick={() => setAddOpen(!addOpen)}
-          className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-0.5 rounded"
+          className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white px-2 py-0.5 rounded"
         >
           +
         </button>
@@ -1139,13 +1321,13 @@ function GroupsPanel({
             onChange={(e) => setAddingName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') setAddOpen(false); }}
             placeholder="Group name"
-            className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500 w-36"
+            className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-gray-900 text-xs focus:outline-none focus:border-blue-500 w-36"
           />
           <input
             type="color"
             value={addingColor}
             onChange={(e) => setAddingColor(e.target.value)}
-            className="w-7 h-7 rounded cursor-pointer border border-gray-600"
+            className="w-7 h-7 rounded cursor-pointer border border-gray-300"
           />
           <button
             onClick={handleAdd}
@@ -1154,7 +1336,7 @@ function GroupsPanel({
           >
             Add
           </button>
-          <button onClick={() => setAddOpen(false)} className="text-xs text-gray-400 hover:text-white">Cancel</button>
+          <button onClick={() => setAddOpen(false)} className="text-xs text-gray-400 hover:text-gray-900">Cancel</button>
         </div>
       )}
 
@@ -1168,16 +1350,16 @@ function GroupsPanel({
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleEditSave(g); if (e.key === 'Escape') setEditingId(null); }}
-                className="bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-white text-xs focus:outline-none focus:border-blue-500 w-28"
+                className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 text-gray-900 text-xs focus:outline-none focus:border-blue-500 w-28"
               />
               <input
                 type="color"
                 value={editColor}
                 onChange={(e) => setEditColor(e.target.value)}
-                className="w-6 h-6 rounded cursor-pointer border border-gray-600"
+                className="w-6 h-6 rounded cursor-pointer border border-gray-300"
               />
               <button onClick={() => handleEditSave(g)} className="text-xs text-green-400 hover:text-green-300">✓</button>
-              <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-white">✕</button>
+              <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-gray-900">✕</button>
             </div>
           ) : (
             <div
@@ -1187,7 +1369,7 @@ function GroupsPanel({
               onDragOver={(e) => onDragOver(e, g.id)}
               onDrop={(e) => onDrop(e, g.id)}
               onDragEnd={onDragEnd}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs text-white font-medium cursor-grab ${
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs text-gray-900 dark:text-white font-medium cursor-grab ${
                 dragTarget === g.id ? 'ring-2 ring-blue-400' : ''
               }`}
               style={{ backgroundColor: g.color }}
@@ -1260,17 +1442,17 @@ function EditParticipantModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
-          <h3 className="font-bold text-white">Edit Participant</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+          <h3 className="font-bold text-gray-900">Edit Participant</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-900">✕</button>
         </div>
         <ParticipantForm value={form} onChange={setForm} showAdminFields groups={groups} />
         <div className="flex gap-2 mt-4">
           <button onClick={handleSave} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded">
             Save
           </button>
-          <button onClick={onClose} className="text-gray-400 hover:text-white px-4">Cancel</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-900 px-4">Cancel</button>
         </div>
       </div>
     </div>
@@ -1332,7 +1514,7 @@ function ParticipantForm({
       <Field label="Requested Days">
         <div className="flex flex-wrap gap-3">
           {DAY_KEYS.map((day) => (
-            <label key={day} className="flex items-center gap-1.5 cursor-pointer text-sm text-gray-300">
+            <label key={day} className="flex items-center gap-1.5 cursor-pointer text-sm text-gray-700">
               <input
                 type="checkbox"
                 checked={Boolean(value[`req_${day}` as keyof Participant])}
@@ -1374,38 +1556,39 @@ function PricesTab({
   secret: string;
   onUpdate: () => void;
 }) {
-  const priceFields = [
-    { key: 'price_preview_adult', label: 'Preview Night — Adult' },
-    { key: 'price_thu_adult', label: 'Thursday — Adult' },
-    { key: 'price_fri_adult', label: 'Friday — Adult' },
-    { key: 'price_sat_adult', label: 'Saturday — Adult' },
-    { key: 'price_sun_adult', label: 'Sunday — Adult' },
-    { key: 'price_preview_junior', label: 'Preview Night — Junior / Military / Senior' },
-    { key: 'price_thu_junior', label: 'Thursday — Junior / Military / Senior' },
-    { key: 'price_fri_junior', label: 'Friday — Junior / Military / Senior' },
-    { key: 'price_sat_junior', label: 'Saturday — Junior / Military / Senior' },
-    { key: 'price_sun_junior', label: 'Sunday — Junior / Military / Senior' },
+  const priceDays = [
+    { day: 'Preview Night', adult: 'price_preview_adult', junior: 'price_preview_junior' },
+    { day: 'Thursday', adult: 'price_thu_adult', junior: 'price_thu_junior' },
+    { day: 'Friday', adult: 'price_fri_adult', junior: 'price_fri_junior' },
+    { day: 'Saturday', adult: 'price_sat_adult', junior: 'price_sat_junior' },
+    { day: 'Sunday', adult: 'price_sun_adult', junior: 'price_sun_junior' },
   ] as const;
+
+  type PriceKey = typeof priceDays[number]['adult'] | typeof priceDays[number]['junior'];
+  const allPriceKeys = priceDays.flatMap((d) => [d.adult, d.junior]);
 
   const centsToDollars = (c: number) => (c / 100).toFixed(2);
   const dollarsToCents = (d: string) => Math.round(parseFloat(d || '0') * 100);
 
   const [values, setValues] = useState<Record<string, string>>(
     event
-      ? Object.fromEntries(priceFields.map(({ key }) => [key, centsToDollars(event[key] as number)]))
+      ? Object.fromEntries(allPriceKeys.map((key) => [key, centsToDollars(event[key as PriceKey] as number)]))
       : {}
   );
   const [saved, setSaved] = useState(false);
 
-  // Reset when event changes
   useEffect(() => {
-    if (event) setValues(Object.fromEntries(priceFields.map(({ key }) => [key, centsToDollars(event[key] as number)])));
+    if (event) {
+      setValues(Object.fromEntries(allPriceKeys.map((key) => [key, centsToDollars(event[key as PriceKey] as number)])));
+    }
   }, [event?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!event) return <div className="text-gray-500">No event for this registration type.</div>;
 
+  const setPrice = (key: string, value: string) => setValues((v) => ({ ...v, [key]: value }));
+
   const handleSave = async () => {
-    const patch = Object.fromEntries(priceFields.map(({ key }) => [key, dollarsToCents(values[key])]));
+    const patch = Object.fromEntries(allPriceKeys.map((key) => [key, dollarsToCents(values[key])]));
     try {
       await api.admin.events.update(secret, event.id, patch);
       setSaved(true);
@@ -1416,34 +1599,50 @@ function PricesTab({
     }
   };
 
+  const priceInput = (key: string) => (
+    <div className="relative inline-block">
+      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+      <input
+        type="number"
+        step="0.01"
+        min="0"
+        value={values[key] ?? ''}
+        onChange={(e) => setPrice(key, e.target.value)}
+        className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded pl-6 pr-2 py-1.5 text-gray-900 text-sm w-24 focus:outline-none focus:border-blue-500"
+      />
+    </div>
+  );
+
   return (
     <div>
       <EventToggle returnEvent={returnEvent} openEvent={openEvent} active={activeRegType} onChange={onRegTypeChange} />
-      <div className="max-w-sm">
-        <h3 className="font-semibold text-gray-200 mb-4">Badge Prices</h3>
-        <div className="space-y-3">
-          {priceFields.map(({ key, label }) => (
-            <div key={key} className="flex items-center gap-3">
-              <label className="text-sm text-gray-300 flex-1">{label}</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                <input
-                  type="number" step="0.01" min="0"
-                  value={values[key] ?? ''}
-                  onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
-                  className="bg-gray-800 border border-gray-600 rounded pl-7 pr-3 py-1.5 text-white text-sm w-28 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={handleSave}
-          className="mt-5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-6 py-2 rounded transition-colors"
-        >
-          {saved ? 'Saved ✓' : 'Save Prices'}
-        </button>
+      <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-4">Badge Prices</h3>
+      <div className="overflow-x-auto max-w-2xl">
+        <table className="w-full text-sm">
+          <thead className="text-gray-400 text-xs border-b border-gray-300">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">Day</th>
+              <th className="px-3 py-2 text-left font-medium">Adult</th>
+              <th className="px-3 py-2 text-left font-medium">Junior / Military / Senior</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800">
+            {priceDays.map(({ day, adult, junior }) => (
+              <tr key={day} className="hover:bg-white/70">
+                <td className="px-3 py-2.5 text-gray-800 dark:text-gray-200 font-medium whitespace-nowrap">{day}</td>
+                <td className="px-3 py-2.5">{priceInput(adult)}</td>
+                <td className="px-3 py-2.5">{priceInput(junior)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+      <button
+        onClick={handleSave}
+        className="mt-5 bg-blue-600 hover:bg-blue-500 text-white dark:text-white text-sm font-medium px-6 py-2 rounded transition-colors"
+      >
+        {saved ? 'Saved ✓' : 'Save Prices'}
+      </button>
     </div>
   );
 }
@@ -1490,12 +1689,12 @@ function DatesTab({
 
   const DateInput = ({ label, field }: { label: string; field: keyof DateFields }) => (
     <div className="flex items-center gap-3">
-      <label className="text-sm text-gray-300 w-52 shrink-0">{label}</label>
+      <label className="text-sm text-gray-700 dark:text-gray-300 w-52 shrink-0">{label}</label>
       <input
         type="date"
         value={form[field]}
         onChange={(e) => set(field, e.target.value)}
-        className="bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+        className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
       />
     </div>
   );
@@ -1503,8 +1702,8 @@ function DatesTab({
   return (
     <div className="max-w-2xl space-y-8">
       {/* Registration dates */}
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
-        <h3 className="font-semibold text-gray-200 mb-4">Registration Dates</h3>
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-5">
+        <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-4">Registration Dates</h3>
         <div className="space-y-3">
           <DateInput label="Return Registration" field="return_reg_start" />
           <DateInput label="Open Registration" field="open_reg_start" />
@@ -1512,8 +1711,8 @@ function DatesTab({
       </div>
 
       {/* Deadlines */}
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
-        <h3 className="font-semibold text-gray-200 mb-4">Deadlines</h3>
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-5">
+        <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-4">Deadlines</h3>
         <div className="space-y-3">
           <DateInput label="Address Deadline" field="address_deadline" />
           <DateInput label="Hotel Deadline" field="hotel_deadline" />
@@ -1521,8 +1720,8 @@ function DatesTab({
       </div>
 
       {/* Event schedule */}
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
-        <h3 className="font-semibold text-gray-200 mb-4">Event Schedule</h3>
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-5">
+        <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-4">Event Schedule</h3>
         <div className="space-y-3">
           <DateInput label="Preview Night" field="preview_date" />
           <DateInput label="Thursday" field="thu_date" />
@@ -1533,20 +1732,20 @@ function DatesTab({
       </div>
 
       {/* Notes */}
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
-        <h3 className="font-semibold text-gray-200 mb-3">Notes</h3>
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-5">
+        <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-3">Notes</h3>
         <textarea
           value={form.notes}
           onChange={(e) => set('notes', e.target.value)}
           rows={3}
           placeholder="Any notes for this year…"
-          className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 resize-none"
+          className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500 resize-none"
         />
       </div>
 
       <button
         onClick={handleSave}
-        className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-8 py-2.5 rounded transition-colors"
+        className="bg-blue-600 hover:bg-blue-500 text-white dark:text-white text-sm font-medium px-8 py-2.5 rounded transition-colors"
       >
         {saved ? 'Saved ✓' : 'Save Dates'}
       </button>
@@ -1597,16 +1796,16 @@ function CopyParticipantsModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md">
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-6 w-full max-w-md">
         <div className="flex justify-between items-center mb-5">
-          <h3 className="font-bold text-white">Copy / Transfer Participants</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+          <h3 className="font-bold text-gray-900">Copy / Transfer Participants</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-900">✕</button>
         </div>
 
         <div className="space-y-4">
           <div>
             <label className="block text-xs text-gray-400 mb-1">From</label>
-            <div className="text-sm text-gray-200 bg-gray-800 border border-gray-600 rounded px-3 py-2">{event.name}</div>
+            <div className="text-sm text-gray-800 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2">{event.name}</div>
           </div>
 
           <div>
@@ -1614,7 +1813,7 @@ function CopyParticipantsModal({
             <select
               value={targetId}
               onChange={(e) => setTargetId(Number(e.target.value))}
-              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+              className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
             >
               {otherEvents.map((e) => (
                 <option key={e.id} value={e.id}>{e.name} ({e.reg_type} / {e.status})</option>
@@ -1626,7 +1825,7 @@ function CopyParticipantsModal({
             <label className="block text-xs text-gray-400 mb-2">Action</label>
             <div className="flex gap-3">
               {(['copy', 'transfer'] as const).map((m) => (
-                <label key={m} className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
+                <label key={m} className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
                   <input
                     type="radio" name="mode" value={m} checked={mode === m}
                     onChange={() => { setMode(m); setResetPurchasing(m === 'copy'); }}
@@ -1641,7 +1840,7 @@ function CopyParticipantsModal({
             </div>
           </div>
 
-          <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
+          <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
             <input
               type="checkbox" checked={resetPurchasing}
               onChange={(e) => setResetPurchasing(e.target.checked)}
@@ -1650,7 +1849,7 @@ function CopyParticipantsModal({
             Reset purchasing history (coordinator, purchased days, payment)
           </label>
 
-          <label className="flex items-start gap-2 cursor-pointer text-sm text-gray-300">
+          <label className="flex items-start gap-2 cursor-pointer text-sm text-gray-700">
             <input
               type="checkbox" checked={carryover}
               onChange={(e) => setCarryover(e.target.checked)}
@@ -1675,7 +1874,7 @@ function CopyParticipantsModal({
           >
             {loading ? 'Working…' : mode === 'transfer' ? 'Transfer All' : 'Copy All'}
           </button>
-          <button onClick={onClose} className="text-gray-400 hover:text-white px-4 text-sm">Cancel</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-900 px-4 text-sm">Cancel</button>
         </div>
       </div>
     </div>
@@ -1707,10 +1906,21 @@ function AccessRequestsPanel({
     setApprovingId(req.id);
     try {
       await api.admin.inviteRequests.update(secret, req.id, { status: 'approved' });
-      const invite = await api.admin.invites.create(secret, inviteYear.id, req.email);
-      const url = `${origin}/join/${invite.code}`;
+      const res = await api.admin.invites.create(secret, inviteYear.id, {
+        label: req.email,
+        email: req.email,
+      });
+      const url = res.join_url || `${origin}/join/${res.invite.code}`;
       setLastInviteUrl(url);
-      await navigator.clipboard.writeText(url);
+      if (res.email_sent) {
+        setLastInviteUrl(null);
+        alert(`Invite created and email sent to ${req.email}.`);
+      } else {
+        await navigator.clipboard.writeText(url);
+        if (res.email_error) {
+          alert(`Invite created, but email failed: ${res.email_error}\n\nLink copied to clipboard.`);
+        }
+      }
       onUpdate();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to approve');
@@ -1741,7 +1951,7 @@ function AccessRequestsPanel({
   return (
     <div className="max-w-2xl space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-white">Access Requests</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Access Requests</h2>
         <p className="text-gray-500 text-sm mt-1">
           Approve to create an invite for {inviteYear?.name ?? '— select a year in sidebar'}.
         </p>
@@ -1751,7 +1961,7 @@ function AccessRequestsPanel({
         <div className="bg-green-950/40 border border-green-800 rounded-xl p-4 text-sm">
           <p className="text-green-300 font-medium mb-1">Invite created — link copied to clipboard</p>
           <p className="text-gray-400 font-mono text-xs break-all">{lastInviteUrl}</p>
-          <button onClick={() => setLastInviteUrl(null)} className="text-xs text-gray-500 hover:text-gray-300 mt-2">Dismiss</button>
+          <button onClick={() => setLastInviteUrl(null)} className="text-xs text-gray-500 hover:text-gray-700 mt-2">Dismiss</button>
         </div>
       )}
 
@@ -1761,7 +1971,7 @@ function AccessRequestsPanel({
             key={f}
             onClick={() => setFilter(f)}
             className={`text-xs px-3 py-1.5 rounded capitalize transition-colors ${
-              filter === f ? 'bg-blue-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
+              filter === f ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-400 hover:text-gray-900'
             }`}
           >
             {f}
@@ -1779,10 +1989,10 @@ function AccessRequestsPanel({
       ) : (
         <div className="space-y-3">
           {filtered.map((r) => (
-            <div key={r.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+            <div key={r.id} className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-white font-medium">{r.email}</p>
+                  <p className="text-gray-900 dark:text-white font-medium">{r.email}</p>
                   <p className="text-gray-500 text-xs mt-0.5">
                     Referred by {r.referred_by || '—'} · {new Date(r.created_at + 'Z').toLocaleDateString()}
                   </p>
@@ -1791,7 +2001,7 @@ function AccessRequestsPanel({
                 <span className={`text-xs px-2 py-0.5 rounded shrink-0 ${
                   r.status === 'pending' ? 'bg-yellow-900/50 text-yellow-300' :
                   r.status === 'approved' ? 'bg-green-900/50 text-green-300' :
-                  'bg-red-900/50 text-red-300'
+                  'bg-red-900/50 text-red-700'
                 }`}>{r.status}</span>
               </div>
               {r.status === 'pending' && (
@@ -1834,7 +2044,9 @@ function InvitesTab({
   onUpdate: () => void;
 }) {
   const [label, setLabel] = useState('');
+  const [email, setEmail] = useState('');
   const [creating, setCreating] = useState(false);
+  const [status, setStatus] = useState<{ type: 'ok' | 'warn'; text: string } | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [bulkCount, setBulkCount] = useState(50);
   const [bulkPrefix, setBulkPrefix] = useState('');
@@ -1880,16 +2092,35 @@ function InvitesTab({
 
   const handleCreate = async () => {
     setCreating(true);
+    setStatus(null);
     try {
-      await api.admin.invites.create(secret, year.id, label.trim() || undefined);
+      const payload: { label?: string; email?: string } = {};
+      if (label.trim()) payload.label = label.trim();
+      if (email.trim()) payload.email = email.trim().toLowerCase();
+
+      const res = await api.admin.invites.create(secret, year.id, payload);
       setLabel('');
+      setEmail('');
       onUpdate();
+
+      if (payload.email) {
+        if (res.email_sent) {
+          setStatus({ type: 'ok', text: `Invite created and email sent to ${payload.email}.` });
+        } else {
+          setStatus({
+            type: 'warn',
+            text: res.email_error ?? 'Invite created, but the email could not be sent.',
+          });
+        }
+      }
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to create invite');
     } finally {
       setCreating(false);
     }
   };
+
+  const sendByEmail = email.trim().length > 0;
 
   const handleDelete = async (inv: Invite) => {
     if (inv.used_by_clerk_user_id && !confirm(`This invite has been used. Delete "${inv.label || inv.code}" anyway?`)) return;
@@ -1913,13 +2144,13 @@ function InvitesTab({
   return (
     <div className="max-w-2xl space-y-6">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-gray-200">Invite Codes — {year.name}</h3>
+        <h3 className="font-semibold text-gray-800 dark:text-gray-100">Invite Codes — {year.name}</h3>
         <div className="flex items-center gap-3">
           <div className="text-xs text-gray-500">{unused.length} unused · {used.length} used</div>
           {unused.length > 0 && (
             <button
               onClick={() => downloadCsv(unused, `${year.name.replace(/\s+/g, '-')}-unused-invites.csv`)}
-              className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2.5 py-1 rounded transition-colors"
+              className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white px-2.5 py-1 rounded transition-colors"
             >
               Download CSV
             </button>
@@ -1927,7 +2158,7 @@ function InvitesTab({
         </div>
       </div>
 
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 space-y-3">
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-4 space-y-3">
         <h4 className="text-xs text-gray-400 uppercase tracking-wide">Bulk Generate</h4>
         <p className="text-xs text-gray-500">
           Create many single-use codes at once. A CSV downloads automatically for mail merge.
@@ -1941,7 +2172,7 @@ function InvitesTab({
               max={100}
               value={bulkCount}
               onChange={(e) => setBulkCount(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
-              className="w-20 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+              className="w-20 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
           <div className="flex-1 min-w-[12rem]">
@@ -1957,7 +2188,7 @@ function InvitesTab({
           <button
             onClick={handleBulkCreate}
             disabled={bulkCreating}
-            className="bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm px-4 py-2 rounded whitespace-nowrap transition-colors"
+            className="bg-green-700 hover:bg-green-600 disabled:opacity-50 text-gray-900 text-sm px-4 py-2 rounded whitespace-nowrap transition-colors"
           >
             {bulkCreating ? 'Generating…' : `Generate ${bulkCount}`}
           </button>
@@ -1965,25 +2196,42 @@ function InvitesTab({
         <p className="text-xs text-gray-600">Labels: &quot;{bulkPrefix.trim() || 'Invite'} 1&quot;, &quot;{bulkPrefix.trim() || 'Invite'} 2&quot;, … — rename in your spreadsheet before sending.</p>
       </div>
 
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-        <h4 className="text-xs text-gray-400 uppercase tracking-wide mb-3">Create One Invite</h4>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
-            placeholder="Label (e.g. Tony's Group, Sarah)"
-            className={inputCls}
-          />
-          <button
-            onClick={handleCreate}
-            disabled={creating}
-            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm px-4 py-1.5 rounded whitespace-nowrap transition-colors"
-          >
-            {creating ? 'Creating…' : 'Create'}
-          </button>
-        </div>
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-4 space-y-3">
+        <h4 className="text-xs text-gray-400 uppercase tracking-wide">Invite someone</h4>
+        <p className="text-xs text-gray-500">
+          Add an email to send the invitation automatically. After sign-up, they land on your join link.
+        </p>
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Name (for your reference)"
+          className={inputCls}
+        />
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
+          placeholder="Email (optional — we'll send the invite)"
+          className={inputCls}
+        />
+        <button
+          onClick={handleCreate}
+          disabled={creating}
+          className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white dark:text-white text-sm font-medium px-4 py-2 rounded transition-colors"
+        >
+          {creating
+            ? 'Working…'
+            : sendByEmail
+              ? 'Create invite & send email'
+              : 'Create invite link'}
+        </button>
+        {status && (
+          <p className={`text-sm ${status.type === 'ok' ? 'text-green-400' : 'text-amber-400'}`}>
+            {status.text}
+          </p>
+        )}
       </div>
 
       {invites.length === 0 ? (
@@ -1993,15 +2241,18 @@ function InvitesTab({
           {invites.map((inv) => (
             <div
               key={inv.id}
-              className={`bg-gray-900 border rounded-xl p-4 flex items-center gap-4 ${
-                inv.used_by_clerk_user_id ? 'border-gray-800 opacity-70' : 'border-gray-700'
+              className={`bg-white dark:bg-gray-900 border rounded-xl p-4 flex items-center gap-4 ${
+                inv.used_by_clerk_user_id ? 'border-gray-200 dark:border-gray-700 opacity-70' : 'border-gray-300 dark:border-gray-600'
               }`}
             >
               <div className={`w-2 h-2 rounded-full shrink-0 ${inv.used_by_clerk_user_id ? 'bg-green-500' : 'bg-yellow-400'}`} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-mono text-sm text-white font-medium">{inv.code}</span>
+                  <span className="font-mono text-sm text-gray-900 dark:text-white font-medium">{inv.code}</span>
                   {inv.label && <span className="text-gray-400 text-sm">{inv.label}</span>}
+                  {inv.invited_email && (
+                    <span className="text-gray-500 text-xs">{inv.invited_email}</span>
+                  )}
                   {inv.used_by_clerk_user_id ? (
                     <span className="text-xs bg-green-900/50 text-green-300 border border-green-800 px-1.5 py-0.5 rounded">used</span>
                   ) : (
@@ -2018,13 +2269,13 @@ function InvitesTab({
               <div className="flex gap-1.5 shrink-0">
                 <button
                   onClick={() => copyLink(inv)}
-                  className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2.5 py-1 rounded transition-colors"
+                  className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white px-2.5 py-1 rounded transition-colors"
                 >
                   {copiedId === inv.id ? 'Copied ✓' : 'Copy Link'}
                 </button>
                 <button
                   onClick={() => handleDelete(inv)}
-                  className="text-xs text-gray-500 hover:text-red-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors"
+                  className="text-xs text-gray-500 hover:text-red-400 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                 >
                   Del
                 </button>
@@ -2037,61 +2288,79 @@ function InvitesTab({
   );
 }
 
-// ─── Members Tab ──────────────────────────────────────────────────────────────
+// ─── Settings Tab ─────────────────────────────────────────────────────────────
 
-function MembersTab({ members }: { members: YearMember[] }) {
-  if (members.length === 0) {
-    return <p className="text-gray-500 text-sm">No members registered for this year yet.</p>;
-  }
+function SettingsTab({
+  year,
+  eventCount,
+  memberCount,
+  inviteCount,
+  secret,
+  onDeleted,
+}: {
+  year: Year;
+  eventCount: number;
+  memberCount: number;
+  inviteCount: number;
+  secret: string;
+  onDeleted: () => void;
+}) {
+  const [confirmText, setConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  const canDelete = confirmText === String(year.con_year);
+
+  const handleDelete = async () => {
+    if (!canDelete) return;
+    if (!window.confirm(
+      `Permanently delete ${year.name}? This removes events, participants, members, and invites. This cannot be undone.`,
+    )) return;
+
+    setDeleting(true);
+    try {
+      await api.admin.years.delete(secret, year.id);
+      onDeleted();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to delete year');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
-    <div>
-      <h3 className="font-semibold text-gray-200 mb-4">{members.length} member{members.length !== 1 ? 's' : ''}</h3>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[700px]">
-          <thead className="text-gray-400 text-xs border-b border-gray-700">
-            <tr>
-              <th className="px-3 py-2 text-left">Name</th>
-              <th className="px-3 py-2 text-left">Member ID</th>
-              <th className="px-3 py-2 text-center">Badge</th>
-              <th className="px-3 py-2 text-center">Return</th>
-              <th className="px-3 py-2 text-left">Role</th>
-              <th className="px-3 py-2 text-left">Joined</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-800">
-            {members.map((m) => (
-              <tr key={m.id} className="hover:bg-gray-900/50">
-                <td className="px-3 py-2 text-white font-medium">{m.first_name} {m.last_name}</td>
-                <td className="px-3 py-2">
-                  <MemberId
-                    value={m.member_id}
-                    letterClassName="text-gray-300"
-                    digitClassName="text-amber-400"
-                  />
-                </td>
-                <td className="px-3 py-2 text-center text-xs">
-                  <span className={m.badge_type === 'JUNIOR' ? 'text-blue-400' : 'text-gray-300'}>{m.badge_type}</span>
-                </td>
-                <td className="px-3 py-2 text-center text-xs">
-                  <span className={m.return_eligible ? 'text-green-400' : 'text-gray-600'}>
-                    {m.return_eligible ? '✓' : '—'}
-                  </span>
-                </td>
-                <td className="px-3 py-2">
-                  <span className={`text-xs px-2 py-0.5 rounded ${
-                    m.role === 'owner' ? 'bg-yellow-900/50 text-yellow-300' :
-                    m.role === 'admin' ? 'bg-blue-900/50 text-blue-300' :
-                    'bg-gray-800 text-gray-400'
-                  }`}>{m.role}</span>
-                </td>
-                <td className="px-3 py-2 text-xs text-gray-400">
-                  {new Date(m.joined_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="max-w-xl">
+      <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-2">Settings</h3>
+      <p className="text-gray-500 text-sm mb-6">
+        Manage configuration for <span className="text-gray-700">{year.name}</span>.
+      </p>
+
+      <div className="border-2 border-red-200/80 bg-red-950/30 rounded-xl p-5">
+        <p className="text-red-700 text-xs font-semibold uppercase tracking-wider mb-2">Danger zone</p>
+        <h4 className="text-white font-semibold mb-1">Delete this year</h4>
+        <p className="text-red-200/80 text-sm mb-4">
+          Permanently removes <strong className="text-red-100">{year.name}</strong> and all associated data:
+          {' '}{eventCount} event{eventCount !== 1 ? 's' : ''}, {memberCount} member{memberCount !== 1 ? 's' : ''},
+          {' '}{inviteCount} invite{inviteCount !== 1 ? 's' : ''}, participants, groups, and registration dates.
+          This cannot be undone.
+        </p>
+        <label className="block text-sm text-red-200/90 mb-2">
+          Type <span className="font-mono text-red-100">{year.con_year}</span> to confirm
+        </label>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          placeholder={String(year.con_year)}
+          className="w-full bg-red-50 border border-red-800 text-white rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-red-500"
+        />
+        <button
+          onClick={handleDelete}
+          disabled={!canDelete || deleting}
+          className="bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-gray-900 dark:text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+        >
+          {deleting ? 'Deleting…' : 'Delete year permanently'}
+        </button>
       </div>
     </div>
   );
@@ -2163,7 +2432,7 @@ function BackgroundsPanel({ secret }: { secret: string }) {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-white">Background Images</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Background Images</h2>
         <p className="text-gray-500 text-sm mt-1">
           Add image URLs to rotate on the dashboard and other pages. Use direct links (https) to hosted photos.
         </p>
@@ -2171,7 +2440,7 @@ function BackgroundsPanel({ secret }: { secret: string }) {
 
       {err && <p className="text-red-400 text-sm">{err}</p>}
 
-      <form onSubmit={handleAdd} className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+      <form onSubmit={handleAdd} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 space-y-3">
         <div>
           <label className="block text-xs text-gray-400 mb-1">Image URL *</label>
           <input
@@ -2195,7 +2464,7 @@ function BackgroundsPanel({ secret }: { secret: string }) {
         <button
           type="submit"
           disabled={adding || !url.trim()}
-          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
+          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white dark:text-white text-sm font-medium px-4 py-2 rounded-lg"
         >
           {adding ? 'Adding…' : 'Add background'}
         </button>
@@ -2212,11 +2481,11 @@ function BackgroundsPanel({ secret }: { secret: string }) {
           {items.map((bg) => (
             <div
               key={bg.id}
-              className={`bg-gray-900 border rounded-xl overflow-hidden ${
-                bg.active ? 'border-gray-700' : 'border-gray-800 opacity-60'
+              className={`bg-white dark:bg-gray-900 border rounded-xl overflow-hidden ${
+                bg.active ? 'border-gray-300 dark:border-gray-600' : 'border-gray-200 dark:border-gray-700 opacity-60'
               }`}
             >
-              <div className="aspect-video bg-gray-800 relative">
+              <div className="aspect-video bg-gray-100 relative">
                 <img
                   src={bg.url}
                   alt={bg.label || 'Background'}
@@ -2227,7 +2496,7 @@ function BackgroundsPanel({ secret }: { secret: string }) {
                 />
               </div>
               <div className="p-3 space-y-2">
-                {bg.label && <p className="text-white text-sm font-medium truncate">{bg.label}</p>}
+                {bg.label && <p className="text-gray-900 dark:text-white text-sm font-medium truncate">{bg.label}</p>}
                 <p className="text-gray-500 text-xs font-mono break-all line-clamp-2">{bg.url}</p>
                 <div className="flex items-center gap-2 pt-1">
                   <button
@@ -2235,7 +2504,7 @@ function BackgroundsPanel({ secret }: { secret: string }) {
                     className={`text-xs px-2.5 py-1 rounded ${
                       bg.active
                         ? 'bg-green-950 text-green-400 border border-green-800'
-                        : 'bg-gray-800 text-gray-400 border border-gray-700'
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-400 border border-gray-300 dark:border-gray-600'
                     }`}
                   >
                     {bg.active ? 'Active' : 'Inactive'}
@@ -2258,7 +2527,7 @@ function BackgroundsPanel({ secret }: { secret: string }) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500';
+const inputCls = 'w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500';
 
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
