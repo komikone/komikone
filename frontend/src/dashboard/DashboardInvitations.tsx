@@ -5,9 +5,11 @@ import { PageShell, EmptyState } from './DashboardProfile';
 
 export default function DashboardInvitations() {
   const { member, invites, selectedYearId, tok, resolveYearId, reload } = useDashboard();
-  const [inviteLabel, setInviteLabel] = useState('');
+  const [label, setLabel] = useState('');
+  const [email, setEmail] = useState('');
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ type: 'ok' | 'warn'; text: string } | null>(null);
 
   if (!member) {
     return <EmptyState title="Invitations" message="Join with an invite before generating new ones." />;
@@ -16,13 +18,31 @@ export default function DashboardInvitations() {
   const handleCreate = async () => {
     if (selectedYearId === null) return;
     setCreating(true);
+    setStatus(null);
     try {
       const t = await tok();
       const yearId = resolveYearId();
       if (!yearId) throw new Error('Year not found');
-      await api.invites.createForYear(yearId, t, inviteLabel || undefined);
-      setInviteLabel('');
+
+      const payload: { label?: string; email?: string } = {};
+      if (label.trim()) payload.label = label.trim();
+      if (email.trim()) payload.email = email.trim().toLowerCase();
+
+      const res = await api.invites.createForYear(yearId, t, payload);
+      setLabel('');
+      setEmail('');
       await reload();
+
+      if (payload.email) {
+        if (res.email_sent) {
+          setStatus({ type: 'ok', text: `Invite created and email sent to ${payload.email}.` });
+        } else {
+          setStatus({
+            type: 'warn',
+            text: res.email_error ?? 'Invite created, but the email could not be sent.',
+          });
+        }
+      }
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to create invite');
     } finally {
@@ -36,30 +56,53 @@ export default function DashboardInvitations() {
     setTimeout(() => setCopied(null), 2000);
   };
 
+  const sendByEmail = email.trim().length > 0;
+
   return (
     <PageShell
       title="Invitations"
-      subtitle="Generate invite links for people who need their own account."
+      subtitle="Create a Komikone invite link. Add an email to have Clerk send the invitation for you."
     >
       <div className="max-w-lg">
         <h2 className="text-sm font-medium text-gray-300 mb-3">Invite someone</h2>
-        <div className="flex gap-2 mb-6">
+        <div className="space-y-3 mb-6">
           <input
             type="text"
-            value={inviteLabel}
-            onChange={(e) => setInviteLabel(e.target.value)}
-            placeholder="Name or email (for your reference)"
-            className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Name (for your reference)"
+            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500"
+          />
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email (optional — Clerk sends the invite)"
+            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500"
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
           <button
             onClick={handleCreate}
             disabled={creating}
-            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors shrink-0"
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
           >
-            {creating ? 'Creating…' : 'Generate'}
+            {creating
+              ? 'Working…'
+              : sendByEmail
+                ? 'Create invite & send email'
+                : 'Create invite link'}
           </button>
         </div>
+
+        {status && (
+          <p className={`text-sm mb-4 ${status.type === 'ok' ? 'text-green-400' : 'text-amber-400'}`}>
+            {status.text}
+          </p>
+        )}
+
+        <p className="text-xs text-gray-500 mb-4">
+          Email uses Clerk&apos;s invitation (no Organizations). After sign-up, they land on your join link to complete Komikone registration.
+        </p>
 
         {invites.length > 0 ? (
           <div className="space-y-2">

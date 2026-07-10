@@ -9,12 +9,14 @@ import {
   normalizeDays,
   resolveSelfParticipant,
 } from './persistence';
+import { sendClerkInvitationEmail } from './clerk';
 
 type Bindings = {
   DB: D1Database;
   ADMIN_SECRET: string;
   FRONTEND_URL: string;
   CLERK_JWKS_URL: string;
+  CLERK_SECRET_KEY?: string;
 };
 
 // ── Clerk JWT verification ────────────────────────────────────────────────────
@@ -1229,7 +1231,7 @@ app.post('/api/years/:yearId/invites', async (c) => {
     if (!member) return err('Not a member of this year', 403);
   }
 
-  const body = await c.req.json<{ label?: string }>();
+  const body = await c.req.json<{ label?: string; email?: string }>();
 
   let code: string;
   // Retry on (unlikely) collision
@@ -1241,16 +1243,41 @@ app.post('/api/years/:yearId/invites', async (c) => {
     if (!existing) break;
   }
 
+  const label = body.label?.trim() ?? '';
   await c.env.DB.prepare(`
     INSERT INTO invites (year_id, code, label, invited_by_clerk_user_id)
     VALUES (?, ?, ?, ?)
-  `).bind(yearId, code!, body.label?.trim() ?? '', access.userId).run();
+  `).bind(yearId, code!, label, access.userId).run();
 
   const invite = await c.env.DB.prepare(
     'SELECT * FROM invites WHERE code = ?'
   ).bind(code!).first<Invite>();
 
-  return json(invite, 201);
+  const frontend = c.env.FRONTEND_URL.replace(/\/$/, '');
+  const joinUrl = `${frontend}/join/${code!}`;
+
+  let emailSent = false;
+  let emailError: string | undefined;
+
+  const email = body.email?.trim();
+  if (email) {
+    if (!c.env.CLERK_SECRET_KEY) {
+      emailError = 'Email sending is not configured (missing CLERK_SECRET_KEY)';
+    } else {
+      const result = await sendClerkInvitationEmail({
+        secretKey: c.env.CLERK_SECRET_KEY,
+        emailAddress: email,
+        redirectUrl: joinUrl,
+      });
+      if (result.ok) {
+        emailSent = true;
+      } else {
+        emailError = result.error;
+      }
+    }
+  }
+
+  return json({ invite, join_url: joinUrl, email_sent: emailSent, email_error: emailError }, 201);
 });
 
 // ── Admin-only routes ─────────────────────────────────────────────────────────

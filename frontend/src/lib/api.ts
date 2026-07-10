@@ -299,10 +299,11 @@ export const api = {
       req<{ ok: boolean; member: YearMember }>(`/api/invites/${code.toUpperCase()}/accept`, {
         method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify(data),
       }),
-    createForYear: (yearId: number, clerkToken: string, label?: string) =>
-      req<Invite>(`/api/years/${yearId}/invites`, {
-        method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify({ label }),
-      }),
+    createForYear: (yearId: number, clerkToken: string, data?: { label?: string; email?: string }) =>
+      req<{ invite: Invite; join_url: string; email_sent: boolean; email_error?: string }>(
+        `/api/years/${yearId}/invites`,
+        { method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify(data ?? {}) },
+      ),
     listForYear: (yearId: number, clerkToken: string) =>
       req<Invite[]>(`/api/years/${yearId}/invites`, { headers: authHeaders(clerkToken) }),
   },

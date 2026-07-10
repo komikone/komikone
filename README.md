@@ -37,14 +37,22 @@ npx wrangler d1 execute komikone --local --file=./migrations/007_backfill_year_m
 
 ### 3. Set secrets
 
-Local dev: create `worker/.dev.vars` with `ADMIN_SECRET=...`
+Local dev: create `worker/.dev.vars` with:
+
+```
+ADMIN_SECRET=...
+CLERK_SECRET_KEY=sk_test_...   # optional — enables invite-by-email via Clerk
+```
 
 Production:
 
 ```bash
 npx wrangler secret put ADMIN_SECRET
 npx wrangler secret put CLERK_JWKS_URL   # Clerk JWKS endpoint for JWT verification
+npx wrangler secret put CLERK_SECRET_KEY # optional — Clerk app invitations (no Organizations)
 ```
+
+Invite emails use Clerk [application invitations](https://clerk.com/docs/reference/backend-api/tag/Invitations#operation/CreateInvitation) (`POST /v1/invitations`). No Organizations setup required. Enable email in the Clerk Dashboard → Emails.
 
 ### 4. Start local dev
 
