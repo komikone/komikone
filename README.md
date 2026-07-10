@@ -93,7 +93,7 @@ npm run deploy
 | `/live/:eventId` | Live purchase board (signed in) |
 | `/payment/:eventId` | Payment settlement (signed in) |
 | `/profile` | Venmo/PayPal/Zelle info (signed in) |
-| `/admin` | Admin panel (Clerk admin role) |
+| `/admin` | Admin panel (Admin role) |
 
 ## Two registration paths (both active)
 
