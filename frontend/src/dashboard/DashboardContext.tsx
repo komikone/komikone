@@ -124,7 +124,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setGroupViews(views);
 
       const inv = await api.invites.listForYear(yearObj.id, t).catch(() => []);
-      setInvites(inv.filter((i) => !i.used_at));
+      setInvites(inv);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {

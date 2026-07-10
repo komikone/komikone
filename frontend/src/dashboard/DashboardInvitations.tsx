@@ -102,6 +102,71 @@ export default function DashboardInvitations() {
   };
 
   const sendByEmail = email.trim().length > 0;
+  const pendingInvites = invites.filter((i) => !i.used_at);
+  const joinedInvites = invites.filter((i) => i.used_at);
+
+  const formatJoinedDate = (usedAt: string) =>
+    new Date(usedAt.includes('T') ? usedAt : `${usedAt}Z`).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+  const renderInviteRow = (inv: (typeof invites)[number], joined: boolean) => (
+    <div
+      key={inv.id}
+      className={`flex items-center gap-3 rounded-lg px-4 py-3 border ${
+        joined ? 'bg-gray-900/60 border-gray-800 opacity-80' : 'bg-gray-900 border-gray-800'
+      }`}
+    >
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          {inv.label && <p className="text-white text-sm truncate">{inv.label}</p>}
+          {joined ? (
+            <span className="text-xs bg-green-900/50 text-green-300 border border-green-800 px-1.5 py-0.5 rounded shrink-0">
+              JOINED
+            </span>
+          ) : (
+            <span className="text-xs bg-yellow-900/50 text-yellow-300 border border-yellow-800 px-1.5 py-0.5 rounded shrink-0">
+              PENDING
+            </span>
+          )}
+        </div>
+        {inv.invited_email && (
+          <p className="text-gray-400 text-xs truncate">{inv.invited_email}</p>
+        )}
+        <p className="text-gray-500 text-xs font-mono">{inv.code}</p>
+        {joined && inv.used_at && (
+          <p className="text-gray-600 text-xs mt-0.5">Joined {formatJoinedDate(inv.used_at)}</p>
+        )}
+      </div>
+      {!joined && (
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <button
+            onClick={() => copyLink(inv.code)}
+            disabled={busyId === inv.id}
+            className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-50"
+          >
+            {copied === inv.code ? 'Copied!' : 'Copy link'}
+          </button>
+          <button
+            onClick={() => handleResend(inv.id, inv.invited_email)}
+            disabled={busyId === inv.id}
+            className="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-50"
+          >
+            {busyId === inv.id ? '…' : 'Resend email'}
+          </button>
+          <button
+            onClick={() => handleDelete(inv.id, inv.label)}
+            disabled={busyId === inv.id}
+            className="text-xs text-gray-500 hover:text-red-400 disabled:opacity-50"
+          >
+            Revoke
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <PageShell
@@ -122,7 +187,7 @@ export default function DashboardInvitations() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="Email (optional — Clerk sends the invite)"
+            placeholder="Email (optional)"
             className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500"
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
@@ -150,45 +215,22 @@ export default function DashboardInvitations() {
         </p>
 
         {invites.length > 0 ? (
-          <div className="space-y-2">
-            <p className="text-xs text-gray-500 mb-2">Unused invites</p>
-            {invites.map((inv) => (
-              <div key={inv.id} className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
-                <div className="flex-1 min-w-0">
-                  {inv.label && <p className="text-white text-sm truncate">{inv.label}</p>}
-                  {inv.invited_email && (
-                    <p className="text-gray-400 text-xs truncate">{inv.invited_email}</p>
-                  )}
-                  <p className="text-gray-500 text-xs font-mono">{inv.code}</p>
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <button
-                    onClick={() => copyLink(inv.code)}
-                    disabled={busyId === inv.id}
-                    className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-50"
-                  >
-                    {copied === inv.code ? 'Copied!' : 'Copy link'}
-                  </button>
-                  <button
-                    onClick={() => handleResend(inv.id, inv.invited_email)}
-                    disabled={busyId === inv.id}
-                    className="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-50"
-                  >
-                    {busyId === inv.id ? '…' : 'Resend email'}
-                  </button>
-                  <button
-                    onClick={() => handleDelete(inv.id, inv.label)}
-                    disabled={busyId === inv.id}
-                    className="text-xs text-gray-500 hover:text-red-400 disabled:opacity-50"
-                  >
-                    Revoke
-                  </button>
-                </div>
+          <div className="space-y-6">
+            {pendingInvites.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-500 mb-2">Pending invites</p>
+                {pendingInvites.map((inv) => renderInviteRow(inv, false))}
               </div>
-            ))}
+            )}
+            {joinedInvites.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-500 mb-2">Joined</p>
+                {joinedInvites.map((inv) => renderInviteRow(inv, true))}
+              </div>
+            )}
           </div>
         ) : (
-          <p className="text-gray-500 text-sm">No unused invites yet.</p>
+          <p className="text-gray-500 text-sm">No invites yet.</p>
         )}
       </div>
     </PageShell>
