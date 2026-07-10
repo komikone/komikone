@@ -9,6 +9,7 @@ export default function DashboardInvitations() {
   const [email, setEmail] = useState('');
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
   const [status, setStatus] = useState<{ type: 'ok' | 'warn'; text: string } | null>(null);
 
   if (!member) {
@@ -47,6 +48,50 @@ export default function DashboardInvitations() {
       alert(e instanceof Error ? e.message : 'Failed to create invite');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDelete = async (inviteId: number, labelText: string) => {
+    if (!confirm(`Revoke invite${labelText ? ` for ${labelText}` : ''}? The link will stop working.`)) return;
+    const yearId = resolveYearId();
+    if (!yearId) return;
+    setBusyId(inviteId);
+    setStatus(null);
+    try {
+      const t = await tok();
+      await api.invites.deleteForYear(yearId, inviteId, t);
+      await reload();
+      setStatus({ type: 'ok', text: 'Invite revoked.' });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to revoke invite');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleResend = async (inviteId: number, invitedEmail: string | null) => {
+    const yearId = resolveYearId();
+    if (!yearId) return;
+    let targetEmail = invitedEmail ?? '';
+    if (!targetEmail) {
+      const input = prompt('Email address to resend the invitation to:');
+      if (!input?.trim()) return;
+      targetEmail = input.trim().toLowerCase();
+    } else if (!confirm(`Resend invitation email to ${targetEmail}?`)) {
+      return;
+    }
+
+    setBusyId(inviteId);
+    setStatus(null);
+    try {
+      const t = await tok();
+      await api.invites.resendForYear(yearId, inviteId, t, targetEmail || undefined);
+      await reload();
+      setStatus({ type: 'ok', text: `Invitation email resent to ${targetEmail}.` });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to resend invitation');
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -111,14 +156,34 @@ export default function DashboardInvitations() {
               <div key={inv.id} className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
                 <div className="flex-1 min-w-0">
                   {inv.label && <p className="text-white text-sm truncate">{inv.label}</p>}
+                  {inv.invited_email && (
+                    <p className="text-gray-400 text-xs truncate">{inv.invited_email}</p>
+                  )}
                   <p className="text-gray-500 text-xs font-mono">{inv.code}</p>
                 </div>
-                <button
-                  onClick={() => copyLink(inv.code)}
-                  className="text-xs text-blue-400 hover:text-blue-300 shrink-0"
-                >
-                  {copied === inv.code ? 'Copied!' : 'Copy link'}
-                </button>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <button
+                    onClick={() => copyLink(inv.code)}
+                    disabled={busyId === inv.id}
+                    className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-50"
+                  >
+                    {copied === inv.code ? 'Copied!' : 'Copy link'}
+                  </button>
+                  <button
+                    onClick={() => handleResend(inv.id, inv.invited_email)}
+                    disabled={busyId === inv.id}
+                    className="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-50"
+                  >
+                    {busyId === inv.id ? '…' : 'Resend email'}
+                  </button>
+                  <button
+                    onClick={() => handleDelete(inv.id, inv.label)}
+                    disabled={busyId === inv.id}
+                    className="text-xs text-gray-500 hover:text-red-400 disabled:opacity-50"
+                  >
+                    Revoke
+                  </button>
+                </div>
               </div>
             ))}
           </div>

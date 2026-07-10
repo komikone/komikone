@@ -73,6 +73,8 @@ export type Invite = {
   invited_by_clerk_user_id: string;
   used_by_clerk_user_id: string | null;
   used_at: string | null;
+  invited_email: string | null;
+  clerk_invitation_id: string | null;
   created_at: string;
 };
 
@@ -306,6 +308,14 @@ export const api = {
       ),
     listForYear: (yearId: number, clerkToken: string) =>
       req<Invite[]>(`/api/years/${yearId}/invites`, { headers: authHeaders(clerkToken) }),
+    deleteForYear: (yearId: number, inviteId: number, clerkToken: string) =>
+      req<{ ok: boolean }>(`/api/years/${yearId}/invites/${inviteId}`, {
+        method: 'DELETE', headers: authHeaders(clerkToken),
+      }),
+    resendForYear: (yearId: number, inviteId: number, clerkToken: string, email?: string) =>
+      req<{ invite: Invite; email_sent: boolean }>(`/api/years/${yearId}/invites/${inviteId}/resend`, {
+        method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify(email ? { email } : {}),
+      }),
   },
 
   years: {

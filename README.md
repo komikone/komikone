@@ -32,6 +32,7 @@ Apply incremental migrations as needed:
 ```bash
 npx wrangler d1 execute komikone --local --file=./migrations/006_years_members_invites.sql
 npx wrangler d1 execute komikone --local --file=./migrations/007_backfill_year_members.sql
+npx wrangler d1 execute komikone --local --file=./migrations/009_invite_email_tracking.sql
 # Add --remote for production
 ```
 

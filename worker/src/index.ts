@@ -9,7 +9,7 @@ import {
   normalizeDays,
   resolveSelfParticipant,
 } from './persistence';
-import { sendClerkInvitationEmail } from './clerk';
+import { sendClerkInvitationEmail, revokeClerkInvitation } from './clerk';
 
 type Bindings = {
   DB: D1Database;
@@ -238,6 +238,45 @@ async function createUniqueInvite(
   const invite = await db.prepare('SELECT * FROM invites WHERE code = ?').bind(code).first<Invite>();
   if (!invite) throw new Error('Failed to create invite');
   return invite;
+}
+
+function inviteJoinUrl(frontendUrl: string, code: string): string {
+  return `${frontendUrl.replace(/\/$/, '')}/join/${code}`;
+}
+
+async function sendInviteClerkEmail(
+  env: Bindings,
+  invite: Invite,
+  email: string,
+): Promise<{ emailSent: boolean; emailError?: string }> {
+  if (!env.CLERK_SECRET_KEY) {
+    return { emailSent: false, emailError: 'Email sending is not configured (missing CLERK_SECRET_KEY)' };
+  }
+
+  const result = await sendClerkInvitationEmail({
+    secretKey: env.CLERK_SECRET_KEY,
+    emailAddress: email,
+    redirectUrl: inviteJoinUrl(env.FRONTEND_URL, invite.code),
+  });
+
+  if (!result.ok) {
+    return { emailSent: false, emailError: result.error };
+  }
+
+  const normalized = email.trim().toLowerCase();
+  await env.DB.prepare(
+    'UPDATE invites SET invited_email = ?, clerk_invitation_id = ? WHERE id = ?'
+  ).bind(normalized, result.invitationId, invite.id).run();
+
+  return { emailSent: true };
+}
+
+async function revokeInviteClerkEmail(env: Bindings, invite: Invite): Promise<void> {
+  if (!invite.clerk_invitation_id || !env.CLERK_SECRET_KEY) return;
+  await revokeClerkInvitation({
+    secretKey: env.CLERK_SECRET_KEY,
+    invitationId: invite.clerk_invitation_id,
+  });
 }
 
 const GROUP_COLORS = [
@@ -1253,31 +1292,83 @@ app.post('/api/years/:yearId/invites', async (c) => {
     'SELECT * FROM invites WHERE code = ?'
   ).bind(code!).first<Invite>();
 
-  const frontend = c.env.FRONTEND_URL.replace(/\/$/, '');
-  const joinUrl = `${frontend}/join/${code!}`;
+  const joinUrl = inviteJoinUrl(c.env.FRONTEND_URL, code!);
 
   let emailSent = false;
   let emailError: string | undefined;
+  let finalInvite = invite!;
 
   const email = body.email?.trim();
   if (email) {
-    if (!c.env.CLERK_SECRET_KEY) {
-      emailError = 'Email sending is not configured (missing CLERK_SECRET_KEY)';
-    } else {
-      const result = await sendClerkInvitationEmail({
-        secretKey: c.env.CLERK_SECRET_KEY,
-        emailAddress: email,
-        redirectUrl: joinUrl,
-      });
-      if (result.ok) {
-        emailSent = true;
-      } else {
-        emailError = result.error;
-      }
+    const result = await sendInviteClerkEmail(c.env, invite!, email);
+    emailSent = result.emailSent;
+    emailError = result.emailError;
+    if (result.emailSent) {
+      finalInvite = await c.env.DB.prepare('SELECT * FROM invites WHERE id = ?').bind(invite!.id).first<Invite>() ?? invite!;
     }
   }
 
-  return json({ invite, join_url: joinUrl, email_sent: emailSent, email_error: emailError }, 201);
+  return json({ invite: finalInvite, join_url: joinUrl, email_sent: emailSent, email_error: emailError }, 201);
+});
+
+// Delete an unused invite created by the current user
+app.delete('/api/years/:yearId/invites/:inviteId', async (c) => {
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access || access.userId === 'admin') return err('Sign in required', 401);
+
+  const yearId = Number(c.req.param('yearId'));
+  const inviteId = Number(c.req.param('inviteId'));
+
+  const member = await c.env.DB.prepare(
+    'SELECT id FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+  ).bind(yearId, access.userId).first();
+  if (!member) return err('Not a member of this year', 403);
+
+  const invite = await c.env.DB.prepare(
+    'SELECT * FROM invites WHERE id = ? AND year_id = ? AND invited_by_clerk_user_id = ?'
+  ).bind(inviteId, yearId, access.userId).first<Invite>();
+  if (!invite) return err('Invite not found', 404);
+  if (invite.used_at) return err('This invite has already been used', 409);
+
+  await revokeInviteClerkEmail(c.env, invite);
+  await c.env.DB.prepare('DELETE FROM invites WHERE id = ?').bind(inviteId).run();
+  return json({ ok: true });
+});
+
+// Resend Clerk invitation email for an unused invite
+app.post('/api/years/:yearId/invites/:inviteId/resend', async (c) => {
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access || access.userId === 'admin') return err('Sign in required', 401);
+
+  const yearId = Number(c.req.param('yearId'));
+  const inviteId = Number(c.req.param('inviteId'));
+  const body = await c.req.json<{ email?: string }>().catch(() => ({} as { email?: string }));
+
+  const member = await c.env.DB.prepare(
+    'SELECT id FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+  ).bind(yearId, access.userId).first();
+  if (!member) return err('Not a member of this year', 403);
+
+  const invite = await c.env.DB.prepare(
+    'SELECT * FROM invites WHERE id = ? AND year_id = ? AND invited_by_clerk_user_id = ?'
+  ).bind(inviteId, yearId, access.userId).first<Invite>();
+  if (!invite) return err('Invite not found', 404);
+  if (invite.used_at) return err('This invite has already been used', 409);
+
+  const email = (body.email?.trim() || invite.invited_email || '').toLowerCase();
+  if (!email) {
+    return err('No email on file for this invite. Provide an email to resend.', 400);
+  }
+
+  await revokeInviteClerkEmail(c.env, invite);
+
+  const result = await sendInviteClerkEmail(c.env, invite, email);
+  if (!result.emailSent) {
+    return err(result.emailError ?? 'Failed to resend invitation email', 502);
+  }
+
+  const updated = await c.env.DB.prepare('SELECT * FROM invites WHERE id = ?').bind(inviteId).first<Invite>();
+  return json({ invite: updated, email_sent: true });
 });
 
 // ── Admin-only routes ─────────────────────────────────────────────────────────
@@ -1852,6 +1943,10 @@ admin.post('/years/:yearId/invites/bulk', async (c) => {
 admin.delete('/years/:yearId/invites/:inviteId', async (c) => {
   const yearId = Number(c.req.param('yearId'));
   const inviteId = Number(c.req.param('inviteId'));
+  const invite = await c.env.DB.prepare(
+    'SELECT * FROM invites WHERE id = ? AND year_id = ?'
+  ).bind(inviteId, yearId).first<Invite>();
+  if (invite) await revokeInviteClerkEmail(c.env, invite);
   await c.env.DB.prepare('DELETE FROM invites WHERE id = ? AND year_id = ?').bind(inviteId, yearId).run();
   return json({ ok: true });
 });

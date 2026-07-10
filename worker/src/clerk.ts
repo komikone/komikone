@@ -48,3 +48,41 @@ export async function sendClerkInvitationEmail(opts: {
     : '';
   return { ok: true, invitationId: id };
 }
+
+/** Revoke a pending Clerk invitation. Best-effort — ignores already-revoked. */
+export async function revokeClerkInvitation(opts: {
+  secretKey: string;
+  invitationId: string;
+}): Promise<ClerkInviteResult> {
+  const invitationId = opts.invitationId.trim();
+  if (!invitationId) {
+    return { ok: false, error: 'Missing invitation id' };
+  }
+
+  const res = await fetch(
+    `https://api.clerk.com/v1/invitations/${encodeURIComponent(invitationId)}/revoke`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${opts.secretKey}`,
+        'Content-Type': 'application/json',
+      },
+    },
+  );
+
+  if (res.ok) {
+    const body = await res.json().catch(() => null);
+    const id = body && typeof body === 'object' && 'id' in body
+      ? String((body as { id: string }).id)
+      : invitationId;
+    return { ok: true, invitationId: id };
+  }
+
+  const body = await res.json().catch(() => null);
+  const message = parseClerkError(body, res.status);
+  // Already revoked or accepted — treat as non-fatal for delete/resend prep
+  if (res.status === 404 || /revoked|not found|already/i.test(message)) {
+    return { ok: true, invitationId };
+  }
+  return { ok: false, error: message };
+}

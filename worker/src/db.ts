@@ -103,6 +103,8 @@ export type Invite = {
   invited_by_clerk_user_id: string;
   used_by_clerk_user_id: string | null;
   used_at: string | null;
+  invited_email: string | null;
+  clerk_invitation_id: string | null;
   created_at: string;
 };
 
