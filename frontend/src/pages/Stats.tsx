@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { MemberId } from '../components/MemberId';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
 
@@ -253,7 +254,13 @@ export default function Stats() {
                   <div key={m.member_id} className="flex items-center justify-between py-1.5 border-b border-gray-800 last:border-0">
                     <div>
                       <span className="text-white text-sm">{m.first_name} {m.last_name}</span>
-                      <span className="text-gray-600 text-xs ml-2">{m.member_id}</span>
+                      <span className="ml-2">
+                        <MemberId
+                          value={m.member_id}
+                          letterClassName="text-gray-500"
+                          digitClassName="text-amber-500"
+                        />
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="flex gap-0.5">

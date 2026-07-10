@@ -1,0 +1,27 @@
+---
+description: Keep shared form field patterns consistent (Return Eligible toggle, Member ID display)
+globs: frontend/src/**/*.{tsx,ts}
+alwaysApply: false
+---
+
+# Form field design patterns
+
+When the same semantic field appears in multiple places, use the same control — do not invent a one-off variant (e.g. checkbox in one screen, toggle in another).
+
+## Return Eligible
+
+- **Always** use `ToggleSwitch` from `frontend/src/components/ToggleSwitch.tsx`.
+- Do **not** use a native checkbox for `return_eligible`.
+- Label copy: `Return eligible` (sentence case) unless the surrounding UI is title-case by convention.
+- Applies to: profile, family add/edit, join, admin participant forms, and any future form with this field.
+
+## Member ID
+
+- **Display** with `MemberId` from `frontend/src/components/MemberId.tsx` (uppercase, amber digits).
+- **Inputs** must uppercase on change via `normalizeMemberIdInput` and use `font-mono uppercase tracking-wide`.
+
+## Before shipping a form change
+
+1. Search the codebase for other instances of the same field.
+2. Reuse the shared component; update every call site if the pattern changes.
+3. Prefer extracting a shared control over duplicating markup.

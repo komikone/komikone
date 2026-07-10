@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useDashboard } from './DashboardContext';
 import { badgeTypeLabel } from './styles';
 import BackgroundLayer from '../components/BackgroundLayer';
+import { MemberId } from '../components/MemberId';
 
 export default function DashboardHome() {
   const { member, primaryView } = useDashboard();
@@ -45,7 +46,14 @@ export default function DashboardHome() {
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <div>
                 <dt className="text-gray-500 text-xs">Member ID</dt>
-                <dd className="text-gray-200 mt-0.5">{member.member_id || '—'}</dd>
+                <dd className="mt-0.5">
+                  <MemberId
+                    value={member.member_id}
+                    className="font-mono text-sm tracking-wide"
+                    letterClassName="text-gray-200"
+                    digitClassName="text-amber-400"
+                  />
+                </dd>
               </div>
               <div>
                 <dt className="text-gray-500 text-xs">Badge type</dt>

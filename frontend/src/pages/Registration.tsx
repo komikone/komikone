@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
 import { api, type EventDetail, DAY_KEYS, dayLabel } from '../lib/api';
+import { normalizeMemberIdInput } from '../components/MemberId';
 
 export default function Registration() {
   const { eventId } = useParams<{ eventId: string }>();
@@ -191,9 +192,11 @@ export default function Registration() {
               type="text"
               required={isReturn}
               value={form.member_id}
-              onChange={(e) => setForm((f) => ({ ...f, member_id: e.target.value }))}
-              placeholder="e.g. 1234567"
-              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              onChange={(e) => setForm((f) => ({ ...f, member_id: normalizeMemberIdInput(e.target.value) }))}
+              placeholder="e.g. AB12CD34"
+              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 font-mono uppercase tracking-wide"
+              autoCapitalize="characters"
+              spellCheck={false}
             />
           </div>
 

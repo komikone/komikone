@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth, SignIn } from '@clerk/clerk-react';
 import { api, type Year } from '../lib/api';
+import { normalizeMemberIdInput } from '../components/MemberId';
+import { ToggleSwitch } from '../components/ToggleSwitch';
 
 type InviteInfo = {
   invite: { code: string; label: string; year_id: number };
@@ -187,9 +189,11 @@ export default function JoinPage() {
           <input
             type="text"
             value={form.member_id}
-            onChange={e => set('member_id', e.target.value)}
-            className={inputCls}
-            placeholder="e.g. 1234567"
+            onChange={e => set('member_id', normalizeMemberIdInput(e.target.value))}
+            className={`${inputCls} font-mono uppercase tracking-wide`}
+            placeholder="e.g. AB12CD34"
+            autoCapitalize="characters"
+            spellCheck={false}
           />
           <p className="text-xs text-gray-600 mt-1">Found in your SDCC account. Used to link your registration.</p>
         </div>
@@ -203,15 +207,12 @@ export default function JoinPage() {
             </select>
           </div>
           <div className="flex items-end pb-2">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={form.return_eligible}
-                onChange={e => set('return_eligible', e.target.checked)}
-                className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-blue-500"
-              />
-              <span className="text-sm text-gray-300">Return eligible</span>
-            </label>
+            <ToggleSwitch
+              checked={form.return_eligible}
+              onChange={(v) => set('return_eligible', v)}
+              label="Return eligible"
+              className="w-full"
+            />
           </div>
         </div>
 

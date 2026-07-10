@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth, useUser, UserButton } from '@clerk/clerk-react';
 import { api, type EventDetail, type Participant, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
 import { useTheme } from '../lib/useTheme';
+import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
 
 const POLL_MS = 8000;
 const DAY_SHORT: Record<string, string> = { preview: 'PV', thu: 'Th', fri: 'Fr', sat: 'Sa', sun: 'Su' };
@@ -899,22 +900,12 @@ function CellContent({
         </span>
       ) : <span className="text-gray-400 dark:text-gray-600 text-xs">—</span>;
 
-    case 'member_id': {
-      const s = (p.member_id || '').toUpperCase();
-      if (!s) return <span className="text-gray-400 dark:text-gray-600 text-xs font-mono">—</span>;
-      const parts = s.split(/(\d+)/);
+    case 'member_id':
       return (
-        <CopyCell value={s}>
-          <span className="font-mono text-xs tracking-wide">
-            {parts.map((part, i) =>
-              /^\d+$/.test(part)
-                ? <span key={i} className="text-red-600 dark:text-red-400">{part}</span>
-                : <span key={i} className="text-gray-700 dark:text-gray-300">{part}</span>
-            )}
-          </span>
+        <CopyCell value={(p.member_id || '').toUpperCase()}>
+          <MemberId value={p.member_id} />
         </CopyCell>
       );
-    }
 
     case 'requested':
       return (
@@ -1075,7 +1066,9 @@ function IdentityAvatar({
           <div className="absolute right-0 top-9 z-50 bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-4 min-w-[180px]">
             <div className="text-white font-semibold text-sm">{myDisplayName}</div>
             {me.member_id && (
-              <div className="text-gray-400 text-xs font-mono mt-0.5">{me.member_id}</div>
+              <div className="mt-0.5">
+                <MemberId value={me.member_id} className="font-mono text-xs tracking-wide" letterClassName="text-gray-400" digitClassName="text-amber-400" />
+              </div>
             )}
             {me.group_name && (
               <div className="mt-1.5">
@@ -1202,8 +1195,13 @@ function EditParticipantModal({
       <label className="text-gray-400 text-xs">{label}</label>
       <input
         value={form[key] as string}
-        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-        className={`w-full mt-1 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 ${mono ? 'font-mono' : ''}`}
+        onChange={(e) => setForm((f) => ({
+          ...f,
+          [key]: key === 'member_id' ? normalizeMemberIdInput(e.target.value) : e.target.value,
+        }))}
+        className={`w-full mt-1 bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 ${mono ? 'font-mono uppercase tracking-wide' : ''}`}
+        autoCapitalize={key === 'member_id' ? 'characters' : undefined}
+        spellCheck={key === 'member_id' ? false : undefined}
       />
     </div>
   );

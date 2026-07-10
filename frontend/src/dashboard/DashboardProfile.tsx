@@ -1,35 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useDashboard } from './DashboardContext';
 import { inputCls, labelCls, badgeTypeLabel } from './styles';
+import { normalizeMemberIdInput } from '../components/MemberId';
+import { ToggleSwitch } from '../components/ToggleSwitch';
 
-export function ToggleSwitch({
-  checked, onChange, label,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-}) {
-  return (
-    <label className="flex items-center justify-between gap-4 cursor-pointer select-none">
-      <span className="text-sm text-gray-300">{label}</span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={`relative w-11 h-6 rounded-full transition-colors ${
-          checked ? 'bg-blue-600' : 'bg-gray-700'
-        }`}
-      >
-        <span
-          className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-            checked ? 'translate-x-5' : 'translate-x-0'
-          }`}
-        />
-      </button>
-    </label>
-  );
-}
+export { ToggleSwitch };
 
 export default function DashboardProfile() {
   const { member, saveIdentity } = useDashboard();
@@ -114,9 +89,11 @@ export default function DashboardProfile() {
           <input
             type="text"
             value={form.member_id}
-            onChange={(e) => set('member_id', e.target.value)}
-            className={inputCls}
+            onChange={(e) => set('member_id', normalizeMemberIdInput(e.target.value))}
+            className={`${inputCls} font-mono uppercase tracking-wide`}
             placeholder="Comic-Con member ID"
+            autoCapitalize="characters"
+            spellCheck={false}
           />
         </div>
 

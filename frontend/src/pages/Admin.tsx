@@ -17,6 +17,8 @@ import {
   DAY_KEYS,
   dayLabel,
 } from '../lib/api';
+import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
+import { ToggleSwitch } from '../components/ToggleSwitch';
 
 const STATUS_OPTIONS: EventDetail['status'][] = ['setup', 'registration', 'purchasing', 'payment', 'complete'];
 
@@ -934,8 +936,12 @@ function ParticipantsTab({
                   </div>
                   {p.notes && <div className="text-xs text-gray-500 italic">{p.notes}</div>}
                 </td>
-                <td className="px-2 py-2 font-mono text-xs text-gray-300">
-                  {p.member_id || '—'}
+                <td className="px-2 py-2">
+                  <MemberId
+                    value={p.member_id}
+                    letterClassName="text-gray-300"
+                    digitClassName="text-amber-400"
+                  />
                 </td>
                 <td className="px-2 py-2 text-center text-xs">
                   <span className={p.badge_type === 'JUNIOR' ? 'text-blue-400' : 'text-gray-300'}>
@@ -1293,7 +1299,14 @@ function ParticipantForm({
       </div>
       <div className="grid grid-cols-2 gap-2">
         <Field label="Member ID">
-          <input type="text" value={value.member_id ?? ''} onChange={(e) => set('member_id', e.target.value)} className={inputCls} />
+          <input
+            type="text"
+            value={value.member_id ?? ''}
+            onChange={(e) => set('member_id', normalizeMemberIdInput(e.target.value))}
+            className={`${inputCls} font-mono uppercase tracking-wide`}
+            autoCapitalize="characters"
+            spellCheck={false}
+          />
         </Field>
         <Field label="Badge Type">
           <select value={value.badge_type ?? 'ADULT'} onChange={(e) => set('badge_type', e.target.value)} className={inputCls}>
@@ -1333,13 +1346,11 @@ function ParticipantForm({
       </Field>
       {showAdminFields && (
         <>
-          <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
-            <input
-              type="checkbox" checked={Boolean(value.return_eligible)}
-              onChange={(e) => set('return_eligible', e.target.checked)} className="accent-green-500"
-            />
-            Return Eligible
-          </label>
+          <ToggleSwitch
+            checked={Boolean(value.return_eligible)}
+            onChange={(v) => set('return_eligible', v)}
+            label="Return eligible"
+          />
           <Field label="Notes">
             <input type="text" value={value.notes ?? ''} onChange={(e) => set('notes', e.target.value)} className={inputCls} />
           </Field>
@@ -2052,7 +2063,13 @@ function MembersTab({ members }: { members: YearMember[] }) {
             {members.map((m) => (
               <tr key={m.id} className="hover:bg-gray-900/50">
                 <td className="px-3 py-2 text-white font-medium">{m.first_name} {m.last_name}</td>
-                <td className="px-3 py-2 font-mono text-xs text-gray-300">{m.member_id || '—'}</td>
+                <td className="px-3 py-2">
+                  <MemberId
+                    value={m.member_id}
+                    letterClassName="text-gray-300"
+                    digitClassName="text-amber-400"
+                  />
+                </td>
                 <td className="px-3 py-2 text-center text-xs">
                   <span className={m.badge_type === 'JUNIOR' ? 'text-blue-400' : 'text-gray-300'}>{m.badge_type}</span>
                 </td>

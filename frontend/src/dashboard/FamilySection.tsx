@@ -3,6 +3,8 @@ import { api } from '../lib/api';
 import { useDashboard } from './DashboardContext';
 import { inputCls, labelCls } from './styles';
 import type { GroupView } from './DashboardContext';
+import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
+import { ToggleSwitch } from '../components/ToggleSwitch';
 
 type ParticipantFormData = {
   first_name: string;
@@ -89,7 +91,13 @@ export function FamilySection({
                     <td className="px-4 py-2.5 text-white font-medium">
                       {p.first_name} {p.last_name}
                     </td>
-                    <td className="px-4 py-2.5 text-gray-400">{p.member_id || '—'}</td>
+                    <td className="px-4 py-2.5">
+                      <MemberId
+                        value={p.member_id}
+                        letterClassName="text-gray-400"
+                        digitClassName="text-amber-400"
+                      />
+                    </td>
                     <td className="px-4 py-2.5 text-gray-400 text-xs">
                       {p.badge_type === 'ADULT' ? 'Adult' : 'Jr/Sr/Mil'}
                     </td>
@@ -158,7 +166,14 @@ function AddParticipantForm({
         </div>
         <div>
           <label className={labelCls}>Member ID</label>
-          <input type="text" value={form.member_id} onChange={(e) => set('member_id', e.target.value)} className={inputCls} />
+          <input
+            type="text"
+            value={form.member_id}
+            onChange={(e) => set('member_id', normalizeMemberIdInput(e.target.value))}
+            className={`${inputCls} font-mono uppercase tracking-wide`}
+            autoCapitalize="characters"
+            spellCheck={false}
+          />
         </div>
         <div>
           <label className={labelCls}>Badge type</label>
@@ -168,15 +183,12 @@ function AddParticipantForm({
           </select>
         </div>
       </div>
-      <label className="flex items-center gap-2 mb-3 cursor-pointer select-none">
-        <input
-          type="checkbox"
-          checked={form.return_eligible}
-          onChange={(e) => set('return_eligible', e.target.checked)}
-          className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-blue-500"
-        />
-        <span className="text-sm text-gray-300">Return eligible</span>
-      </label>
+      <ToggleSwitch
+        checked={form.return_eligible}
+        onChange={(v) => set('return_eligible', v)}
+        label="Return eligible"
+        className="mb-3"
+      />
       {err && <p className="text-red-400 text-xs mb-2">{err}</p>}
       <div className="flex gap-2">
         <button
@@ -221,17 +233,27 @@ function EditParticipantRow({
         <div className="grid grid-cols-2 gap-2 mb-2">
           <input type="text" value={form.first_name} onChange={(e) => set('first_name', e.target.value)} placeholder="First name" className={inputCls} />
           <input type="text" value={form.last_name} onChange={(e) => set('last_name', e.target.value)} placeholder="Last name" className={inputCls} />
-          <input type="text" value={form.member_id} onChange={(e) => set('member_id', e.target.value)} placeholder="Member ID" className={inputCls} />
+          <input
+            type="text"
+            value={form.member_id}
+            onChange={(e) => set('member_id', normalizeMemberIdInput(e.target.value))}
+            placeholder="Member ID"
+            className={`${inputCls} font-mono uppercase tracking-wide`}
+            autoCapitalize="characters"
+            spellCheck={false}
+          />
           <select value={form.badge_type} onChange={(e) => set('badge_type', e.target.value as 'ADULT' | 'JUNIOR')} className={inputCls}>
             <option value="ADULT">Adult</option>
             <option value="JUNIOR">Jr / Sr / Military</option>
           </select>
         </div>
         <div className="flex items-center gap-4">
-          <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-gray-300">
-            <input type="checkbox" checked={form.return_eligible} onChange={(e) => set('return_eligible', e.target.checked)} className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-blue-500" />
-            Return eligible
-          </label>
+          <ToggleSwitch
+            checked={form.return_eligible}
+            onChange={(v) => set('return_eligible', v)}
+            label="Return eligible"
+            className="flex-1"
+          />
           <button
             onClick={async () => {
               setSaving(true);
