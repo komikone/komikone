@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth, useUser } from '@clerk/clerk-react';
-import { api, type EventDetail, type Participant, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
+import { api, type EventDetail, type Participant, type PurchaseQueueEntry, type PurchaseQueueStatus, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
 import { HeaderUserMenu } from '../components/HeaderUserMenu';
 import { useTheme } from '../lib/useTheme';
 import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
@@ -169,6 +169,8 @@ export default function LiveBoard() {
 
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [buyerQueue, setBuyerQueue] = useState<PurchaseQueueEntry[]>([]);
+  const [showBuyerQueue, setShowBuyerQueue] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [identityId, setIdentityId] = useState<number | null>(null);
@@ -263,11 +265,13 @@ export default function LiveBoard() {
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     try {
-      const [ev, ps] = await Promise.all([
+      const [ev, ps, queue] = await Promise.all([
         api.events.get(Number(eventId), clerkToken),
         api.participants.list(Number(eventId), clerkToken),
+        api.purchaseQueue.list(Number(eventId), clerkToken).catch(() => [] as PurchaseQueueEntry[]),
       ]);
       setEvent(ev);
+      setBuyerQueue(queue);
       const newFlash: Record<number, boolean> = {};
       for (const p of ps) {
         if (prevIds.current.has(p.id)) {
@@ -618,6 +622,60 @@ export default function LiveBoard() {
     await fetchAll();
   };
 
+  const refreshBuyerQueue = async (next: PurchaseQueueEntry[]) => {
+    setBuyerQueue(next);
+  };
+
+  const handleQueueJoin = async () => {
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    try {
+      await refreshBuyerQueue(await api.purchaseQueue.join(Number(eventId), clerkToken));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to join queue');
+    }
+  };
+
+  const handleQueueLeave = async () => {
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    try {
+      await refreshBuyerQueue(await api.purchaseQueue.leave(Number(eventId), clerkToken));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to leave queue');
+    }
+  };
+
+  const handleQueueStatus = async (qid: number, status: PurchaseQueueStatus) => {
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    try {
+      await refreshBuyerQueue(await api.purchaseQueue.setStatus(Number(eventId), qid, clerkToken, status));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to update status');
+    }
+  };
+
+  const handleQueueEta = async (qid: number, eta_minutes: number | null) => {
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    try {
+      await refreshBuyerQueue(await api.purchaseQueue.setEta(Number(eventId), qid, clerkToken, eta_minutes));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to update ETA');
+    }
+  };
+
+  const handleQueueMove = async (qid: number, direction: 'up' | 'down') => {
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    try {
+      await refreshBuyerQueue(await api.purchaseQueue.move(Number(eventId), qid, clerkToken, direction));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to reorder');
+    }
+  };
+
   // ─── Loading / error ─────────────────────────────────────────────────────────
 
   if (!event && !error) {
@@ -768,19 +826,49 @@ export default function LiveBoard() {
         <span className="text-yellow-400 dark:text-yellow-300 text-xs font-mono">{inProgress} <span className="text-zinc-600 dark:text-zinc-500">claiming</span></span>
         <span className="text-gray-700 dark:text-gray-600 text-xs font-mono">{remaining} <span className="text-zinc-600 dark:text-zinc-500">left</span></span>
         {withGaps > 0 && <span className="text-red-400 dark:text-red-700 text-xs font-mono font-bold">{withGaps} gaps</span>}
-        {showPurchaseChrome && priorityQueue.length > 0 && (
-          <button
-            onClick={() => setShowNextUp((v) => !v)}
-            className={`ml-auto text-sm font-black uppercase tracking-wide px-4 py-1.5 rounded-md border-2 transition-colors ${
-              showNextUp
-                ? 'bg-yellow-300 text-black border-yellow-100 shadow-lg shadow-yellow-400/40'
-                : 'whos-next-flash bg-yellow-400 text-black border-yellow-200 hover:bg-yellow-300'
-            }`}
-          >
-            ⚡ Who&apos;s next?
-          </button>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {showPurchaseChrome && (
+            <button
+              type="button"
+              onClick={() => setShowBuyerQueue((v) => !v)}
+              className={`text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
+                showBuyerQueue
+                  ? 'bg-sky-400 text-black border-sky-200'
+                  : 'text-sky-300 border-sky-700 hover:border-sky-400 hover:text-sky-200'
+              }`}
+            >
+              Queue-It line{buyerQueue.length > 0 ? ` · ${buyerQueue.filter((q) => q.status !== 'done' && q.status !== 'skipped').length}` : ''}
+            </button>
+          )}
+          {showPurchaseChrome && priorityQueue.length > 0 && (
+            <button
+              onClick={() => setShowNextUp((v) => !v)}
+              className={`text-sm font-black uppercase tracking-wide px-4 py-1.5 rounded-md border-2 transition-colors ${
+                showNextUp
+                  ? 'bg-yellow-300 text-black border-yellow-100 shadow-lg shadow-yellow-400/40'
+                  : 'whos-next-flash bg-yellow-400 text-black border-yellow-200 hover:bg-yellow-300'
+              }`}
+            >
+              ⚡ Who&apos;s next?
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* ── Queue-It buyer line (purchase day prep) ── */}
+      {showPurchaseChrome && showBuyerQueue && (
+        <BuyerQueuePanel
+          queue={buyerQueue}
+          myClerkId={user?.id ?? null}
+          identityLinked={identityId != null}
+          onJoin={handleQueueJoin}
+          onLeave={handleQueueLeave}
+          onStatus={handleQueueStatus}
+          onEta={handleQueueEta}
+          onMove={handleQueueMove}
+          onDismiss={() => setShowBuyerQueue(false)}
+        />
+      )}
 
       {/* ── Who's Next panel (purchasing phase or simulation) ── */}
       {showPurchaseChrome && showNextUp && priorityQueue.length > 0 && (
@@ -1558,6 +1646,353 @@ function EditParticipantModal({
         </form>
       </div>
     </div>
+  );
+}
+
+// ─── BuyerQueuePanel (Queue-It ETA prep order) ────────────────────────────────
+
+const QUEUE_STATUS_LABEL: Record<PurchaseQueueStatus, string> = {
+  waiting: 'Waiting',
+  on_deck: 'On deck',
+  in_queueit: 'In Queue-It',
+  buying: 'Buying',
+  done: 'Done',
+  skipped: 'Skipped',
+};
+
+const QUEUE_STATUS_NEXT: Partial<Record<PurchaseQueueStatus, PurchaseQueueStatus>> = {
+  waiting: 'in_queueit',
+  on_deck: 'in_queueit',
+  in_queueit: 'buying',
+  buying: 'done',
+};
+
+const QUEUE_STATUS_STYLE: Record<PurchaseQueueStatus, string> = {
+  waiting: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200',
+  on_deck: 'bg-amber-400 text-black',
+  in_queueit: 'bg-sky-500 text-white',
+  buying: 'bg-orange-500 text-white',
+  done: 'bg-green-600 text-white',
+  skipped: 'bg-zinc-400 text-zinc-800',
+};
+
+/** Common Queue-It screen estimates people shout on the call. */
+const ETA_PRESETS: { minutes: number; label: string }[] = [
+  { minutes: 5, label: '5m' },
+  { minutes: 10, label: '10m' },
+  { minutes: 15, label: '15m' },
+  { minutes: 25, label: '25m' },
+  { minutes: 30, label: '30m' },
+  { minutes: 45, label: '45m' },
+  { minutes: 60, label: '1h' },
+  { minutes: 90, label: '1h+' },
+  { minutes: 120, label: '2h+' },
+];
+
+function formatEta(minutes: number | null | undefined): string {
+  if (minutes == null) return '—';
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes === 60) return '1 hr';
+  if (minutes === 90) return '1h+';
+  if (minutes === 120) return '2h+';
+  const hrs = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  return rem ? `${hrs}h ${rem}m` : `${hrs} hr`;
+}
+
+function BuyerQueuePanel({
+  queue, myClerkId, identityLinked, onJoin, onLeave, onStatus, onEta, onMove, onDismiss,
+}: {
+  queue: PurchaseQueueEntry[];
+  myClerkId: string | null;
+  identityLinked: boolean;
+  onJoin: () => Promise<void>;
+  onLeave: () => Promise<void>;
+  onStatus: (qid: number, status: PurchaseQueueStatus) => Promise<void>;
+  onEta: (qid: number, eta_minutes: number | null) => Promise<void>;
+  onMove: (qid: number, direction: 'up' | 'down') => Promise<void>;
+  onDismiss: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const myEntry = myClerkId ? queue.find((q) => q.clerk_user_id === myClerkId) : undefined;
+  const active = queue.filter((q) => q.status !== 'done' && q.status !== 'skipped');
+  const finished = queue.filter((q) => q.status === 'done' || q.status === 'skipped');
+
+  // Prep order: buying first, then soonest ETA (server already sorts this way).
+  const buying = active.find((q) => q.status === 'buying') ?? null;
+  const byEta = active.filter((q) => q.status !== 'buying');
+  const soonest = buying ?? byEta[0] ?? null;
+  const onDeck = soonest
+    ? byEta.find((q) => q.id !== soonest.id) ?? null
+    : null;
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try { await fn(); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bg-sky-50 dark:bg-sky-950/40 border-b-4 border-sky-400 px-4 py-3 shrink-0 max-h-[42vh] overflow-y-auto">
+      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+        <div>
+          <div className="text-sky-700 dark:text-sky-300 text-[10px] font-bold uppercase tracking-widest">
+            Queue-It buyer line
+          </div>
+          <p className="text-sky-900/70 dark:text-sky-200/70 text-xs mt-0.5 max-w-xl">
+            Report the ETA on your Queue-It screen. Line sorts soonest-first so the call can prep whoever&apos;s about to get through.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {identityLinked && !myEntry && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(onJoin)}
+              className="text-xs font-bold px-3 py-1.5 rounded bg-sky-500 hover:bg-sky-400 text-white disabled:opacity-50"
+            >
+              Join line
+            </button>
+          )}
+          {myEntry && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(onLeave)}
+              className="text-xs font-bold px-3 py-1.5 rounded border border-sky-400 text-sky-800 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-50"
+            >
+              Leave line
+            </button>
+          )}
+          <button type="button" onClick={onDismiss} className="text-sky-500 hover:text-sky-800 text-xs px-1">✕</button>
+        </div>
+      </div>
+
+      {(soonest || onDeck || active.length > 0) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+          <BuyerSpotlight
+            label="Coming through next"
+            entry={soonest}
+            empty="Report ETAs from Queue-It screens"
+            accent="sky"
+          />
+          <BuyerSpotlight
+            label="On deck — prep them"
+            entry={onDeck}
+            empty="Next person after soonest ETA"
+            accent="amber"
+          />
+        </div>
+      )}
+
+      {active.length === 0 && finished.length === 0 && (
+        <p className="text-sky-800/60 dark:text-sky-300/50 text-sm py-2">
+          {identityLinked
+            ? 'Nobody in line yet — hit Join line when you\'re on the purchase call, then tap your ETA.'
+            : 'Link your identity on the board, then join the Queue-It line.'}
+        </p>
+      )}
+
+      {active.length > 0 && (
+        <ol className="space-y-1.5">
+          {active.map((entry, i) => (
+            <BuyerQueueRow
+              key={entry.id}
+              entry={entry}
+              index={i + 1}
+              isMe={entry.clerk_user_id === myClerkId}
+              busy={busy}
+              canMoveUp={i > 0 && entry.eta_minutes == null}
+              canMoveDown={i < active.length - 1 && entry.eta_minutes == null}
+              onStatus={(status) => run(() => onStatus(entry.id, status))}
+              onEta={(mins) => run(() => onEta(entry.id, mins))}
+              onMove={(dir) => run(() => onMove(entry.id, dir))}
+            />
+          ))}
+        </ol>
+      )}
+
+      {finished.length > 0 && (
+        <div className="mt-3 pt-2 border-t border-sky-200 dark:border-sky-800">
+          <div className="text-[10px] uppercase tracking-widest text-sky-600/70 mb-1.5">Finished</div>
+          <div className="flex flex-wrap gap-1.5">
+            {finished.map((e) => (
+              <span
+                key={e.id}
+                className={`text-[10px] font-medium px-2 py-0.5 rounded ${QUEUE_STATUS_STYLE[e.status]}`}
+              >
+                {e.first_name} {e.last_name} · {QUEUE_STATUS_LABEL[e.status]}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BuyerSpotlight({
+  label, entry, empty, accent,
+}: {
+  label: string;
+  entry: PurchaseQueueEntry | null;
+  empty: string;
+  accent: 'sky' | 'amber';
+}) {
+  const ring = accent === 'sky'
+    ? 'border-sky-400 bg-white dark:bg-sky-950/60'
+    : 'border-amber-400 bg-white dark:bg-amber-950/40';
+  return (
+    <div className={`rounded-lg border-2 px-3 py-2.5 ${ring}`}>
+      <div className={`text-[10px] font-bold uppercase tracking-widest ${
+        accent === 'sky' ? 'text-sky-600' : 'text-amber-600'
+      }`}>
+        {label}
+      </div>
+      {entry ? (
+        <div className="mt-1">
+          <div className="font-bangers text-xl text-gray-900 dark:text-white tracking-wide leading-tight">
+            {entry.first_name} {entry.last_name}
+          </div>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            {entry.eta_minutes != null && (
+              <span className="text-sm font-bold text-gray-900 dark:text-white font-mono">
+                ~{formatEta(entry.eta_minutes)}
+              </span>
+            )}
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${QUEUE_STATUS_STYLE[entry.status]}`}>
+              {QUEUE_STATUS_LABEL[entry.status]}
+            </span>
+            {entry.member_id && (
+              <span className="font-mono text-[11px] text-gray-500 tracking-wide">
+                {entry.member_id.toUpperCase()}
+              </span>
+            )}
+            {entry.group_name && (
+              <span className="text-[10px] text-gray-500">{entry.group_name}</span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="text-xs text-gray-400 mt-1">{empty}</div>
+      )}
+    </div>
+  );
+}
+
+function BuyerQueueRow({
+  entry, index, isMe, busy, canMoveUp, canMoveDown, onStatus, onEta, onMove,
+}: {
+  entry: PurchaseQueueEntry;
+  index: number;
+  isMe: boolean;
+  busy: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onStatus: (status: PurchaseQueueStatus) => Promise<void>;
+  onEta: (eta_minutes: number | null) => Promise<void>;
+  onMove: (direction: 'up' | 'down') => Promise<void>;
+}) {
+  const next = QUEUE_STATUS_NEXT[entry.status];
+  return (
+    <li className={`rounded-md border px-2.5 py-2 ${
+      isMe
+        ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-950/30'
+        : 'border-sky-200 dark:border-sky-800 bg-white/80 dark:bg-sky-950/30'
+    }`}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-mono text-sky-600 w-5 shrink-0">{index}</span>
+        <div className="flex-1 min-w-0">
+          <span className="font-semibold text-sm text-gray-900 dark:text-white">
+            {entry.first_name} {entry.last_name}
+          </span>
+          {isMe && <span className="ml-1.5 text-[10px] font-bold bg-yellow-400 text-black px-1.5 py-0.5 rounded">YOU</span>}
+          {entry.member_id && (
+            <span className="ml-2 font-mono text-[10px] text-gray-500">{entry.member_id.toUpperCase()}</span>
+          )}
+        </div>
+        <span className="text-sm font-bold font-mono text-gray-900 dark:text-white shrink-0 min-w-[3.5rem] text-right">
+          {entry.eta_minutes != null ? `~${formatEta(entry.eta_minutes)}` : '—'}
+        </span>
+        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${QUEUE_STATUS_STYLE[entry.status]}`}>
+          {QUEUE_STATUS_LABEL[entry.status]}
+        </span>
+        <div className="flex items-center gap-0.5 shrink-0">
+          {entry.eta_minutes == null && (
+            <>
+              <button
+                type="button"
+                disabled={busy || !canMoveUp}
+                onClick={() => onMove('up')}
+                className="text-xs px-1.5 py-0.5 rounded text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-30"
+                title="Move up"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                disabled={busy || !canMoveDown}
+                onClick={() => onMove('down')}
+                className="text-xs px-1.5 py-0.5 rounded text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-30"
+                title="Move down"
+              >
+                ↓
+              </button>
+            </>
+          )}
+          {next && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onStatus(next)}
+              className="ml-1 text-[10px] font-bold px-2 py-0.5 rounded bg-sky-500 hover:bg-sky-400 text-white disabled:opacity-50"
+            >
+              → {QUEUE_STATUS_LABEL[next]}
+            </button>
+          )}
+          {entry.status !== 'skipped' && entry.status !== 'done' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onStatus('skipped')}
+              className="text-[10px] px-1.5 py-0.5 text-gray-400 hover:text-red-500 disabled:opacity-50"
+              title="Skip"
+            >
+              skip
+            </button>
+          )}
+        </div>
+      </div>
+      {entry.status !== 'done' && entry.status !== 'skipped' && (
+        <div className="mt-1.5 ml-7 flex flex-wrap items-center gap-1">
+          <span className="text-[10px] uppercase tracking-wide text-sky-600/80 mr-1">ETA</span>
+          {ETA_PRESETS.map((p) => (
+            <button
+              key={p.minutes}
+              type="button"
+              disabled={busy}
+              onClick={() => onEta(p.minutes)}
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded border transition-colors disabled:opacity-50 ${
+                entry.eta_minutes === p.minutes
+                  ? 'bg-sky-500 text-white border-sky-400'
+                  : 'bg-white dark:bg-sky-950/50 text-sky-800 dark:text-sky-200 border-sky-200 dark:border-sky-700 hover:border-sky-400'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+          {entry.eta_minutes != null && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onEta(null)}
+              className="text-[10px] px-1.5 py-0.5 text-gray-400 hover:text-red-500 disabled:opacity-50"
+            >
+              clear
+            </button>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 

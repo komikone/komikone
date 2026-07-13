@@ -133,6 +133,27 @@ export type Coordinator = {
   updated_at: string;
 };
 
+export type PurchaseQueueStatus =
+  | 'waiting'
+  | 'on_deck'
+  | 'in_queueit'
+  | 'buying'
+  | 'done'
+  | 'skipped';
+
+export type PurchaseQueueEntry = {
+  id: number;
+  event_id: number;
+  participant_id: number;
+  clerk_user_id: string;
+  position: number;
+  status: PurchaseQueueStatus;
+  /** Minutes left per Queue-It screen; null if not reported. */
+  eta_minutes: number | null;
+  joined_at: string;
+  updated_at: string;
+};
+
 export type YearMeta = {
   year: number;
   return_reg_start: string;

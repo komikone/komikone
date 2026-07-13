@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, enrichParticipant, isClaimExpired } from './db';
+import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, enrichParticipant, isClaimExpired } from './db';
 import {
   assertRegistrationOpen,
   daysToSql,
@@ -751,6 +751,226 @@ app.put('/api/events/:id/coordinators/:name', async (c) => {
   `).bind(eventId, name, body.venmo?.trim() ?? '', body.zelle?.trim() ?? '', body.paypal?.trim() ?? '', body.phone_last4?.trim() ?? '').run();
 
   return json({ ok: true });
+});
+
+// ─── Purchase queue (Queue-It buyer line) ─────────────────────────────────────
+
+const QUEUE_STATUSES: PurchaseQueueStatus[] = [
+  'waiting', 'on_deck', 'in_queueit', 'buying', 'done', 'skipped',
+];
+
+type PurchaseQueueRow = PurchaseQueueEntry & {
+  first_name: string;
+  last_name: string;
+  member_id: string;
+  group_name: string | null;
+};
+
+async function listPurchaseQueue(db: D1Database, eventId: number): Promise<PurchaseQueueRow[]> {
+  const rows = await db.prepare(`
+    SELECT q.*, p.first_name, p.last_name, p.member_id, g.name AS group_name
+    FROM purchase_queue q
+    JOIN participants p ON p.id = q.participant_id
+    LEFT JOIN groups g ON g.id = p.group_id
+    WHERE q.event_id = ?
+    ORDER BY
+      CASE q.status
+        WHEN 'buying' THEN 0
+        WHEN 'in_queueit' THEN 1
+        WHEN 'on_deck' THEN 2
+        WHEN 'waiting' THEN 3
+        WHEN 'done' THEN 4
+        WHEN 'skipped' THEN 5
+        ELSE 6
+      END,
+      CASE WHEN q.eta_minutes IS NULL THEN 1 ELSE 0 END,
+      q.eta_minutes ASC,
+      q.position ASC,
+      q.id ASC
+  `).bind(eventId).all<PurchaseQueueRow>();
+  return rows.results ?? [];
+}
+
+app.get('/api/events/:id/purchase-queue', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+
+  const event = await getEvent(c.env.DB, eventId);
+  if (!event) return err('Event not found', 404);
+
+  return json(await listPurchaseQueue(c.env.DB, eventId));
+});
+
+app.post('/api/events/:id/purchase-queue/join', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+  if (access.userId === 'admin') return err('Join as a signed-in member, not admin secret', 400);
+
+  const event = await getEvent(c.env.DB, eventId);
+  if (!event) return err('Event not found', 404);
+
+  const me = await c.env.DB.prepare(
+    'SELECT id FROM participants WHERE event_id = ? AND clerk_user_id = ?'
+  ).bind(eventId, access.userId).first<{ id: number }>();
+  if (!me) return err('Link your account to a participant first', 400);
+
+  const existing = await c.env.DB.prepare(
+    'SELECT id FROM purchase_queue WHERE event_id = ? AND clerk_user_id = ?'
+  ).bind(eventId, access.userId).first<{ id: number }>();
+  if (existing) return err('Already in the queue', 409);
+
+  const maxPos = await c.env.DB.prepare(
+    'SELECT COALESCE(MAX(position), 0) AS m FROM purchase_queue WHERE event_id = ?'
+  ).bind(eventId).first<{ m: number }>();
+  const position = (maxPos?.m ?? 0) + 1;
+
+  await c.env.DB.prepare(`
+    INSERT INTO purchase_queue (event_id, participant_id, clerk_user_id, position, status)
+    VALUES (?, ?, ?, ?, 'waiting')
+  `).bind(eventId, me.id, access.userId, position).run();
+
+  return json(await listPurchaseQueue(c.env.DB, eventId));
+});
+
+app.delete('/api/events/:id/purchase-queue/me', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+  if (access.userId === 'admin') return err('Leave as a signed-in member', 400);
+
+  await c.env.DB.prepare(
+    'DELETE FROM purchase_queue WHERE event_id = ? AND clerk_user_id = ?'
+  ).bind(eventId, access.userId).run();
+
+  return json(await listPurchaseQueue(c.env.DB, eventId));
+});
+
+app.patch('/api/events/:id/purchase-queue/:qid', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const qid = Number(c.req.param('qid'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+
+  const body = await c.req.json<{ status?: PurchaseQueueStatus; eta_minutes?: number | null }>();
+  if (body.status === undefined && body.eta_minutes === undefined) {
+    return err('Provide status and/or eta_minutes');
+  }
+  if (body.status !== undefined && !QUEUE_STATUSES.includes(body.status)) {
+    return err(`status must be one of: ${QUEUE_STATUSES.join(', ')}`);
+  }
+  if (body.eta_minutes !== undefined && body.eta_minutes !== null) {
+    if (!Number.isFinite(body.eta_minutes) || body.eta_minutes < 0 || body.eta_minutes > 24 * 60) {
+      return err('eta_minutes must be between 0 and 1440');
+    }
+  }
+
+  const row = await c.env.DB.prepare(
+    'SELECT id, status FROM purchase_queue WHERE id = ? AND event_id = ?'
+  ).bind(qid, eventId).first<{ id: number; status: PurchaseQueueStatus }>();
+  if (!row) return err('Queue entry not found', 404);
+
+  // Anyone on the call can update so heads-down buyers can be reported by others.
+  const fields: string[] = ["updated_at = datetime('now')"];
+  const values: (string | number | null)[] = [];
+
+  let nextStatus = body.status;
+  if (
+    body.eta_minutes != null &&
+    nextStatus === undefined &&
+    (row.status === 'waiting' || row.status === 'on_deck')
+  ) {
+    // Reporting an ETA means they're in Queue-It.
+    nextStatus = 'in_queueit';
+  }
+  if (nextStatus !== undefined) {
+    fields.push('status = ?');
+    values.push(nextStatus);
+    if (nextStatus === 'done' || nextStatus === 'skipped') {
+      fields.push('eta_minutes = NULL');
+    }
+  }
+  if (body.eta_minutes !== undefined && nextStatus !== 'done' && nextStatus !== 'skipped') {
+    fields.push('eta_minutes = ?');
+    values.push(body.eta_minutes == null ? null : Math.round(body.eta_minutes));
+  }
+
+  values.push(qid, eventId);
+  await c.env.DB.prepare(`
+    UPDATE purchase_queue SET ${fields.join(', ')}
+    WHERE id = ? AND event_id = ?
+  `).bind(...values).run();
+
+  return json(await listPurchaseQueue(c.env.DB, eventId));
+});
+
+app.put('/api/events/:id/purchase-queue/reorder', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+
+  const body = await c.req.json<{ order: number[] }>();
+  if (!Array.isArray(body.order) || body.order.length === 0) {
+    return err('order must be a non-empty array of queue entry ids');
+  }
+
+  const existing = await c.env.DB.prepare(
+    'SELECT id FROM purchase_queue WHERE event_id = ?'
+  ).bind(eventId).all<{ id: number }>();
+  const idSet = new Set((existing.results ?? []).map((r) => r.id));
+  if (body.order.some((id) => !idSet.has(id)) || body.order.length !== idSet.size) {
+    return err('order must include every queue entry exactly once');
+  }
+
+  const stmts = body.order.map((id, i) =>
+    c.env.DB.prepare(`
+      UPDATE purchase_queue SET position = ?, updated_at = datetime('now')
+      WHERE id = ? AND event_id = ?
+    `).bind(i + 1, id, eventId)
+  );
+  await c.env.DB.batch(stmts);
+
+  return json(await listPurchaseQueue(c.env.DB, eventId));
+});
+
+app.post('/api/events/:id/purchase-queue/:qid/move', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const qid = Number(c.req.param('qid'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+
+  const body = await c.req.json<{ direction: 'up' | 'down' }>();
+  if (body.direction !== 'up' && body.direction !== 'down') {
+    return err('direction must be up or down');
+  }
+
+  const rows = await c.env.DB.prepare(`
+    SELECT id, position FROM purchase_queue
+    WHERE event_id = ? AND status NOT IN ('done', 'skipped')
+    ORDER BY position ASC, id ASC
+  `).bind(eventId).all<{ id: number; position: number }>();
+  const list = rows.results ?? [];
+  const idx = list.findIndex((r) => r.id === qid);
+  if (idx === -1) return err('Queue entry not found or already finished', 404);
+
+  const swapIdx = body.direction === 'up' ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= list.length) {
+    return json(await listPurchaseQueue(c.env.DB, eventId));
+  }
+
+  const a = list[idx];
+  const b = list[swapIdx];
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      "UPDATE purchase_queue SET position = ?, updated_at = datetime('now') WHERE id = ?"
+    ).bind(b.position, a.id),
+    c.env.DB.prepare(
+      "UPDATE purchase_queue SET position = ?, updated_at = datetime('now') WHERE id = ?"
+    ).bind(a.position, b.id),
+  ]);
+
+  return json(await listPurchaseQueue(c.env.DB, eventId));
 });
 
 app.patch('/api/events/:id/participants/:pid/profile', async (c) => {

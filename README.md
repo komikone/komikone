@@ -35,6 +35,8 @@ npx wrangler d1 execute komikone --local --file=./migrations/007_backfill_year_m
 npx wrangler d1 execute komikone --local --file=./migrations/008_backgrounds.sql
 npx wrangler d1 execute komikone --local --file=./migrations/009_invite_email_tracking.sql
 npx wrangler d1 execute komikone --local --file=./migrations/010_participant_clerk.sql
+npx wrangler d1 execute komikone --local --file=./migrations/012_purchase_queue.sql
+npx wrangler d1 execute komikone --local --file=./migrations/013_purchase_queue_eta.sql
 # Add --remote for production
 ```
 

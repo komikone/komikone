@@ -188,6 +188,31 @@ export type Coordinator = {
   phone_last4: string;
 };
 
+export type PurchaseQueueStatus =
+  | 'waiting'
+  | 'on_deck'
+  | 'in_queueit'
+  | 'buying'
+  | 'done'
+  | 'skipped';
+
+export type PurchaseQueueEntry = {
+  id: number;
+  event_id: number;
+  participant_id: number;
+  clerk_user_id: string;
+  position: number;
+  status: PurchaseQueueStatus;
+  /** Minutes left per Queue-It screen; null if not reported. */
+  eta_minutes: number | null;
+  joined_at: string;
+  updated_at: string;
+  first_name: string;
+  last_name: string;
+  member_id: string;
+  group_name: string | null;
+};
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export const api = {
@@ -277,6 +302,46 @@ export const api = {
     upsert: (eventId: number, name: string, clerkToken: string, data: Partial<Coordinator>) =>
       req<{ ok: boolean }>(`/api/events/${eventId}/coordinators/${encodeURIComponent(name)}`, {
         method: 'PUT', headers: authHeaders(clerkToken), body: JSON.stringify(data),
+      }),
+  },
+
+  purchaseQueue: {
+    list: (eventId: number, clerkToken: string) =>
+      req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue`, {
+        headers: authHeaders(clerkToken),
+      }),
+    join: (eventId: number, clerkToken: string) =>
+      req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/join`, {
+        method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify({}),
+      }),
+    leave: (eventId: number, clerkToken: string) =>
+      req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/me`, {
+        method: 'DELETE', headers: authHeaders(clerkToken),
+      }),
+    setStatus: (eventId: number, qid: number, clerkToken: string, status: PurchaseQueueStatus) =>
+      req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/${qid}`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify({ status }),
+      }),
+    setEta: (eventId: number, qid: number, clerkToken: string, eta_minutes: number | null) =>
+      req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/${qid}`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify({ eta_minutes }),
+      }),
+    update: (
+      eventId: number,
+      qid: number,
+      clerkToken: string,
+      data: { status?: PurchaseQueueStatus; eta_minutes?: number | null },
+    ) =>
+      req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/${qid}`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),
+      }),
+    move: (eventId: number, qid: number, clerkToken: string, direction: 'up' | 'down') =>
+      req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/${qid}/move`, {
+        method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify({ direction }),
+      }),
+    reorder: (eventId: number, clerkToken: string, order: number[]) =>
+      req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/reorder`, {
+        method: 'PUT', headers: authHeaders(clerkToken), body: JSON.stringify({ order }),
       }),
   },
 
