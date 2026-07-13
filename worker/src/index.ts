@@ -816,11 +816,7 @@ app.post('/api/events/:id/purchase-queue/join', async (c) => {
   ).bind(eventId, access.userId).first<{ id: number }>();
   if (!me) return err('Link your account to a participant first', 400);
 
-  const existing = await c.env.DB.prepare(
-    'SELECT id FROM purchase_queue WHERE event_id = ? AND clerk_user_id = ?'
-  ).bind(eventId, access.userId).first<{ id: number }>();
-  if (existing) return err('Already in the queue', 409);
-
+  // Multiple joins allowed — one entry per Queue-It cookie / browser session.
   const maxPos = await c.env.DB.prepare(
     'SELECT COALESCE(MAX(position), 0) AS m FROM purchase_queue WHERE event_id = ?'
   ).bind(eventId).first<{ m: number }>();
@@ -834,6 +830,7 @@ app.post('/api/events/:id/purchase-queue/join', async (c) => {
   return json(await listPurchaseQueue(c.env.DB, eventId));
 });
 
+// Must be registered before /:qid so "me" is not captured as an id.
 app.delete('/api/events/:id/purchase-queue/me', async (c) => {
   const eventId = Number(c.req.param('id'));
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
@@ -843,6 +840,25 @@ app.delete('/api/events/:id/purchase-queue/me', async (c) => {
   await c.env.DB.prepare(
     'DELETE FROM purchase_queue WHERE event_id = ? AND clerk_user_id = ?'
   ).bind(eventId, access.userId).run();
+
+  return json(await listPurchaseQueue(c.env.DB, eventId));
+});
+
+app.delete('/api/events/:id/purchase-queue/:qid', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const qid = Number(c.req.param('qid'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+
+  const row = await c.env.DB.prepare(
+    'SELECT id FROM purchase_queue WHERE id = ? AND event_id = ?'
+  ).bind(qid, eventId).first<{ id: number }>();
+  if (!row) return err('Queue entry not found', 404);
+
+  // Anyone on the call can remove a cookie slot (prep coordination).
+  await c.env.DB.prepare(
+    'DELETE FROM purchase_queue WHERE id = ? AND event_id = ?'
+  ).bind(qid, eventId).run();
 
   return json(await listPurchaseQueue(c.env.DB, eventId));
 });

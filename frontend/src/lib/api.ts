@@ -314,7 +314,11 @@ export const api = {
       req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/join`, {
         method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify({}),
       }),
-    leave: (eventId: number, clerkToken: string) =>
+    leave: (eventId: number, qid: number, clerkToken: string) =>
+      req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/${qid}`, {
+        method: 'DELETE', headers: authHeaders(clerkToken),
+      }),
+    leaveAll: (eventId: number, clerkToken: string) =>
       req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/me`, {
         method: 'DELETE', headers: authHeaders(clerkToken),
       }),

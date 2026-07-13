@@ -636,11 +636,11 @@ export default function LiveBoard() {
     }
   };
 
-  const handleQueueLeave = async () => {
+  const handleQueueLeave = async (qid: number) => {
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     try {
-      await refreshBuyerQueue(await api.purchaseQueue.leave(Number(eventId), clerkToken));
+      await refreshBuyerQueue(await api.purchaseQueue.leave(Number(eventId), qid, clerkToken));
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to leave queue');
     }
@@ -855,21 +855,6 @@ export default function LiveBoard() {
         </div>
       </div>
 
-      {/* ── Queue-It buyer line (purchase day prep) ── */}
-      {showPurchaseChrome && showBuyerQueue && (
-        <BuyerQueuePanel
-          queue={buyerQueue}
-          myClerkId={user?.id ?? null}
-          identityLinked={identityId != null}
-          onJoin={handleQueueJoin}
-          onLeave={handleQueueLeave}
-          onStatus={handleQueueStatus}
-          onEta={handleQueueEta}
-          onMove={handleQueueMove}
-          onDismiss={() => setShowBuyerQueue(false)}
-        />
-      )}
-
       {/* ── Who's Next panel (purchasing phase or simulation) ── */}
       {showPurchaseChrome && showNextUp && priorityQueue.length > 0 && (
         <NextUpPanel
@@ -899,83 +884,86 @@ export default function LiveBoard() {
         </div>
       )}
 
-      {/* ── Filter bar ── */}
-      <div className="border-b-2 border-yellow-200 dark:border-gray-300 bg-amber-50 dark:bg-gray-900 px-4 py-2 flex items-center gap-3 flex-wrap shrink-0">
-        <input
-          type="search"
-          placeholder="Search… (* wildcard)"
-          value={filterText}
-          onChange={(e) => setFilterText(e.target.value)}
-          className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-white w-52 focus:outline-none focus:border-yellow-400 dark:focus:border-yellow-400 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-        />
-        <div className="flex gap-1.5 flex-wrap">
-          {([
-            ['all',      'All'],
-            ['none',     'Remaining'],
-            ['claiming', 'Claiming'],
-            ['partial',  'Partial'],
-            ['complete', 'Complete'],
-          ] as [RowStatus | 'all', string][]).map(([s, label]) => (
-            <button
-              key={s}
-              onClick={() => setFilterStatus(s)}
-              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                filterStatus === s
-                  ? 'bg-yellow-400 text-black border-transparent'
-                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {(filterText || filterStatus !== 'all') && (
-          <span className="text-xs text-gray-400 dark:text-gray-600">{displayRows.length} of {participants.length}</span>
-        )}
-        <div className="ml-auto flex gap-3">
-          {customRowOrder && (
-            <button
-              onClick={() => setCustomRowOrder(null)}
-              className="text-xs text-gray-400 hover:text-orange-500 dark:hover:text-orange-400"
-            >
-              Reset row order ✕
-            </button>
+      {/* Board + optional Queue-It side rail */}
+      <div className="flex-1 min-h-0 flex">
+        <div className="flex-1 min-w-0 flex flex-col">
+          {/* ── Filter bar ── */}
+          <div className="border-b-2 border-yellow-200 dark:border-gray-300 bg-amber-50 dark:bg-gray-900 px-4 py-2 flex items-center gap-3 flex-wrap shrink-0">
+            <input
+              type="search"
+              placeholder="Search… (* wildcard)"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-white w-52 focus:outline-none focus:border-yellow-400 dark:focus:border-yellow-400 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            />
+            <div className="flex gap-1.5 flex-wrap">
+              {([
+                ['all',      'All'],
+                ['none',     'Remaining'],
+                ['claiming', 'Claiming'],
+                ['partial',  'Partial'],
+                ['complete', 'Complete'],
+              ] as [RowStatus | 'all', string][]).map(([s, label]) => (
+                <button
+                  key={s}
+                  onClick={() => setFilterStatus(s)}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                    filterStatus === s
+                      ? 'bg-yellow-400 text-black border-transparent'
+                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {(filterText || filterStatus !== 'all') && (
+              <span className="text-xs text-gray-400 dark:text-gray-600">{displayRows.length} of {participants.length}</span>
+            )}
+            <div className="ml-auto flex gap-3">
+              {customRowOrder && (
+                <button
+                  onClick={() => setCustomRowOrder(null)}
+                  className="text-xs text-gray-400 hover:text-orange-500 dark:hover:text-orange-400"
+                >
+                  Reset row order ✕
+                </button>
+              )}
+              {sortCol && (
+                <button
+                  onClick={() => { setSortCol(null); setSortDir('asc'); }}
+                  className="text-xs text-gray-400 hover:text-red-500 dark:hover:text-red-400"
+                >
+                  Clear sort ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* ── Link identity modal ── */}
+          {showLinkModal && (
+            <LinkIdentityModal
+              participants={participants}
+              currentIdentityId={identityId}
+              userName={user ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : ''}
+              onLink={handleLinkIdentity}
+              onDismiss={() => setShowLinkModal(false)}
+              registerUrl={`/register/${eventId}`}
+            />
           )}
-          {sortCol && (
-            <button
-              onClick={() => { setSortCol(null); setSortDir('asc'); }}
-              className="text-xs text-gray-400 hover:text-red-500 dark:hover:text-red-400"
-            >
-              Clear sort ✕
-            </button>
+
+          {/* ── Edit participant modal ── */}
+          {editParticipant && (
+            <EditParticipantModal
+              participant={editParticipant}
+              onSave={handleEditSave}
+              onClose={() => setEditParticipant(null)}
+            />
           )}
-        </div>
-      </div>
 
-      {/* ── Link identity modal ── */}
-      {showLinkModal && (
-        <LinkIdentityModal
-          participants={participants}
-          currentIdentityId={identityId}
-          userName={user ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : ''}
-          onLink={handleLinkIdentity}
-          onDismiss={() => setShowLinkModal(false)}
-          registerUrl={`/register/${eventId}`}
-        />
-      )}
-
-      {/* ── Edit participant modal ── */}
-      {editParticipant && (
-        <EditParticipantModal
-          participant={editParticipant}
-          onSave={handleEditSave}
-          onClose={() => setEditParticipant(null)}
-        />
-      )}
-
-      {/* ── Table ── */}
-      <div className="flex-1 overflow-auto">
-        <table className="text-sm w-full" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
+          {/* ── Table ── */}
+          <div className="flex-1 overflow-auto">
+            <table className="text-sm w-full" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
 
           <thead>
             <tr>
@@ -1153,6 +1141,22 @@ export default function LiveBoard() {
             )}
           </tbody>
         </table>
+          </div>
+        </div>
+
+        {showPurchaseChrome && showBuyerQueue && (
+          <BuyerQueuePanel
+            queue={buyerQueue}
+            myClerkId={user?.id ?? null}
+            identityLinked={identityId != null}
+            onJoin={handleQueueJoin}
+            onLeave={handleQueueLeave}
+            onStatus={handleQueueStatus}
+            onEta={handleQueueEta}
+            onMove={handleQueueMove}
+            onDismiss={() => setShowBuyerQueue(false)}
+          />
+        )}
       </div>
     </div>
   );
@@ -1677,27 +1681,32 @@ const QUEUE_STATUS_STYLE: Record<PurchaseQueueStatus, string> = {
 };
 
 /** Common Queue-It screen estimates people shout on the call. */
-const ETA_PRESETS: { minutes: number; label: string }[] = [
+const ETA_PRESETS: { minutes: number; label: string; span?: number }[] = [
   { minutes: 5, label: '5m' },
   { minutes: 10, label: '10m' },
   { minutes: 15, label: '15m' },
   { minutes: 25, label: '25m' },
   { minutes: 30, label: '30m' },
   { minutes: 45, label: '45m' },
-  { minutes: 60, label: '1h' },
-  { minutes: 90, label: '1h+' },
-  { minutes: 120, label: '2h+' },
+  { minutes: 60, label: 'More than an hour', span: 3 },
 ];
 
 function formatEta(minutes: number | null | undefined): string {
   if (minutes == null) return '—';
   if (minutes < 60) return `${minutes} min`;
-  if (minutes === 60) return '1 hr';
-  if (minutes === 90) return '1h+';
-  if (minutes === 120) return '2h+';
-  const hrs = Math.floor(minutes / 60);
-  const rem = minutes % 60;
-  return rem ? `${hrs}h ${rem}m` : `${hrs} hr`;
+  return 'More than an hour';
+}
+
+function cookieSlotLabel(
+  entry: PurchaseQueueEntry,
+  queue: PurchaseQueueEntry[],
+): string | null {
+  const mine = queue
+    .filter((q) => q.clerk_user_id === entry.clerk_user_id)
+    .sort((a, b) => a.id - b.id);
+  if (mine.length < 2) return null;
+  const n = mine.findIndex((q) => q.id === entry.id) + 1;
+  return `Cookie ${n}`;
 }
 
 function BuyerQueuePanel({
@@ -1707,14 +1716,16 @@ function BuyerQueuePanel({
   myClerkId: string | null;
   identityLinked: boolean;
   onJoin: () => Promise<void>;
-  onLeave: () => Promise<void>;
+  onLeave: (qid: number) => Promise<void>;
   onStatus: (qid: number, status: PurchaseQueueStatus) => Promise<void>;
   onEta: (qid: number, eta_minutes: number | null) => Promise<void>;
   onMove: (qid: number, direction: 'up' | 'down') => Promise<void>;
   onDismiss: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const myEntry = myClerkId ? queue.find((q) => q.clerk_user_id === myClerkId) : undefined;
+  const myActiveCount = myClerkId
+    ? queue.filter((q) => q.clerk_user_id === myClerkId && q.status !== 'done' && q.status !== 'skipped').length
+    : 0;
   const active = queue.filter((q) => q.status !== 'done' && q.status !== 'skipped');
   const finished = queue.filter((q) => q.status === 'done' || q.status === 'skipped');
 
@@ -1732,109 +1743,106 @@ function BuyerQueuePanel({
   };
 
   return (
-    <div className="bg-sky-50 dark:bg-sky-950/40 border-b-4 border-sky-400 px-4 py-3 shrink-0 max-h-[42vh] overflow-y-auto">
-      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
-        <div>
+    <aside className="w-[17.5rem] shrink-0 border-l-4 border-sky-400 bg-sky-50 dark:bg-sky-950/50 flex flex-col min-h-0">
+      <div className="px-3 py-2.5 border-b border-sky-200 dark:border-sky-800 shrink-0">
+        <div className="flex items-center justify-between gap-2">
           <div className="text-sky-700 dark:text-sky-300 text-[10px] font-bold uppercase tracking-widest">
-            Queue-It buyer line
+            Queue-It line
           </div>
-          <p className="text-sky-900/70 dark:text-sky-200/70 text-xs mt-0.5 max-w-xl">
-            Report the ETA on your Queue-It screen. Line sorts soonest-first so the call can prep whoever&apos;s about to get through.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {identityLinked && !myEntry && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => run(onJoin)}
-              className="text-xs font-bold px-3 py-1.5 rounded bg-sky-500 hover:bg-sky-400 text-white disabled:opacity-50"
-            >
-              Join line
-            </button>
-          )}
-          {myEntry && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => run(onLeave)}
-              className="text-xs font-bold px-3 py-1.5 rounded border border-sky-400 text-sky-800 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-50"
-            >
-              Leave line
-            </button>
-          )}
           <button type="button" onClick={onDismiss} className="text-sky-500 hover:text-sky-800 text-xs px-1">✕</button>
         </div>
+        <p className="text-sky-900/60 dark:text-sky-200/60 text-[11px] mt-1 leading-snug">
+          One slot per cookie / browser. Report ETA; sorts soonest-first.
+        </p>
+        {identityLinked && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => run(onJoin)}
+            className="mt-2 w-full text-xs font-bold px-3 py-1.5 rounded bg-sky-500 hover:bg-sky-400 text-white disabled:opacity-50"
+          >
+            {myActiveCount > 0 ? 'Add another cookie' : 'Join line'}
+          </button>
+        )}
       </div>
 
-      {(soonest || onDeck || active.length > 0) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-          <BuyerSpotlight
-            label="Coming through next"
-            entry={soonest}
-            empty="Report ETAs from Queue-It screens"
-            accent="sky"
-          />
-          <BuyerSpotlight
-            label="On deck — prep them"
-            entry={onDeck}
-            empty="Next person after soonest ETA"
-            accent="amber"
-          />
-        </div>
-      )}
-
-      {active.length === 0 && finished.length === 0 && (
-        <p className="text-sky-800/60 dark:text-sky-300/50 text-sm py-2">
-          {identityLinked
-            ? 'Nobody in line yet — hit Join line when you\'re on the purchase call, then tap your ETA.'
-            : 'Link your identity on the board, then join the Queue-It line.'}
-        </p>
-      )}
-
-      {active.length > 0 && (
-        <ol className="space-y-1.5">
-          {active.map((entry, i) => (
-            <BuyerQueueRow
-              key={entry.id}
-              entry={entry}
-              index={i + 1}
-              isMe={entry.clerk_user_id === myClerkId}
-              busy={busy}
-              canMoveUp={i > 0 && entry.eta_minutes == null}
-              canMoveDown={i < active.length - 1 && entry.eta_minutes == null}
-              onStatus={(status) => run(() => onStatus(entry.id, status))}
-              onEta={(mins) => run(() => onEta(entry.id, mins))}
-              onMove={(dir) => run(() => onMove(entry.id, dir))}
+      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
+        {(soonest || onDeck || active.length > 0) && (
+          <div className="space-y-2">
+            <BuyerSpotlight
+              label="Coming through next"
+              entry={soonest}
+              cookieLabel={soonest ? cookieSlotLabel(soonest, queue) : null}
+              empty="Report ETAs from Queue-It screens"
+              accent="sky"
             />
-          ))}
-        </ol>
-      )}
-
-      {finished.length > 0 && (
-        <div className="mt-3 pt-2 border-t border-sky-200 dark:border-sky-800">
-          <div className="text-[10px] uppercase tracking-widest text-sky-600/70 mb-1.5">Finished</div>
-          <div className="flex flex-wrap gap-1.5">
-            {finished.map((e) => (
-              <span
-                key={e.id}
-                className={`text-[10px] font-medium px-2 py-0.5 rounded ${QUEUE_STATUS_STYLE[e.status]}`}
-              >
-                {e.first_name} {e.last_name} · {QUEUE_STATUS_LABEL[e.status]}
-              </span>
-            ))}
+            <BuyerSpotlight
+              label="On deck — prep them"
+              entry={onDeck}
+              cookieLabel={onDeck ? cookieSlotLabel(onDeck, queue) : null}
+              empty="Next after soonest ETA"
+              accent="amber"
+            />
           </div>
-        </div>
-      )}
-    </div>
+        )}
+
+        {active.length === 0 && finished.length === 0 && (
+          <p className="text-sky-800/60 dark:text-sky-300/50 text-xs py-2">
+            {identityLinked
+              ? 'Nobody in line yet — join when you\'re on the call, then tap your ETA.'
+              : 'Link your identity, then join the line.'}
+          </p>
+        )}
+
+        {active.length > 0 && (
+          <ol className="space-y-1.5">
+            {active.map((entry, i) => (
+              <BuyerQueueRow
+                key={entry.id}
+                entry={entry}
+                index={i + 1}
+                cookieLabel={cookieSlotLabel(entry, queue)}
+                isMe={entry.clerk_user_id === myClerkId}
+                busy={busy}
+                canMoveUp={i > 0 && entry.eta_minutes == null}
+                canMoveDown={i < active.length - 1 && entry.eta_minutes == null}
+                onStatus={(status) => run(() => onStatus(entry.id, status))}
+                onEta={(mins) => run(() => onEta(entry.id, mins))}
+                onMove={(dir) => run(() => onMove(entry.id, dir))}
+                onLeave={() => run(() => onLeave(entry.id))}
+              />
+            ))}
+          </ol>
+        )}
+
+        {finished.length > 0 && (
+          <div className="pt-2 border-t border-sky-200 dark:border-sky-800">
+            <div className="text-[10px] uppercase tracking-widest text-sky-600/70 mb-1.5">Finished</div>
+            <div className="flex flex-col gap-1">
+              {finished.map((e) => (
+                <span
+                  key={e.id}
+                  className={`text-[10px] font-medium px-2 py-0.5 rounded ${QUEUE_STATUS_STYLE[e.status]}`}
+                >
+                  {e.first_name} {e.last_name}
+                  {cookieSlotLabel(e, queue) ? ` · ${cookieSlotLabel(e, queue)}` : ''}
+                  {' · '}{QUEUE_STATUS_LABEL[e.status]}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </aside>
   );
 }
 
 function BuyerSpotlight({
-  label, entry, empty, accent,
+  label, entry, cookieLabel, empty, accent,
 }: {
   label: string;
   entry: PurchaseQueueEntry | null;
+  cookieLabel: string | null;
   empty: string;
   accent: 'sky' | 'amber';
 }) {
@@ -1842,48 +1850,49 @@ function BuyerSpotlight({
     ? 'border-sky-400 bg-white dark:bg-sky-950/60'
     : 'border-amber-400 bg-white dark:bg-amber-950/40';
   return (
-    <div className={`rounded-lg border-2 px-3 py-2.5 ${ring}`}>
-      <div className={`text-[10px] font-bold uppercase tracking-widest ${
+    <div className={`rounded-lg border-2 px-2.5 py-2 ${ring}`}>
+      <div className={`text-[9px] font-bold uppercase tracking-widest ${
         accent === 'sky' ? 'text-sky-600' : 'text-amber-600'
       }`}>
         {label}
       </div>
       {entry ? (
-        <div className="mt-1">
-          <div className="font-bangers text-xl text-gray-900 dark:text-white tracking-wide leading-tight">
+        <div className="mt-0.5">
+          <div className="font-bangers text-lg text-gray-900 dark:text-white tracking-wide leading-tight">
             {entry.first_name} {entry.last_name}
           </div>
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
+          {cookieLabel && (
+            <div className="text-[10px] font-bold text-sky-700 dark:text-sky-300 mt-0.5">{cookieLabel}</div>
+          )}
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             {entry.eta_minutes != null && (
               <span className="text-sm font-bold text-gray-900 dark:text-white font-mono">
                 ~{formatEta(entry.eta_minutes)}
               </span>
             )}
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${QUEUE_STATUS_STYLE[entry.status]}`}>
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${QUEUE_STATUS_STYLE[entry.status]}`}>
               {QUEUE_STATUS_LABEL[entry.status]}
             </span>
-            {entry.member_id && (
-              <span className="font-mono text-[11px] text-gray-500 tracking-wide">
-                {entry.member_id.toUpperCase()}
-              </span>
-            )}
-            {entry.group_name && (
-              <span className="text-[10px] text-gray-500">{entry.group_name}</span>
-            )}
           </div>
+          {entry.member_id && (
+            <div className="font-mono text-[10px] text-gray-500 tracking-wide mt-0.5">
+              {entry.member_id.toUpperCase()}
+            </div>
+          )}
         </div>
       ) : (
-        <div className="text-xs text-gray-400 mt-1">{empty}</div>
+        <div className="text-[11px] text-gray-400 mt-0.5">{empty}</div>
       )}
     </div>
   );
 }
 
 function BuyerQueueRow({
-  entry, index, isMe, busy, canMoveUp, canMoveDown, onStatus, onEta, onMove,
+  entry, index, cookieLabel, isMe, busy, canMoveUp, canMoveDown, onStatus, onEta, onMove, onLeave,
 }: {
   entry: PurchaseQueueEntry;
   index: number;
+  cookieLabel: string | null;
   isMe: boolean;
   busy: boolean;
   canMoveUp: boolean;
@@ -1891,39 +1900,44 @@ function BuyerQueueRow({
   onStatus: (status: PurchaseQueueStatus) => Promise<void>;
   onEta: (eta_minutes: number | null) => Promise<void>;
   onMove: (direction: 'up' | 'down') => Promise<void>;
+  onLeave: () => Promise<void>;
 }) {
   const next = QUEUE_STATUS_NEXT[entry.status];
   return (
-    <li className={`rounded-md border px-2.5 py-2 ${
+    <li className={`rounded-md border px-2 py-1.5 ${
       isMe
         ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-950/30'
         : 'border-sky-200 dark:border-sky-800 bg-white/80 dark:bg-sky-950/30'
     }`}>
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs font-mono text-sky-600 w-5 shrink-0">{index}</span>
+      <div className="flex items-start gap-1.5">
+        <span className="text-[10px] font-mono text-sky-600 w-4 shrink-0 pt-0.5">{index}</span>
         <div className="flex-1 min-w-0">
-          <span className="font-semibold text-sm text-gray-900 dark:text-white">
-            {entry.first_name} {entry.last_name}
-          </span>
-          {isMe && <span className="ml-1.5 text-[10px] font-bold bg-yellow-400 text-black px-1.5 py-0.5 rounded">YOU</span>}
-          {entry.member_id && (
-            <span className="ml-2 font-mono text-[10px] text-gray-500">{entry.member_id.toUpperCase()}</span>
+          <div className="flex items-baseline gap-1 flex-wrap">
+            <span className="font-semibold text-xs text-gray-900 dark:text-white leading-tight">
+              {entry.first_name} {entry.last_name}
+            </span>
+            {isMe && <span className="text-[9px] font-bold bg-yellow-400 text-black px-1 py-0.5 rounded">YOU</span>}
+          </div>
+          {cookieLabel && (
+            <div className="text-[10px] font-bold text-sky-700 dark:text-sky-300">{cookieLabel}</div>
           )}
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            <span className="text-xs font-bold font-mono text-gray-900 dark:text-white">
+              {entry.eta_minutes != null ? `~${formatEta(entry.eta_minutes)}` : '—'}
+            </span>
+            <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${QUEUE_STATUS_STYLE[entry.status]}`}>
+              {QUEUE_STATUS_LABEL[entry.status]}
+            </span>
+          </div>
         </div>
-        <span className="text-sm font-bold font-mono text-gray-900 dark:text-white shrink-0 min-w-[3.5rem] text-right">
-          {entry.eta_minutes != null ? `~${formatEta(entry.eta_minutes)}` : '—'}
-        </span>
-        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${QUEUE_STATUS_STYLE[entry.status]}`}>
-          {QUEUE_STATUS_LABEL[entry.status]}
-        </span>
-        <div className="flex items-center gap-0.5 shrink-0">
+        <div className="flex flex-col gap-0.5 shrink-0">
           {entry.eta_minutes == null && (
             <>
               <button
                 type="button"
                 disabled={busy || !canMoveUp}
                 onClick={() => onMove('up')}
-                className="text-xs px-1.5 py-0.5 rounded text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-30"
+                className="text-[10px] px-1 rounded text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-30"
                 title="Move up"
               >
                 ↑
@@ -1932,46 +1946,58 @@ function BuyerQueueRow({
                 type="button"
                 disabled={busy || !canMoveDown}
                 onClick={() => onMove('down')}
-                className="text-xs px-1.5 py-0.5 rounded text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-30"
+                className="text-[10px] px-1 rounded text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-30"
                 title="Move down"
               >
                 ↓
               </button>
             </>
           )}
-          {next && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onStatus(next)}
-              className="ml-1 text-[10px] font-bold px-2 py-0.5 rounded bg-sky-500 hover:bg-sky-400 text-white disabled:opacity-50"
-            >
-              → {QUEUE_STATUS_LABEL[next]}
-            </button>
-          )}
-          {entry.status !== 'skipped' && entry.status !== 'done' && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onStatus('skipped')}
-              className="text-[10px] px-1.5 py-0.5 text-gray-400 hover:text-red-500 disabled:opacity-50"
-              title="Skip"
-            >
-              skip
-            </button>
-          )}
         </div>
       </div>
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {next && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onStatus(next)}
+            className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-500 hover:bg-sky-400 text-white disabled:opacity-50"
+          >
+            → {QUEUE_STATUS_LABEL[next]}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onLeave()}
+          className="text-[9px] px-1.5 py-0.5 text-gray-400 hover:text-red-500 disabled:opacity-50"
+          title="Remove this cookie slot"
+        >
+          remove
+        </button>
+        {entry.status !== 'skipped' && entry.status !== 'done' && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onStatus('skipped')}
+            className="text-[9px] px-1.5 py-0.5 text-gray-400 hover:text-red-500 disabled:opacity-50"
+            title="Skip"
+          >
+            skip
+          </button>
+        )}
+      </div>
       {entry.status !== 'done' && entry.status !== 'skipped' && (
-        <div className="mt-1.5 ml-7 flex flex-wrap items-center gap-1">
-          <span className="text-[10px] uppercase tracking-wide text-sky-600/80 mr-1">ETA</span>
+        <div className="mt-1.5 grid grid-cols-3 gap-1">
           {ETA_PRESETS.map((p) => (
             <button
               key={p.minutes}
               type="button"
               disabled={busy}
               onClick={() => onEta(p.minutes)}
-              className={`text-[10px] font-bold px-1.5 py-0.5 rounded border transition-colors disabled:opacity-50 ${
+              className={`text-[9px] font-bold px-1 py-0.5 rounded border transition-colors disabled:opacity-50 ${
+                p.span === 3 ? 'col-span-3' : ''
+              } ${
                 entry.eta_minutes === p.minutes
                   ? 'bg-sky-500 text-white border-sky-400'
                   : 'bg-white dark:bg-sky-950/50 text-sky-800 dark:text-sky-200 border-sky-200 dark:border-sky-700 hover:border-sky-400'
@@ -1985,9 +2011,9 @@ function BuyerQueueRow({
               type="button"
               disabled={busy}
               onClick={() => onEta(null)}
-              className="text-[10px] px-1.5 py-0.5 text-gray-400 hover:text-red-500 disabled:opacity-50"
+              className="text-[9px] px-1 py-0.5 text-gray-400 hover:text-red-500 disabled:opacity-50 col-span-3 text-left"
             >
-              clear
+              clear ETA
             </button>
           )}
         </div>

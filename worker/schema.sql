@@ -104,9 +104,8 @@ CREATE TABLE IF NOT EXISTS purchase_queue (
   -- Minutes remaining from Queue-It screen; null = not reported yet. Sort key for prep order.
   eta_minutes INTEGER,
   joined_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(event_id, participant_id),
-  UNIQUE(event_id, clerk_user_id)
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  -- Multiple rows per clerk_user_id allowed (one per Queue-It cookie / browser session).
 );
 
 -- Index for fast live board queries
@@ -114,3 +113,4 @@ CREATE INDEX IF NOT EXISTS idx_participants_event_sort ON participants(event_id,
 CREATE INDEX IF NOT EXISTS idx_coordinators_event ON coordinators(event_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinators_event_name ON coordinators(event_id, name);
 CREATE INDEX IF NOT EXISTS idx_purchase_queue_event_pos ON purchase_queue(event_id, position);
+CREATE INDEX IF NOT EXISTS idx_purchase_queue_event_clerk ON purchase_queue(event_id, clerk_user_id);

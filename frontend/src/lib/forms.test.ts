@@ -33,6 +33,7 @@ function emptyParticipant(overrides: Partial<Participant> = {}): Participant {
     group_id: 1,
     group_name: 'Tony',
     group_color: '#3b82f6',
+    group_owner_clerk_user_id: null,
     claim_active: false,
     purchase_total: 0,
     gaps: [],

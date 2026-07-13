@@ -1,5 +1,7 @@
--- Queue-It buyer line for purchase day: order of people entering Comic-Con's virtual queue.
-CREATE TABLE IF NOT EXISTS purchase_queue (
+-- Allow multiple Queue-It cookies per buyer (one person, multiple browser sessions).
+-- SQLite cannot DROP UNIQUE constraints in place — rebuild the table.
+
+CREATE TABLE purchase_queue_new (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   participant_id INTEGER NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
@@ -7,12 +9,20 @@ CREATE TABLE IF NOT EXISTS purchase_queue (
   position INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'waiting'
     CHECK(status IN ('waiting', 'on_deck', 'in_queueit', 'buying', 'done', 'skipped')),
-  -- Minutes remaining from Queue-It screen; null = not reported yet. Sort key for prep order.
   eta_minutes INTEGER,
   joined_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  -- Multiple rows per clerk_user_id allowed (one per Queue-It cookie / browser session).
 );
+
+INSERT INTO purchase_queue_new (
+  id, event_id, participant_id, clerk_user_id, position, status, eta_minutes, joined_at, updated_at
+)
+SELECT
+  id, event_id, participant_id, clerk_user_id, position, status, eta_minutes, joined_at, updated_at
+FROM purchase_queue;
+
+DROP TABLE purchase_queue;
+ALTER TABLE purchase_queue_new RENAME TO purchase_queue;
 
 CREATE INDEX IF NOT EXISTS idx_purchase_queue_event_pos ON purchase_queue(event_id, position);
 CREATE INDEX IF NOT EXISTS idx_purchase_queue_event_clerk ON purchase_queue(event_id, clerk_user_id);
