@@ -11,7 +11,7 @@ type InviteInfo = {
   year: Pick<Year, 'id' | 'name' | 'con_year'>;
 };
 
-const inputCls = 'w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500';
+const inputCls = 'w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500';
 const labelCls = 'block text-xs text-gray-400 mb-1';
 
 export default function JoinPage() {

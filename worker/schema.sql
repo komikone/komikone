@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS participants (
   who_purchased TEXT NOT NULL DEFAULT '',
   -- Payment
   paid INTEGER NOT NULL DEFAULT 0,
+  -- Auth linkage (nullable — family members may have no account)
+  clerk_user_id TEXT,
+  registered_by_clerk_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -109,6 +109,54 @@ function priorityScore(p: Participant, me: Participant | null, identityId: numbe
   return groupBonus + p.gaps.length * 100 + dayScore;
 }
 
+const SIM_STORAGE_PREFIX = 'komikone_sim_';
+
+function simStorageKey(eventId: string | undefined) {
+  return `${SIM_STORAGE_PREFIX}${eventId ?? 'global'}`;
+}
+
+/** Self, family you registered, or group you own. No admin bypass on the live board. */
+function canEditIdentityRow(
+  p: Participant,
+  me: Participant | null,
+  identityId: number | null,
+  myClerkId: string | null | undefined,
+): boolean {
+  if (identityId != null && p.id === identityId) return true;
+  const clerkId = myClerkId ?? me?.clerk_user_id ?? null;
+  if (!clerkId) return false;
+  if (p.clerk_user_id === clerkId) return true;
+  if (p.registered_by_clerk_user_id === clerkId) return true;
+  if (p.group_id && p.group_owner_clerk_user_id === clerkId) return true;
+  return false;
+}
+
+/** Claimed by you — required for purchase day toggles; no admin bypass. */
+function hasClaimByMe(p: Participant, myDisplayName: string): boolean {
+  if (!p.claim_active) return false;
+  if (!myDisplayName.trim()) return false;
+  return p.purchasing_claimed_by.trim().toLowerCase() === myDisplayName.trim().toLowerCase();
+}
+
+/** Lower tier = higher on the board. During purchasing, your active claims float below self/group. */
+function rowSortTier(
+  p: Participant,
+  me: Participant | null,
+  identityId: number | null,
+  myDisplayName: string,
+  purchaseMode: boolean,
+): number {
+  if (identityId != null && p.id === identityId) return 0;
+  if (me?.group_id != null && p.group_id === me.group_id) return 1;
+  if (purchaseMode && hasClaimByMe(p, myDisplayName) && !p.all_purchased) return 2;
+  return 3;
+}
+
+function claimSortKey(p: Participant): number {
+  if (!p.purchasing_claimed_at) return Number.MAX_SAFE_INTEGER;
+  return new Date(p.purchasing_claimed_at).getTime();
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function LiveBoard() {
@@ -128,7 +176,21 @@ export default function LiveBoard() {
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editParticipant, setEditParticipant] = useState<Participant | null>(null);
   const [flash, setFlash] = useState<Record<number, boolean>>({});
+  const [simulation, setSimulation] = useState(() => {
+    try { return localStorage.getItem(simStorageKey(eventId)) === '1'; } catch { return false; }
+  });
+  /** null = still checking; string = block reason before board access */
+  const [accessBlock, setAccessBlock] = useState<'member_id' | 'return_eligible' | null | undefined>(undefined);
+  const [openLiveEventId, setOpenLiveEventId] = useState<number | null>(null);
   const prevIds = useRef<Set<number>>(new Set());
+
+  const isPlatformAdmin = user?.publicMetadata?.role === 'admin';
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(simStorageKey(eventId), simulation ? '1' : '0');
+    } catch { /* ignore */ }
+  }, [simulation, eventId]);
 
   // Column order
   const [movableCols, setMovableCols] = useState<ColKey[]>(() => {
@@ -240,23 +302,72 @@ export default function LiveBoard() {
     return () => clearInterval(interval);
   }, [eventId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Resolve Clerk identity → participant link
+  // Resolve Clerk identity → participant link, and gate Member ID / return eligibility
   useEffect(() => {
     if (!eventId || !isSignedIn) return;
+    let cancelled = false;
+    setAccessBlock(undefined);
+    setOpenLiveEventId(null);
+
     getToken({ template: 'komikone' }).then(async (clerkToken) => {
-      if (!clerkToken) return;
+      if (!clerkToken || cancelled) return;
       try {
-        const res = await api.participants.getMyIdentity(Number(eventId), clerkToken);
+        const [res, yearList, eventDetail, allEvents] = await Promise.all([
+          api.participants.getMyIdentity(Number(eventId), clerkToken),
+          api.years.list(clerkToken).catch(() => [] as Awaited<ReturnType<typeof api.years.list>>),
+          api.events.get(Number(eventId), clerkToken).catch(() => null),
+          api.events.list().catch(() => [] as Awaited<ReturnType<typeof api.events.list>>),
+        ]);
+
+        if (cancelled) return;
+
+        const conYear = eventDetail?.year;
+        const yearObj = conYear != null ? yearList.find((y) => y.con_year === conYear) : undefined;
+        let yearMemberId = '';
+        let returnEligible = false;
+        if (yearObj) {
+          const memberRes = await api.years.me(yearObj.id, clerkToken).catch(() => null);
+          yearMemberId = memberRes?.member.member_id?.trim() ?? '';
+          returnEligible = !!memberRes?.member.return_eligible;
+        }
+
+        const linkedMemberId = res.linked && res.participant
+          ? (res.participant.member_id?.trim() ?? '')
+          : '';
+        if (res.linked && res.participant) {
+          returnEligible = returnEligible || !!res.participant.return_eligible;
+        }
+
+        const hasMemberId = !!(yearMemberId || linkedMemberId);
+        if (!hasMemberId) {
+          setAccessBlock('member_id');
+          return;
+        }
+
+        // Return Reg board is only for return-eligible members
+        if (eventDetail?.reg_type === 'return' && !returnEligible && !isPlatformAdmin) {
+          const openEvt = allEvents.find(
+            (e) => e.year === conYear && e.reg_type === 'open',
+          );
+          setOpenLiveEventId(openEvt?.id ?? null);
+          setAccessBlock('return_eligible');
+          return;
+        }
+
+        setAccessBlock(null);
+
         if (res.linked && res.participant) {
           setIdentityId(res.participant.id);
         } else {
           setShowLinkModal(true);
         }
       } catch {
-        // silently degrade — user can still observe the board
+        if (!cancelled) setAccessBlock(null);
       }
     });
-  }, [eventId, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return () => { cancelled = true; };
+  }, [eventId, isSignedIn, isPlatformAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Actions ────────────────────────────────────────────────────────────────
 
@@ -266,7 +377,10 @@ export default function LiveBoard() {
     try {
       const clerkToken = await getToken({ template: 'komikone' });
       if (!clerkToken) return;
-      await api.participants.claim(Number(eventId), p.id, clerkToken, `${me.first_name} ${me.last_name}`);
+      await api.participants.claim(
+        Number(eventId), p.id, clerkToken, `${me.first_name} ${me.last_name}`,
+        { simulation },
+      );
       await fetchAll();
     } catch (e) { alert(e instanceof Error ? e.message : 'Failed'); }
   };
@@ -283,6 +397,10 @@ export default function LiveBoard() {
   const handlePurchaseToggle = async (p: Participant, day: DayKey, checked: boolean) => {
     const me = participants.find((x) => x.id === identityId);
     const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
+    if (!hasClaimByMe(p, myDisplayName)) {
+      alert('Claim this person first before marking purchase days');
+      return;
+    }
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     await api.participants.updatePurchased(Number(eventId), p.id, clerkToken, {
@@ -295,6 +413,15 @@ export default function LiveBoard() {
   };
 
   const handleRequestedToggle = async (p: Participant, day: DayKey, checked: boolean) => {
+    if (simulation || event?.status === 'purchasing') {
+      alert('Requested days are locked during purchasing');
+      return;
+    }
+    const meRow = participants.find((x) => x.id === identityId) ?? null;
+    if (!canEditIdentityRow(p, meRow, identityId, user?.id)) {
+      alert('You can only change requested days for yourself or your group');
+      return;
+    }
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     await api.participants.updateRequested(Number(eventId), p.id, clerkToken, {
@@ -306,6 +433,13 @@ export default function LiveBoard() {
   };
 
   const handleWhoChange = async (p: Participant, who: string) => {
+    const me = participants.find((x) => x.id === identityId);
+    const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
+    if (!hasClaimByMe(p, myDisplayName)) {
+      alert('Claim this person first before editing who bought');
+      setEditingRow(null);
+      return;
+    }
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     await api.participants.updatePurchased(Number(eventId), p.id, clerkToken, {
@@ -391,6 +525,9 @@ export default function LiveBoard() {
 
   // ─── Derived data ────────────────────────────────────────────────────────────
 
+  const boardStatus = simulation ? 'purchasing' : (event?.status ?? '');
+  const showPurchaseChrome = boardStatus === 'purchasing';
+
   const getColWidth = (col: ColKey): number => colWidths[col] ?? DEFAULT_WIDTHS[col];
 
   const orderedParticipants = customRowOrder
@@ -406,24 +543,40 @@ export default function LiveBoard() {
     return re.test(p.first_name) || re.test(p.last_name) || re.test(p.member_id) || re.test(p.purchasing_coordinator);
   });
 
-  const displayRows = sortCol
-    ? [...filtered].sort((a, b) => {
-        const ai = participants.indexOf(a);
-        const bi = participants.indexOf(b);
-        const av = sortValue(a, sortCol, ai);
-        const bv = sortValue(b, sortCol, bi);
-        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-        return sortDir === 'asc' ? cmp : -cmp;
-      })
-    : filtered;
+  const me = participants.find((p) => p.id === identityId) ?? null;
+  const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
+  const myClerkId = user?.id ?? me?.clerk_user_id ?? null;
+
+  // Default: you + group pinned; during purchasing your active claims rise next (claim order).
+  // Manual drag order applies outside purchase/simulation only — purchase toggles don't reshuffle.
+  const displayRows = customRowOrder && !showPurchaseChrome
+    ? filtered
+    : [...filtered].sort((a, b) => {
+        const ta = rowSortTier(a, me, identityId, myDisplayName, showPurchaseChrome);
+        const tb = rowSortTier(b, me, identityId, myDisplayName, showPurchaseChrome);
+        if (ta !== tb) return ta - tb;
+
+        if (ta === 2) {
+          const claimCmp = claimSortKey(a) - claimSortKey(b);
+          if (claimCmp !== 0) return claimCmp;
+        }
+
+        if (sortCol) {
+          const ai = participants.indexOf(a);
+          const bi = participants.indexOf(b);
+          const av = sortValue(a, sortCol, ai);
+          const bv = sortValue(b, sortCol, bi);
+          const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+          return sortDir === 'asc' ? cmp : -cmp;
+        }
+
+        return a.sort_order - b.sort_order || a.id - b.id;
+      });
 
   const purchased  = participants.filter((p) => p.all_purchased).length;
   const inProgress = participants.filter((p) => !p.all_purchased && p.claim_active).length;
   const remaining  = participants.filter((p) => !p.all_purchased && !p.claim_active).length;
   const withGaps   = participants.filter((p) => p.gaps.length > 0 && p.any_purchased).length;
-
-  const me = participants.find((p) => p.id === identityId) ?? null;
-  const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
 
   const [showNextUp, setShowNextUp] = useState(false);
 
@@ -451,6 +604,12 @@ export default function LiveBoard() {
 
   const handleEditSave = async (data: Partial<Participant>) => {
     if (!editParticipant) return;
+    const meRow = participants.find((x) => x.id === identityId) ?? null;
+    if (!canEditIdentityRow(editParticipant, meRow, identityId, user?.id)) {
+      alert('You can only edit your own profile or your group members');
+      setEditParticipant(null);
+      return;
+    }
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     await api.participants.updateProfile(Number(eventId), editParticipant.id, clerkToken, data)
@@ -476,23 +635,105 @@ export default function LiveBoard() {
     );
   }
 
+  if (accessBlock === undefined) {
+    return (
+      <div className="min-h-screen bg-amber-50 dark:bg-gray-950 flex items-center justify-center">
+        <div className="text-gray-400">Loading...</div>
+      </div>
+    );
+  }
+
+  if (accessBlock === 'member_id') {
+    return (
+      <div className="min-h-screen bg-amber-50 dark:bg-gray-950 flex items-center justify-center px-6">
+        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-8 max-w-md text-center shadow-xl">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Member ID required</h2>
+          <p className="text-gray-500 text-sm mb-6">
+            Set your Comic-Con Member ID on your profile before joining the Live Board.
+            Coordinators use it to match badges during purchase day.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Link
+              to="/dashboard/profile"
+              className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-sm px-5 py-2.5 rounded-lg transition-colors"
+            >
+              Set Member ID →
+            </Link>
+            <Link
+              to="/dashboard"
+              className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 text-sm px-3 py-2.5"
+            >
+              Back to dashboard
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (accessBlock === 'return_eligible') {
+    return (
+      <div className="min-h-screen bg-amber-50 dark:bg-gray-950 flex items-center justify-center px-6">
+        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-8 max-w-md text-center shadow-xl">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Return Reg only</h2>
+          <p className="text-gray-500 text-sm mb-6">
+            This Live Board is for return-eligible members. You&apos;re set up for Open registration instead.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            {openLiveEventId != null && (
+              <Link
+                to={`/live/${openLiveEventId}`}
+                className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-sm px-5 py-2.5 rounded-lg transition-colors"
+              >
+                Go to Open Live Board →
+              </Link>
+            )}
+            <Link
+              to="/dashboard"
+              className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 text-sm px-3 py-2.5"
+            >
+              Back to dashboard
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-screen bg-amber-50 dark:bg-gray-950 text-gray-950 dark:text-white flex flex-col overflow-hidden">
+    <div className={`h-screen bg-amber-50 dark:bg-gray-950 text-gray-950 dark:text-white flex flex-col overflow-hidden ${simulation ? 'ring-4 ring-inset ring-fuchsia-500' : ''}`}>
 
       {/* ── Top bar ── */}
-      <div className="bg-zinc-950 dark:bg-zinc-900 border-b-[5px] border-yellow-400 dark:border-yellow-500 px-4 py-2.5 flex items-center gap-3 shrink-0">
+      <div className={`bg-zinc-950 dark:bg-zinc-900 border-b-[5px] px-4 py-2.5 flex items-center gap-3 shrink-0 ${
+        simulation ? 'border-fuchsia-500' : 'border-yellow-400 dark:border-yellow-500'
+      }`}>
         <Link to="/" className="font-bangers text-yellow-400 text-xl tracking-wide shrink-0 hover:text-yellow-300 transition-colors">komikone</Link>
         <span className="text-zinc-600 dark:text-zinc-500 shrink-0 text-base">·</span>
         <div className="flex-1 min-w-0">
           <div className="font-bangers text-white text-lg tracking-wide leading-tight">{event?.name}</div>
-          <div className="text-yellow-600 dark:text-yellow-500 text-[10px] uppercase tracking-widest leading-tight">
+          <div className={`text-[10px] uppercase tracking-widest leading-tight ${
+            simulation ? 'text-fuchsia-400' : 'text-yellow-600 dark:text-yellow-500'
+          }`}>
             {event?.reg_type === 'return' ? 'Return Reg' : 'Open Reg'} · Live Board
+            {simulation && ' · Simulation'}
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           <span className="text-zinc-500 dark:text-zinc-400 text-xs hidden sm:block">
             {lastUpdated ? lastUpdated.toLocaleTimeString() : '…'}
           </span>
+          <button
+            type="button"
+            onClick={() => setSimulation((v) => !v)}
+            className={`text-xs font-bold px-2.5 py-0.5 rounded border transition-colors ${
+              simulation
+                ? 'bg-fuchsia-500 text-white border-fuchsia-300 shadow-[0_0_12px_rgba(217,70,239,0.55)]'
+                : 'text-zinc-400 dark:text-zinc-300 border-zinc-700 dark:border-zinc-600 hover:text-fuchsia-300 hover:border-fuchsia-500'
+            }`}
+            title={simulation ? 'Exit simulation mode' : 'Practice claim & purchase without waiting for purchase day'}
+          >
+            {simulation ? 'Sim ON' : 'Simulate'}
+          </button>
           <button
             type="button"
             onClick={toggle}
@@ -505,28 +746,44 @@ export default function LiveBoard() {
         </div>
       </div>
 
+      {simulation && (
+        <div className="bg-fuchsia-600 text-white px-4 py-2 shrink-0 flex items-center gap-3 border-b-2 border-fuchsia-300">
+          <span className="text-xs font-black uppercase tracking-[0.2em]">Simulation mode</span>
+          <span className="text-xs text-fuchsia-100">
+            Practice the full claim → purchase flow. Changes still write to this event&apos;s roster.
+          </span>
+          <button
+            type="button"
+            onClick={() => setSimulation(false)}
+            className="ml-auto text-xs font-bold underline hover:no-underline shrink-0"
+          >
+            Exit
+          </button>
+        </div>
+      )}
+
       {/* ── Stats bar ── */}
       <div className="bg-black dark:bg-zinc-950 border-b-2 border-zinc-800 dark:border-yellow-950 px-4 py-1 flex items-center gap-5 shrink-0">
         <span className="text-green-400 dark:text-green-300 text-xs font-mono">{purchased} <span className="text-zinc-600 dark:text-zinc-500">done</span></span>
         <span className="text-yellow-400 dark:text-yellow-300 text-xs font-mono">{inProgress} <span className="text-zinc-600 dark:text-zinc-500">claiming</span></span>
         <span className="text-gray-700 dark:text-gray-600 text-xs font-mono">{remaining} <span className="text-zinc-600 dark:text-zinc-500">left</span></span>
         {withGaps > 0 && <span className="text-red-400 dark:text-red-700 text-xs font-mono font-bold">{withGaps} gaps</span>}
-        {event?.status === 'purchasing' && priorityQueue.length > 0 && (
+        {showPurchaseChrome && priorityQueue.length > 0 && (
           <button
             onClick={() => setShowNextUp((v) => !v)}
-            className={`ml-auto text-xs font-bold px-3 py-1 rounded border-2 transition-colors ${
+            className={`ml-auto text-sm font-black uppercase tracking-wide px-4 py-1.5 rounded-md border-2 transition-colors ${
               showNextUp
-                ? 'bg-yellow-400 text-black border-yellow-300'
-                : 'bg-transparent text-yellow-400 border-yellow-600 hover:bg-yellow-900/40'
+                ? 'bg-yellow-300 text-black border-yellow-100 shadow-lg shadow-yellow-400/40'
+                : 'whos-next-flash bg-yellow-400 text-black border-yellow-200 hover:bg-yellow-300'
             }`}
           >
-            ⚡ Who's next?
+            ⚡ Who&apos;s next?
           </button>
         )}
       </div>
 
-      {/* ── Who's Next panel (purchasing phase only) ── */}
-      {event?.status === 'purchasing' && showNextUp && priorityQueue.length > 0 && (
+      {/* ── Who's Next panel (purchasing phase or simulation) ── */}
+      {showPurchaseChrome && showNextUp && priorityQueue.length > 0 && (
         <NextUpPanel
           queue={priorityQueue}
           me={me}
@@ -536,12 +793,20 @@ export default function LiveBoard() {
         />
       )}
 
-      {/* ── Registration phase tip banner ── */}
-      {event?.status === 'registration' && (
+      {/* ── Pre-purchase tip banners (hidden while simulating) ── */}
+      {!simulation && event?.status === 'setup' && (
+        <div className="bg-amber-50 dark:bg-yellow-950/30 border-b-2 border-amber-300 dark:border-yellow-800 px-4 py-2 shrink-0">
+          <span className="text-amber-800 dark:text-yellow-300 text-xs font-bold uppercase tracking-wider">Preview · </span>
+          <span className="text-amber-700 dark:text-yellow-400/90 text-xs">
+            Look around and get familiar with the board. Claiming opens when purchase day starts — or turn on Simulate to practice.
+          </span>
+        </div>
+      )}
+      {!simulation && event?.status === 'registration' && (
         <div className="bg-blue-50 dark:bg-blue-950/30 border-b-2 border-blue-300 dark:border-blue-800 px-4 py-2 shrink-0">
           <span className="text-blue-700 dark:text-blue-300 text-xs font-bold uppercase tracking-wider">Registration is open · </span>
           <span className="text-blue-600 dark:text-blue-400 text-xs">
-            Purchase day hasn't started. While you wait: verify your requested days, confirm your Member ID, and check your badge type are all correct.
+            Purchase day hasn&apos;t started. Verify your requested days, Member ID, and badge type — or turn on Simulate to practice claiming.
           </span>
         </div>
       )}
@@ -703,20 +968,30 @@ export default function LiveBoard() {
               const isFlashing = flash[p.id];
               const isRowDragTarget = rowDragTarget === p.id;
               const evenRow = dispIdx % 2 === 0;
+              const isSelf = identityId != null && p.id === identityId;
+              const isMyGroup = !isSelf && me?.group_id != null && p.group_id === me.group_id;
 
               const frozenBg = isFlashing
                 ? 'bg-blue-100 dark:bg-blue-900/30'
-                : evenRow
-                  ? 'bg-white dark:bg-gray-900'
-                  : 'bg-gray-50 dark:bg-gray-800/60';
+                : isSelf
+                  ? 'bg-yellow-50 dark:bg-yellow-950/40'
+                  : isMyGroup
+                    ? 'bg-amber-50/80 dark:bg-amber-950/25'
+                    : evenRow
+                      ? 'bg-white dark:bg-gray-900'
+                      : 'bg-gray-50 dark:bg-gray-800/60';
 
               const rowBg = isFlashing
                 ? 'bg-blue-100 dark:bg-blue-900/30'
                 : isRowDragTarget
                   ? 'bg-blue-100 dark:bg-blue-900/20'
-                  : evenRow
-                    ? 'bg-white dark:bg-gray-900'
-                    : 'bg-gray-50 dark:bg-gray-800/60';
+                  : isSelf
+                    ? 'bg-yellow-50 dark:bg-yellow-950/40'
+                    : isMyGroup
+                      ? 'bg-amber-50/80 dark:bg-amber-950/25'
+                      : evenRow
+                        ? 'bg-white dark:bg-gray-900'
+                        : 'bg-gray-50 dark:bg-gray-800/60';
 
               return (
                 <tr
@@ -759,10 +1034,13 @@ export default function LiveBoard() {
                             col={col}
                             p={p}
                             status={status}
-                            eventStatus={event?.status ?? ''}
+                            eventStatus={boardStatus}
                             naturalIdx={naturalIdx}
                             editingRow={editingRow}
                             setEditingRow={setEditingRow}
+                            canEditRequested={!showPurchaseChrome && canEditIdentityRow(p, me, identityId, myClerkId)}
+                            canEditProfile={canEditIdentityRow(p, me, identityId, myClerkId)}
+                            canTogglePurchase={hasClaimByMe(p, myDisplayName)}
                             onClaim={handleClaim}
                             onUnclaim={handleUnclaim}
                             onRequestedToggle={handleRequestedToggle}
@@ -831,7 +1109,7 @@ function CopyCell({ value, children }: { value: string; children?: React.ReactNo
 }
 
 function CellContent({
-  col, p, status, eventStatus, editingRow, setEditingRow,
+  col, p, status, eventStatus, editingRow, setEditingRow, canEditRequested, canEditProfile, canTogglePurchase,
   onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
 }: {
   col: ColKey;
@@ -841,6 +1119,9 @@ function CellContent({
   naturalIdx: number;
   editingRow: number | null;
   setEditingRow: (id: number | null) => void;
+  canEditRequested: boolean;
+  canEditProfile: boolean;
+  canTogglePurchase: boolean;
   onClaim: (p: Participant) => void;
   onUnclaim: (p: Participant) => void;
   onRequestedToggle: (p: Participant, day: DayKey, checked: boolean) => void;
@@ -865,6 +1146,7 @@ function CellContent({
       return <span className="font-semibold">{p.first_name}</span>;
 
     case 'actions':
+      if (!canEditProfile) return null;
       return (
         <div className="flex items-center justify-center">
           <button
@@ -920,12 +1202,17 @@ function CellContent({
             const bought = p[`pur_${day}` as keyof Participant] as boolean;
             return (
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                {bought ? (
-                  <div title="Purchased — locked" className={`w-4 h-4 rounded-sm border-2 cursor-not-allowed opacity-60 ${
-                    req
-                      ? 'bg-gray-400 border-gray-500 dark:bg-gray-500 dark:border-gray-400'
-                      : 'border-gray-200 dark:border-gray-300'
-                  }`} />
+                {bought || !canEditRequested ? (
+                  <div
+                    title={bought ? 'Purchased — locked' : canEditRequested ? '' : 'You can only change requested days for yourself or your group'}
+                    className={`w-4 h-4 rounded-sm border-2 ${
+                      bought ? 'cursor-not-allowed opacity-60' : 'cursor-default'
+                    } ${
+                      req
+                        ? 'bg-gray-400 border-gray-500 dark:bg-gray-500 dark:border-gray-400'
+                        : 'border-gray-200 dark:border-gray-300'
+                    }`}
+                  />
                 ) : (
                   <button
                     onClick={() => onRequestedToggle(p, day, !req)}
@@ -951,7 +1238,9 @@ function CellContent({
             const bought = p[`pur_${day}` as keyof Participant] as boolean;
             return (
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                {req ? (
+                {!req ? (
+                  <div className="w-4 h-4 rounded-sm border border-gray-200 dark:border-gray-300" />
+                ) : canTogglePurchase ? (
                   <button
                     onClick={() => onPurchaseToggle(p, day, !bought)}
                     className={`w-4 h-4 rounded-sm border-2 transition-colors ${
@@ -961,7 +1250,14 @@ function CellContent({
                     }`}
                   />
                 ) : (
-                  <div className="w-4 h-4 rounded-sm border border-gray-200 dark:border-gray-300" />
+                  <div
+                    title={p.claim_active ? 'Only the claimer can mark purchases' : 'Claim this person first to mark purchases'}
+                    className={`w-4 h-4 rounded-sm border-2 cursor-not-allowed ${
+                      bought
+                        ? 'bg-green-500/70 border-green-600/70 dark:bg-green-500/60 dark:border-green-400/60'
+                        : 'border-gray-200 dark:border-gray-300 opacity-70'
+                    }`}
+                  />
                 )}
                 <span className="text-[7px] text-gray-400 dark:text-gray-600 leading-none">{DAY_SHORT[day]}</span>
               </div>
@@ -1025,19 +1321,23 @@ function CellContent({
       );
 
     case 'who':
-      return editingRow === p.id ? (
+      return editingRow === p.id && canTogglePurchase ? (
         <WhoInput
           initial={p.who_purchased}
           onSave={(val) => onWhoChange(p, val)}
           onCancel={() => setEditingRow(null)}
         />
-      ) : (
+      ) : canTogglePurchase ? (
         <button
           onClick={() => setEditingRow(p.id)}
           className="text-xs text-left text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-900"
         >
           {p.who_purchased || <span className="italic text-gray-400 dark:text-gray-600">tap to set</span>}
         </button>
+      ) : (
+        <span className="text-xs text-gray-500 dark:text-gray-500">
+          {p.who_purchased || '—'}
+        </span>
       );
 
     default:
@@ -1111,8 +1411,15 @@ function LinkIdentityModal({
   const [search, setSearch] = useState(userName);
   const [linking, setLinking] = useState<number | null>(null);
   const filtered = participants.filter((p) => {
-    const q = search.toLowerCase();
-    return !q || p.first_name.toLowerCase().includes(q) || p.last_name.toLowerCase().includes(q);
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    const full = `${p.first_name} ${p.last_name}`.toLowerCase();
+    const parts = q.split(/\s+/).filter(Boolean);
+    return full.includes(q)
+      || p.first_name.toLowerCase().includes(q)
+      || p.last_name.toLowerCase().includes(q)
+      || p.member_id.toLowerCase().includes(q)
+      || (parts.length > 1 && parts.every((part) => full.includes(part)));
   });
 
   const isReLinking = currentIdentityId !== null;

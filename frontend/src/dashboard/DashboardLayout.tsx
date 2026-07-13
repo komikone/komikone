@@ -11,7 +11,11 @@ const NAV = [
 ];
 
 function DashboardShell() {
-  const { loading, years, selectedYearId, setSelectedYearId, yearObj, error } = useDashboard();
+  const {
+    loading, years, selectedYearId, setSelectedYearId, yearObj, error, activeEvent, member,
+  } = useDashboard();
+
+  const canUseLiveBoard = !!(member?.member_id?.trim());
 
   if (loading) {
     return (
@@ -51,6 +55,26 @@ function DashboardShell() {
                 {label}
               </NavLink>
             ))}
+            {activeEvent && canUseLiveBoard && (
+              <Link
+                to={`/live/${activeEvent.id}`}
+                className="block px-3 py-2.5 rounded-lg text-sm transition-colors text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800/60"
+              >
+                Live Board
+              </Link>
+            )}
+            {activeEvent && !canUseLiveBoard && member && (
+              <Link
+                to="/dashboard/profile"
+                className="block px-3 py-2.5 rounded-lg text-sm transition-colors text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                title="Set your Member ID to open Live Board"
+              >
+                Live Board
+                <span className="block text-[10px] font-normal text-amber-500/80 normal-case tracking-normal">
+                  Set Member ID first
+                </span>
+              </Link>
+            )}
           </nav>
 
           <div className="px-4 py-4 border-t border-gray-200 dark:border-gray-800">

@@ -14,7 +14,6 @@ export default function Registration() {
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [alreadyRegistered, setAlreadyRegistered] = useState(false);
-  const [needsInvite, setNeedsInvite] = useState(false);
 
   const [form, setForm] = useState({
     first_name: '',
@@ -39,13 +38,20 @@ export default function Registration() {
         const ev = await api.events.get(Number(eventId), tok);
         setEvent(ev);
 
+        // Prefill from year membership or prior participant identity when available
         const yearList = await api.years.list(tok).catch(() => []);
         const yearObj = yearList.find((y) => y.con_year === ev.year);
         if (yearObj) {
           const memberRes = await api.years.me(yearObj.id, tok).catch(() => null);
-          if (!memberRes) {
-            setNeedsInvite(true);
-            return;
+          if (memberRes?.member) {
+            const m = memberRes.member;
+            setForm((f) => ({
+              ...f,
+              first_name: m.first_name || f.first_name,
+              last_name: m.last_name || f.last_name,
+              member_id: m.member_id || f.member_id,
+              badge_type: m.badge_type || f.badge_type,
+            }));
           }
         }
 
@@ -90,23 +96,7 @@ export default function Registration() {
     }
   };
 
-  if (needsInvite) {
-    return (
-      <AppPage title="Registration" backTo={{ to: '/', label: '← Home' }}>
-        <div className="flex-1 flex items-center justify-center px-6">
-        <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-8 max-w-sm text-center">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white dark:text-white mb-2">Invite required</h2>
-          <p className="text-gray-400 text-sm mb-6">
-            You need an invite link before you can select badge days. Check your email or request access from the homepage.
-          </p>
-          <Link to="/" className="text-blue-400 hover:text-blue-300 text-sm">← Back to home</Link>
-        </div>
-        </div>
-      </AppPage>
-    );
-  }
-
-  if (!isLoaded || (!event && !error && !needsInvite)) {
+  if (!isLoaded || (!event && !error)) {
     return (
       <AppPage title="Registration">
         <div className="flex-1 flex items-center justify-center">
@@ -172,7 +162,7 @@ export default function Registration() {
                 required
                 value={form.first_name}
                 onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))}
-                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
@@ -182,7 +172,7 @@ export default function Registration() {
                 required
                 value={form.last_name}
                 onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))}
-                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white focus:outline-none focus:border-blue-500"
               />
             </div>
           </div>
@@ -198,7 +188,7 @@ export default function Registration() {
               value={form.member_id}
               onChange={(e) => setForm((f) => ({ ...f, member_id: normalizeMemberIdInput(e.target.value) }))}
               placeholder="e.g. AB12CD34"
-              className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 font-mono uppercase tracking-wide"
+              className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 font-mono uppercase tracking-wide"
               autoCapitalize="characters"
               spellCheck={false}
             />

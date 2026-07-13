@@ -183,14 +183,14 @@ export default function DashboardInvitations() {
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="Name (for your reference)"
-            className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 dark:border-gray-700 rounded-lg px-3 py-2.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
           />
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email (optional)"
-            className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 dark:border-gray-700 rounded-lg px-3 py-2.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
           <button

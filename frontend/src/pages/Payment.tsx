@@ -137,7 +137,7 @@ export default function Payment() {
                 value={myCoordName}
                 onChange={(e) => setMyCoordName(e.target.value)}
                 placeholder="e.g. Tony"
-                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
@@ -148,7 +148,7 @@ export default function Payment() {
                 maxLength={4}
                 onChange={(e) => setCoordForm((f) => ({ ...f, phone_last4: e.target.value }))}
                 placeholder="1234"
-                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
@@ -158,7 +158,7 @@ export default function Payment() {
                 value={coordForm.venmo}
                 onChange={(e) => setCoordForm((f) => ({ ...f, venmo: e.target.value }))}
                 placeholder="@handle"
-                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
@@ -168,7 +168,7 @@ export default function Payment() {
                 value={coordForm.zelle}
                 onChange={(e) => setCoordForm((f) => ({ ...f, zelle: e.target.value }))}
                 placeholder="phone or email"
-                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
@@ -178,7 +178,7 @@ export default function Payment() {
                 value={coordForm.paypal}
                 onChange={(e) => setCoordForm((f) => ({ ...f, paypal: e.target.value }))}
                 placeholder="@handle"
-                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
               />
             </div>
           </div>

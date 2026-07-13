@@ -22,6 +22,7 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 export type EventSummary = {
   id: number;
   year: number;
+  year_id?: number | null;
   name: string;
   reg_type: 'return' | 'open';
   status: 'setup' | 'registration' | 'purchasing' | 'payment' | 'complete';
@@ -126,6 +127,7 @@ export type Participant = {
   group_id: number | null;
   group_name: string | null;
   group_color: string | null;
+  group_owner_clerk_user_id: string | null;
   clerk_user_id: string | null;
   registered_by_clerk_user_id: string | null;
   // Computed by server
@@ -205,8 +207,10 @@ export const api = {
   },
 
   participants: {
-    list: (eventId: number, clerkToken: string) =>
-      req<Participant[]>(`/api/events/${eventId}/participants`, { headers: authHeaders(clerkToken) }),
+    list: (eventId: number, clerkToken: string, opts?: { includeIneligible?: boolean }) => {
+      const qs = opts?.includeIneligible ? '?include_ineligible=1' : '';
+      return req<Participant[]>(`/api/events/${eventId}/participants${qs}`, { headers: authHeaders(clerkToken) });
+    },
     getMyIdentity: (eventId: number, clerkToken: string) =>
       req<{ linked: boolean; participant?: Participant }>(
         `/api/events/${eventId}/me`,
@@ -223,11 +227,11 @@ export const api = {
         headers: authHeaders(clerkToken),
         body: JSON.stringify(data),
       }),
-    claim: (eventId: number, pid: number, clerkToken: string, coordinator_name: string) =>
+    claim: (eventId: number, pid: number, clerkToken: string, coordinator_name: string, opts?: { simulation?: boolean }) =>
       req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/claim`, {
         method: 'POST',
         headers: authHeaders(clerkToken),
-        body: JSON.stringify({ coordinator_name }),
+        body: JSON.stringify({ coordinator_name, simulation: opts?.simulation === true }),
       }),
     unclaim: (eventId: number, pid: number, clerkToken: string) =>
       req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/unclaim`, {
@@ -321,6 +325,15 @@ export const api = {
   years: {
     list: (clerkToken: string) =>
       req<Year[]>('/api/years', { headers: authHeaders(clerkToken) }),
+    current: (clerkToken: string) =>
+      req<Year>('/api/years/current', { headers: authHeaders(clerkToken) }),
+    enroll: (yearId: number, clerkToken: string, data?: {
+      first_name?: string; last_name?: string; member_id?: string;
+      badge_type?: 'ADULT' | 'JUNIOR'; return_eligible?: boolean;
+    }) =>
+      req<{ ok: boolean; member: YearMember; created: boolean }>(`/api/years/${yearId}/enroll`, {
+        method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify(data ?? {}),
+      }),
     me: (yearId: number, clerkToken: string) =>
       req<{ member: YearMember }>(`/api/years/${yearId}/me`, { headers: authHeaders(clerkToken) }),
     updateMe: (yearId: number, clerkToken: string, data: {
@@ -466,6 +479,27 @@ export const api = {
         req<{ ok: boolean }>(`/api/admin/years/${yearId}`, {
           method: 'DELETE', headers: authHeaders(undefined, authToken),
         }),
+      dummies: {
+        count: (authToken: string, yearId: number) =>
+          req<{ participants: number; groups: number; event_ids: number[] }>(
+            `/api/admin/years/${yearId}/dummies`,
+            { headers: authHeaders(undefined, authToken) },
+          ),
+        seed: (authToken: string, yearId: number, data?: { count?: number; clear_existing?: boolean }) =>
+          req<{ created: number; groups_created: number; event_ids: number[] }>(
+            `/api/admin/years/${yearId}/dummies`,
+            {
+              method: 'POST',
+              headers: authHeaders(undefined, authToken),
+              body: JSON.stringify(data ?? {}),
+            },
+          ),
+        clear: (authToken: string, yearId: number) =>
+          req<{ participants_deleted: number; groups_deleted: number; event_ids: number[] }>(
+            `/api/admin/years/${yearId}/dummies`,
+            { method: 'DELETE', headers: authHeaders(undefined, authToken) },
+          ),
+      },
     },
     invites: {
       list: (authToken: string, yearId: number) =>

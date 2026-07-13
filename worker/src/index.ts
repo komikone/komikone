@@ -10,6 +10,7 @@ import {
   resolveSelfParticipant,
 } from './persistence';
 import { sendClerkInvitationEmail, revokeClerkInvitation } from './clerk';
+import { seedDummies, clearDummies, countDummies } from './seedDummies';
 
 type Bindings = {
   DB: D1Database;
@@ -113,6 +114,152 @@ async function getEvent(db: D1Database, id: number): Promise<Event | null> {
   return db.prepare('SELECT * FROM events WHERE id = ?').bind(id).first<Event>();
 }
 
+/** Self, group owner, registrar, or platform admin may edit requested days / profile. */
+async function canEditParticipantIdentity(
+  db: D1Database,
+  access: { isAdmin: boolean; userId: string },
+  eventId: number,
+  pid: number,
+): Promise<boolean> {
+  if (access.userId === 'admin') return true;
+
+  const p = await db.prepare(
+    `SELECT clerk_user_id, group_id, registered_by_clerk_user_id
+     FROM participants WHERE id = ? AND event_id = ?`
+  ).bind(pid, eventId).first<{
+    clerk_user_id: string | null;
+    group_id: number | null;
+    registered_by_clerk_user_id: string | null;
+  }>();
+  if (!p) return false;
+  if (p.clerk_user_id === access.userId) return true;
+  if (p.registered_by_clerk_user_id === access.userId) return true;
+  if (p.group_id) {
+    const g = await db.prepare(
+      'SELECT owner_clerk_user_id FROM groups WHERE id = ?'
+    ).bind(p.group_id).first<{ owner_clerk_user_id: string | null }>();
+    if (g?.owner_clerk_user_id === access.userId) return true;
+  }
+  return false;
+}
+
+/** Active claim by the authenticated user (admins must claim too). */
+async function canActOnClaimedParticipant(
+  db: D1Database,
+  access: { userId: string },
+  eventId: number,
+  pid: number,
+): Promise<boolean> {
+  const target = await db.prepare(
+    'SELECT purchasing_claimed_by, purchasing_claimed_at FROM participants WHERE id = ? AND event_id = ?'
+  ).bind(pid, eventId).first<{ purchasing_claimed_by: string; purchasing_claimed_at: string | null }>();
+  if (!target) return false;
+
+  const claimActive = !!target.purchasing_claimed_by && !isClaimExpired(target.purchasing_claimed_at);
+  if (!claimActive) return false;
+  if (access.userId === 'admin') return true;
+
+  const me = await db.prepare(
+    'SELECT first_name, last_name FROM participants WHERE event_id = ? AND clerk_user_id = ?'
+  ).bind(eventId, access.userId).first<{ first_name: string; last_name: string }>();
+  const myName = me ? `${me.first_name} ${me.last_name}`.trim() : '';
+  return !!myName && target.purchasing_claimed_by.trim().toLowerCase() === myName.toLowerCase();
+}
+
+/** Resolve (and self-heal) the years row for an event. Never leaves year_id null when a years row exists. */
+async function ensureEventYear(
+  db: D1Database,
+  event: Event,
+): Promise<{ yearId: number; conYear: number } | null> {
+  if (event.year_id) {
+    const row = await db.prepare('SELECT id, con_year FROM years WHERE id = ?')
+      .bind(event.year_id).first<{ id: number; con_year: number }>();
+    if (row) return { yearId: row.id, conYear: row.con_year };
+  }
+
+  let year = await db.prepare('SELECT id, con_year FROM years WHERE con_year = ?')
+    .bind(event.year).first<{ id: number; con_year: number }>();
+
+  if (!year) {
+    // Fall back to current (latest) year so registrants are never year-less
+    year = await db.prepare('SELECT id, con_year FROM years ORDER BY con_year DESC LIMIT 1')
+      .first<{ id: number; con_year: number }>();
+  }
+  if (!year) return null;
+
+  await db.prepare(
+    'UPDATE events SET year_id = ?, year = ?, updated_at = datetime(\'now\') WHERE id = ?'
+  ).bind(year.id, year.con_year, event.id).run();
+  event.year_id = year.id;
+  event.year = year.con_year;
+  return { yearId: year.id, conYear: year.con_year };
+}
+
+/** Ensure a signed-in registrant has a year_members row for the event's year. */
+async function ensureYearMemberForRegistrant(
+  db: D1Database,
+  yearId: number,
+  clerkUserId: string,
+  identity: {
+    first_name: string;
+    last_name: string;
+    member_id: string;
+    badge_type: 'ADULT' | 'JUNIOR';
+  },
+): Promise<YearMember> {
+  const existing = await db.prepare(
+    'SELECT * FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+  ).bind(yearId, clerkUserId).first<YearMember>();
+
+  if (existing) {
+    await db.prepare(`
+      UPDATE year_members SET
+        first_name = ?, last_name = ?, member_id = ?, badge_type = ?
+      WHERE id = ?
+    `).bind(
+      identity.first_name, identity.last_name, identity.member_id, identity.badge_type,
+      existing.id,
+    ).run();
+    return {
+      ...existing,
+      first_name: identity.first_name,
+      last_name: identity.last_name,
+      member_id: identity.member_id,
+      badge_type: identity.badge_type,
+    };
+  }
+
+  await db.prepare(`
+    INSERT INTO year_members (year_id, clerk_user_id, role, first_name, last_name, member_id, badge_type)
+    VALUES (?, ?, 'registered', ?, ?, ?, ?)
+  `).bind(
+    yearId, clerkUserId,
+    identity.first_name, identity.last_name, identity.member_id, identity.badge_type,
+  ).run();
+
+  const created = await db.prepare(
+    'SELECT * FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+  ).bind(yearId, clerkUserId).first<YearMember>();
+  if (!created) throw new Error('Could not create year membership');
+  return created;
+}
+
+/** Find or create a years row for a con_year (used when creating events). */
+async function resolveOrCreateYearId(
+  db: D1Database,
+  conYear: number,
+  ownerClerkUserId = '',
+): Promise<number> {
+  const existing = await db.prepare('SELECT id FROM years WHERE con_year = ?')
+    .bind(conYear).first<{ id: number }>();
+  if (existing) return existing.id;
+
+  const result = await db.prepare(
+    'INSERT INTO years (name, con_year, owner_clerk_user_id) VALUES (?, ?, ?)'
+  ).bind(`SDCC ${conYear}`, conYear, ownerClerkUserId).run();
+  return Number(result.meta.last_row_id);
+}
+
 async function getOrCreateOwnerGroup(
   db: D1Database,
   eventId: number,
@@ -210,7 +357,7 @@ async function upsertSelfParticipantDays(
 }
 
 const PARTICIPANTS_QUERY = `
-  SELECT p.*, g.name AS group_name, g.color AS group_color
+  SELECT p.*, g.name AS group_name, g.color AS group_color, g.owner_clerk_user_id AS group_owner_clerk_user_id
   FROM participants p
   LEFT JOIN groups g ON g.id = p.group_id
 `;
@@ -315,8 +462,8 @@ app.post('/api/invite-requests', async (c) => {
 
 app.get('/api/events', async (c) => {
   const rows = await c.env.DB.prepare(
-    'SELECT id, year, name, reg_type, status FROM events ORDER BY year DESC, id DESC'
-  ).all<Pick<Event, 'id' | 'year' | 'name' | 'reg_type' | 'status'>>();
+    'SELECT id, year, year_id, name, reg_type, status FROM events ORDER BY year DESC, id DESC'
+  ).all<Pick<Event, 'id' | 'year' | 'year_id' | 'name' | 'reg_type' | 'status'>>();
   return json(rows.results);
 });
 
@@ -341,7 +488,11 @@ app.get('/api/events/:id/participants', async (c) => {
   if (!event) return err('Event not found', 404);
 
   const rows = await c.env.DB.prepare(
-    `${PARTICIPANTS_QUERY} WHERE p.event_id = ? ORDER BY p.sort_order ASC, p.id ASC`
+    `${PARTICIPANTS_QUERY} WHERE p.event_id = ?${
+      event.reg_type === 'return' && c.req.query('include_ineligible') !== '1'
+        ? ' AND p.return_eligible = 1'
+        : ''
+    } ORDER BY p.sort_order ASC, p.id ASC`
   ).bind(id).all<Participant>();
 
   return json(rows.results.map((p) => enrichParticipant(p, event)));
@@ -358,21 +509,11 @@ app.post('/api/events/:id/register', async (c) => {
   const statusErr = assertRegistrationOpen(event.status);
   if (statusErr) return err(statusErr, 403);
 
+  // Always attach the event to a year (self-heal orphans with null year_id)
+  const yearInfo = await ensureEventYear(c.env.DB, event);
+  if (!yearInfo) return err('No convention year configured — create a year in Admin first', 400);
+
   const clerkUserId = access.userId === 'admin' ? null : access.userId;
-  let yearMember: YearMember | null = null;
-  if (clerkUserId) {
-    const yearRow = await c.env.DB.prepare(
-      'SELECT id FROM years WHERE con_year = ?'
-    ).bind(event.year).first<{ id: number }>();
-    if (yearRow) {
-      yearMember = await c.env.DB.prepare(
-        'SELECT * FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
-      ).bind(yearRow.id, clerkUserId).first<YearMember>();
-      if (!yearMember) {
-        return err('An invite is required before you can register. Use your invite link or request access.', 403);
-      }
-    }
-  }
 
   const body = await c.req.json<{
     first_name: string;
@@ -393,13 +534,24 @@ app.post('/api/events/:id/register', async (c) => {
   const identity = {
     first_name: body.first_name.trim(),
     last_name: body.last_name.trim(),
-    member_id: body.member_id?.trim() ?? yearMember?.member_id ?? '',
+    member_id: body.member_id?.trim() ?? '',
     badge_type: (body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT') as 'ADULT' | 'JUNIOR',
   };
   const days = normalizeDays(body);
 
   // Prefer group-linked upsert so dashboard my-group sees the row
   if (clerkUserId) {
+    // Prefer existing year-member identity fields when the form omits them
+    const existingYm = await c.env.DB.prepare(
+      'SELECT * FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+    ).bind(yearInfo.yearId, clerkUserId).first<YearMember>();
+    if (!identity.member_id && existingYm?.member_id) {
+      identity.member_id = existingYm.member_id;
+    }
+
+    // Registration always assigns the user to the event's year
+    await ensureYearMemberForRegistrant(c.env.DB, yearInfo.yearId, clerkUserId, identity);
+
     const group = await getOrCreateOwnerGroup(c.env.DB, id, clerkUserId, identity);
     const pid = await upsertSelfParticipantDays(c.env.DB, {
       eventId: id,
@@ -408,18 +560,6 @@ app.post('/api/events/:id/register', async (c) => {
       identity,
       days,
     });
-
-    // Keep year_members identity in sync when present
-    if (yearMember) {
-      await c.env.DB.prepare(`
-        UPDATE year_members SET
-          first_name = ?, last_name = ?, member_id = ?, badge_type = ?
-        WHERE id = ?
-      `).bind(
-        identity.first_name, identity.last_name, identity.member_id, identity.badge_type,
-        yearMember.id,
-      ).run();
-    }
 
     return json({ ok: true, id: pid, updated: true, group_id: group.id });
   }
@@ -447,10 +587,13 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
 
   const event = await getEvent(c.env.DB, eventId);
   if (!event) return err('Event not found', 404);
-  if (event.status !== 'purchasing') return err('Not in purchasing phase', 403);
 
-  const body = await c.req.json<{ coordinator_name: string }>();
+  const body = await c.req.json<{ coordinator_name: string; simulation?: boolean }>();
   if (!body.coordinator_name?.trim()) return err('coordinator_name required');
+
+  if (event.status !== 'purchasing' && !body.simulation) {
+    return err('Not in purchasing phase', 403);
+  }
 
   const p = await c.env.DB.prepare('SELECT * FROM participants WHERE id = ? AND event_id = ?')
     .bind(pid, eventId).first<Participant>();
@@ -493,6 +636,19 @@ app.patch('/api/events/:id/participants/:pid/purchased', async (c) => {
   const event = await getEvent(c.env.DB, eventId);
   if (!event) return err('Event not found', 404);
 
+  const target = await c.env.DB.prepare(
+    'SELECT purchasing_claimed_by, purchasing_claimed_at FROM participants WHERE id = ? AND event_id = ?'
+  ).bind(pid, eventId).first<{ purchasing_claimed_by: string; purchasing_claimed_at: string | null }>();
+  if (!target) return err('Participant not found', 404);
+
+  if (!(await canActOnClaimedParticipant(c.env.DB, access, eventId, pid))) {
+    const claimActive = !!target.purchasing_claimed_by && !isClaimExpired(target.purchasing_claimed_at);
+    return err(
+      claimActive ? 'Only the claimer can mark purchases for this person' : 'Claim this person first before marking purchases',
+      403,
+    );
+  }
+
   const body = await c.req.json<{
     pur_preview?: boolean; pur_thu?: boolean; pur_fri?: boolean;
     pur_sat?: boolean; pur_sun?: boolean; who_purchased?: string;
@@ -518,6 +674,16 @@ app.patch('/api/events/:id/participants/:pid/requested', async (c) => {
   const pid = Number(c.req.param('pid'));
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
   if (!access) return err('Authentication required', 401);
+
+  const event = await getEvent(c.env.DB, eventId);
+  if (!event) return err('Event not found', 404);
+  if (event.status === 'purchasing') {
+    return err('Requested days cannot be changed during purchasing', 403);
+  }
+
+  if (!(await canEditParticipantIdentity(c.env.DB, access, eventId, pid))) {
+    return err('You can only change requested days for yourself or your group', 403);
+  }
 
   const body = await c.req.json<{
     req_preview?: boolean; req_thu?: boolean; req_fri?: boolean;
@@ -593,9 +759,16 @@ app.patch('/api/events/:id/participants/:pid/profile', async (c) => {
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
   if (!access) return err('Authentication required', 401);
 
+  const event = await getEvent(c.env.DB, eventId);
+  if (!event) return err('Event not found', 404);
+
   const body = await c.req.json<{
     first_name?: string; last_name?: string; member_id?: string; badge_type?: string; notes?: string;
   }>();
+
+  if (!(await canEditParticipantIdentity(c.env.DB, access, eventId, pid))) {
+    return err('You can only edit your own profile or your group members', 403);
+  }
 
   const fields: string[] = [];
   const values: (string | number)[] = [];
@@ -866,6 +1039,112 @@ app.get('/api/years', async (c) => {
     ORDER BY y.con_year DESC
   `).bind(access.userId).all<Year>();
   return json(rows.results);
+});
+
+/** Latest convention year (auth required, membership not required). */
+app.get('/api/years/current', async (c) => {
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access || access.userId === 'admin') return err('Sign in required', 401);
+
+  const year = await c.env.DB.prepare(
+    'SELECT * FROM years ORDER BY con_year DESC LIMIT 1'
+  ).first<Year>();
+  if (!year) return err('No years configured', 404);
+  return json(year);
+});
+
+/**
+ * Enroll the signed-in user into a year (creates year_members + per-event group/participant).
+ * Used when registering without a prior invite, or joining from the dashboard.
+ */
+app.post('/api/years/:yearId/enroll', async (c) => {
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access || access.userId === 'admin') return err('Sign in required', 401);
+
+  const yearId = Number(c.req.param('yearId'));
+  const year = await c.env.DB.prepare('SELECT * FROM years WHERE id = ?').bind(yearId).first<Year>();
+  if (!year) return err('Year not found', 404);
+
+  const body = await c.req.json<{
+    first_name?: string;
+    last_name?: string;
+    member_id?: string;
+    badge_type?: 'ADULT' | 'JUNIOR';
+    return_eligible?: boolean;
+  }>().catch(() => ({} as {
+    first_name?: string;
+    last_name?: string;
+    member_id?: string;
+    badge_type?: 'ADULT' | 'JUNIOR';
+    return_eligible?: boolean;
+  }));
+
+  const existing = await c.env.DB.prepare(
+    'SELECT * FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+  ).bind(yearId, access.userId).first<YearMember>();
+  if (existing) {
+    return json({ ok: true, member: mapYearMember(existing), created: false });
+  }
+
+  const firstName = (body.first_name ?? '').trim() || 'Member';
+  const lastName = (body.last_name ?? '').trim() || '';
+  const memberId = (body.member_id ?? '').trim();
+  const badgeType = body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT';
+  const returnEligible = body.return_eligible ? 1 : 0;
+
+  const db = c.env.DB;
+  const color = await pickGroupColor(db, yearId);
+  const groupName = lastName ? `${firstName} ${lastName}` : `${firstName}'s Group`;
+
+  const events = await db.prepare(
+    'SELECT id FROM events WHERE year_id = ?'
+  ).bind(yearId).all<{ id: number }>();
+
+  await db.prepare(`
+    INSERT INTO year_members (year_id, clerk_user_id, role, first_name, last_name, member_id, badge_type, return_eligible)
+    VALUES (?, ?, 'registered', ?, ?, ?, ?, ?)
+  `).bind(yearId, access.userId, firstName, lastName, memberId, badgeType, returnEligible).run();
+
+  for (const ev of events.results) {
+    await db.prepare(`
+      INSERT INTO groups (event_id, name, color, owner_clerk_user_id)
+      VALUES (?, ?, ?, ?)
+    `).bind(ev.id, groupName, color, access.userId).run();
+
+    const group = await db.prepare(
+      'SELECT id FROM groups WHERE event_id = ? AND owner_clerk_user_id = ?'
+    ).bind(ev.id, access.userId).first<{ id: number }>();
+    if (!group) continue;
+
+    const existingP = memberId
+      ? await db.prepare(
+          'SELECT id FROM participants WHERE event_id = ? AND UPPER(member_id) = UPPER(?)'
+        ).bind(ev.id, memberId).first<{ id: number }>()
+      : null;
+
+    if (existingP) {
+      await db.prepare(`
+        UPDATE participants SET clerk_user_id = ?, group_id = ?, registered_by_clerk_user_id = ?,
+          first_name = ?, last_name = ?
+        WHERE id = ?
+      `).bind(access.userId, group.id, access.userId, firstName, lastName, existingP.id).run();
+    } else {
+      await db.prepare(`
+        INSERT INTO participants (event_id, first_name, last_name, member_id, badge_type,
+          return_eligible, clerk_user_id, registered_by_clerk_user_id, group_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        ev.id, firstName, lastName, memberId, badgeType, returnEligible,
+        access.userId, access.userId, group.id,
+      ).run();
+    }
+  }
+
+  const member = await db.prepare(
+    'SELECT * FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+  ).bind(yearId, access.userId).first<YearMember>();
+
+  return json({ ok: true, member: mapYearMember(member!), created: true }, 201);
 });
 
 // Current user's membership + group info for a year
@@ -1389,21 +1668,24 @@ admin.post('/events', async (c) => {
   const body = await c.req.json<Omit<Event, 'id' | 'created_at' | 'updated_at'>>();
   if (!body.year || !body.name) return err('year and name required');
 
+  const yearId = body.year_id
+    ?? await resolveOrCreateYearId(c.env.DB, body.year);
+
   const result = await c.env.DB.prepare(`
     INSERT INTO events
-      (year, name, reg_type, status,
+      (year, year_id, name, reg_type, status,
        price_preview_adult, price_thu_adult, price_fri_adult, price_sat_adult, price_sun_adult,
        price_preview_junior, price_thu_junior, price_fri_junior, price_sat_junior, price_sun_junior)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
-    body.year, body.name, body.reg_type ?? 'open', body.status ?? 'setup',
+    body.year, yearId, body.name, body.reg_type ?? 'open', body.status ?? 'setup',
     body.price_preview_adult ?? 0, body.price_thu_adult ?? 0,
     body.price_fri_adult ?? 0, body.price_sat_adult ?? 0, body.price_sun_adult ?? 0,
     body.price_preview_junior ?? 0, body.price_thu_junior ?? 0,
     body.price_fri_junior ?? 0, body.price_sat_junior ?? 0, body.price_sun_junior ?? 0,
   ).run();
 
-  return json({ id: result.meta.last_row_id }, 201);
+  return json({ id: result.meta.last_row_id, year_id: yearId }, 201);
 });
 
 admin.patch('/events/:id', async (c) => {
@@ -1548,11 +1830,13 @@ admin.post('/initialize-year', async (c) => {
 
   if (!body.year) return err('year required');
 
+  const yearId = await resolveOrCreateYearId(c.env.DB, body.year);
+
   const insertSQL = `
-    INSERT INTO events (year, name, reg_type, status,
+    INSERT INTO events (year, year_id, name, reg_type, status,
       price_preview_adult, price_thu_adult, price_fri_adult, price_sat_adult, price_sun_adult,
       price_preview_junior, price_thu_junior, price_fri_junior, price_sat_junior, price_sun_junior)
-    VALUES (?, ?, ?, 'setup', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, 'setup', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   const priceBinds = [
@@ -1563,11 +1847,11 @@ admin.post('/initialize-year', async (c) => {
   ];
 
   await c.env.DB.batch([
-    c.env.DB.prepare(insertSQL).bind(body.year, `SDCC ${body.year} Return Reg`, 'return', ...priceBinds),
-    c.env.DB.prepare(insertSQL).bind(body.year, `SDCC ${body.year} Open Reg`, 'open', ...priceBinds),
+    c.env.DB.prepare(insertSQL).bind(body.year, yearId, `SDCC ${body.year} Return Reg`, 'return', ...priceBinds),
+    c.env.DB.prepare(insertSQL).bind(body.year, yearId, `SDCC ${body.year} Open Reg`, 'open', ...priceBinds),
   ]);
 
-  return json({ ok: true }, 201);
+  return json({ ok: true, year_id: yearId }, 201);
 });
 
 admin.post('/events/:id/participants/copy', async (c) => {
@@ -1990,6 +2274,42 @@ admin.get('/years/:yearId/members', async (c) => {
     'SELECT * FROM year_members WHERE year_id = ? ORDER BY joined_at'
   ).bind(yearId).all<YearMember>();
   return json(rows.results);
+});
+
+// ── Admin: Dummy test participants ────────────────────────────────────────────
+
+admin.get('/years/:yearId/dummies', async (c) => {
+  const yearId = Number(c.req.param('yearId'));
+  const year = await c.env.DB.prepare('SELECT id FROM years WHERE id = ?').bind(yearId).first();
+  if (!year) return err('Year not found', 404);
+  return json(await countDummies(c.env.DB, yearId));
+});
+
+admin.post('/years/:yearId/dummies', async (c) => {
+  const yearId = Number(c.req.param('yearId'));
+  const year = await c.env.DB.prepare('SELECT id FROM years WHERE id = ?').bind(yearId).first();
+  if (!year) return err('Year not found', 404);
+
+  let body: { count?: number; clear_existing?: boolean } = {};
+  try {
+    body = await c.req.json<{ count?: number; clear_existing?: boolean }>();
+  } catch { /* empty body ok */ }
+  try {
+    const result = await seedDummies(c.env.DB, yearId, {
+      count: body.count,
+      clearExisting: body.clear_existing !== false,
+    });
+    return json(result, 201);
+  } catch (e) {
+    return err(e instanceof Error ? e.message : 'Seed failed', 400);
+  }
+});
+
+admin.delete('/years/:yearId/dummies', async (c) => {
+  const yearId = Number(c.req.param('yearId'));
+  const year = await c.env.DB.prepare('SELECT id FROM years WHERE id = ?').bind(yearId).first();
+  if (!year) return err('Year not found', 404);
+  return json(await clearDummies(c.env.DB, yearId));
 });
 
 admin.get('/invite-requests', async (c) => {

@@ -1,7 +1,7 @@
 import {
   createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode,
 } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAuth, useUser } from '@clerk/clerk-react';
 import {
   api,
   type YearMember, type Year, type Participant, type Group,
@@ -48,6 +48,7 @@ export function useDashboard() {
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const { getToken } = useAuth();
+  const { user } = useUser();
   const [years, setYears] = useState<Year[]>([]);
   const [selectedYearId, setSelectedYearId] = useState<number | null>(null);
   const [member, setMember] = useState<YearMember | null>(null);
@@ -71,7 +72,20 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setError('');
     tok()
       .then(async (t) => {
-        const ys = await api.years.list(t);
+        let ys = await api.years.list(t);
+
+        // Local/dev Clerk IDs differ from prod — auto-enroll into the current year if needed
+        if (ys.length === 0) {
+          const current = await api.years.current(t).catch(() => null);
+          if (current) {
+            await api.years.enroll(current.id, t, {
+              first_name: user?.firstName ?? undefined,
+              last_name: user?.lastName ?? undefined,
+            });
+            ys = await api.years.list(t);
+          }
+        }
+
         if (cancelled) return;
         setYears(ys);
         if (ys.length > 0) {
@@ -98,7 +112,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setYearsReady(true);
       });
     return () => { cancelled = true; };
-  }, [tok]);
+  }, [tok, user?.firstName, user?.lastName]);
 
   const loadYear = useCallback(async (conYear: number, opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);

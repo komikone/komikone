@@ -67,6 +67,8 @@ export default function DashboardRegistrations() {
           const myDays = self ? selectedDays(self, dayPrefix) : [];
           const isPrimary = view.event.id === primaryView?.event.id;
           const canEditDays = isPrimary && view.event.status === 'registration';
+          const canOpenLive =
+            view.event.reg_type !== 'return' || !!member.return_eligible;
 
           return (
             <section key={view.event.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
@@ -75,14 +77,18 @@ export default function DashboardRegistrations() {
                   <h2 className="font-semibold text-gray-900 dark:text-white">{view.event.name}</h2>
                   <EventStatusBadge status={view.event.status} />
                 </div>
-                {view.event.status === 'purchasing' || view.event.status === 'payment' ? (
+                {canOpenLive ? (
                   <Link
                     to={`/live/${view.event.id}`}
                     className="text-xs text-blue-400 hover:text-blue-300 shrink-0"
                   >
                     Live board →
                   </Link>
-                ) : null}
+                ) : (
+                  <span className="text-xs text-gray-500 shrink-0" title="Return Reg Live Board is for return-eligible members">
+                    Open Reg only
+                  </span>
+                )}
               </div>
 
               <div className="p-5 space-y-6">

@@ -34,6 +34,7 @@ npx wrangler d1 execute komikone --local --file=./migrations/006_years_members_i
 npx wrangler d1 execute komikone --local --file=./migrations/007_backfill_year_members.sql
 npx wrangler d1 execute komikone --local --file=./migrations/008_backgrounds.sql
 npx wrangler d1 execute komikone --local --file=./migrations/009_invite_email_tracking.sql
+npx wrangler d1 execute komikone --local --file=./migrations/010_participant_clerk.sql
 # Add --remote for production
 ```
 
@@ -100,6 +101,12 @@ npm run deploy
 | `/payment/:eventId` | Payment settlement (signed in) |
 | `/profile` | Venmo/PayPal/Zelle info (signed in) |
 | `/admin` | Admin panel (Admin role) |
+
+### Dummy test data
+
+Admin → select a year → **Settings** → **Seed dummies** / **Clear dummies**.
+
+Dummies are tagged (`notes=[DUMMY]`, `member_id=DUMMY-####`) so clear only removes test rows.
 
 ## Two registration paths (both active)
 

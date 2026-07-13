@@ -49,16 +49,27 @@ export default function Admin() {
   const [invitePanelYearId, setInvitePanelYearId] = useState<number | null>(null);
   const [accessRequests, setAccessRequests] = useState<InviteRequest[]>([]);
 
-  // Derived
+  // Derived — prefer events linked to the years row (year_id) so orphan duplicates are ignored
   const years = useMemo(
-    () => [...new Set(events.map((e) => e.year))].sort((a, b) => b - a),
+    () => [...new Set(events.map((e) => e.year).filter((y): y is number => y != null))].sort((a, b) => b - a),
     [events]
   );
-  const yearEvents = events.filter((e) => e.year === selectedYear);
+  const activeYear = yearsData.find((y) => y.con_year === selectedYear) ?? null;
+  const yearEvents = useMemo(() => {
+    if (selectedYear == null) return [];
+    if (activeYear) {
+      const linked = events.filter((e) => e.year_id === activeYear.id);
+      if (linked.length > 0) return linked;
+    }
+    // Fallback: lowest id per reg_type when year_id is missing (older DBs)
+    const forYear = events.filter((e) => e.year === selectedYear);
+    const pick = (reg: 'return' | 'open') =>
+      [...forYear.filter((e) => e.reg_type === reg)].sort((a, b) => a.id - b.id)[0];
+    return [pick('return'), pick('open')].filter(Boolean) as EventDetail[];
+  }, [events, selectedYear, activeYear]);
   const returnEvent = yearEvents.find((e) => e.reg_type === 'return') ?? null;
   const openEvent = yearEvents.find((e) => e.reg_type === 'open') ?? null;
   const activeEvent = yearEvents.find((e) => e.reg_type === activeRegType) ?? yearEvents[0] ?? null;
-  const activeYear = yearsData.find((y) => y.con_year === selectedYear) ?? null;
   const participants = activeRegType === 'return' ? returnParticipants : openParticipants;
 
   const getAuth = useCallback(async (): Promise<string> => {
@@ -84,15 +95,19 @@ export default function Admin() {
     }
   }, [getAuth]);
 
-  const loadYearData = useCallback(async (year: number, evts: EventDetail[]) => {
+  const loadYearData = useCallback(async (year: number, evts: EventDetail[], yearRow?: Year | null) => {
     const tok = await getAuth();
     if (!tok) return;
-    const retEvt = evts.find((e) => e.year === year && e.reg_type === 'return');
-    const openEvt = evts.find((e) => e.year === year && e.reg_type === 'open');
+    const linked = yearRow ? evts.filter((e) => e.year_id === yearRow.id) : [];
+    const pool = linked.length > 0 ? linked : evts.filter((e) => e.year === year);
+    const byId = (reg: 'return' | 'open') =>
+      [...pool.filter((e) => e.reg_type === reg)].sort((a, b) => a.id - b.id)[0];
+    const retEvt = byId('return');
+    const openEvt = byId('open');
 
     const [retPs, openPs, meta] = await Promise.all([
-      retEvt ? api.participants.list(retEvt.id, tok).catch(() => []) : Promise.resolve([]),
-      openEvt ? api.participants.list(openEvt.id, tok).catch(() => []) : Promise.resolve([]),
+      retEvt ? api.participants.list(retEvt.id, tok, { includeIneligible: true }).catch(() => []) : Promise.resolve([]),
+      openEvt ? api.participants.list(openEvt.id, tok, { includeIneligible: true }).catch(() => []) : Promise.resolve([]),
       api.admin.yearMeta.get(tok, year).catch(() => null),
     ]);
     setReturnParticipants(retPs);
@@ -105,7 +120,7 @@ export default function Admin() {
     if (!tok) return;
     const evt = evts.find((e) => e.year === year && e.reg_type === regType);
     if (!evt) return;
-    const ps = await api.participants.list(evt.id, tok).catch(() => []);
+    const ps = await api.participants.list(evt.id, tok, { includeIneligible: true }).catch(() => []);
     if (regType === 'return') setReturnParticipants(ps);
     else setOpenParticipants(ps);
   }, [getAuth]);
@@ -153,8 +168,8 @@ export default function Admin() {
     const [fresh, freshYears] = await Promise.all([loadEvents(), loadYearsData()]);
     const yr = year ?? selectedYear;
     if (yr !== null) {
-      loadYearData(yr, fresh);
-      const yearObj = freshYears.find((y) => y.con_year === yr);
+      const yearObj = freshYears.find((y) => y.con_year === yr) ?? null;
+      loadYearData(yr, fresh, yearObj);
       if (yearObj) loadYearExtras(yearObj);
     }
   }, [loadEvents, loadYearsData, loadYearData, loadYearExtras, selectedYear]);
@@ -166,8 +181,8 @@ export default function Admin() {
     setSelectedYear(nextYear);
     setTab('overview');
     if (nextYear !== null) {
-      loadYearData(nextYear, freshEvents);
-      const yearObj = freshYears.find((y) => y.con_year === nextYear);
+      const yearObj = freshYears.find((y) => y.con_year === nextYear) ?? null;
+      loadYearData(nextYear, freshEvents, yearObj);
       if (yearObj) loadYearExtras(yearObj);
     } else {
       setReturnParticipants([]);
@@ -205,7 +220,8 @@ export default function Admin() {
     if (events.length > 0 && selectedYear === null) {
       const latest = Math.max(...events.map((e) => e.year));
       setSelectedYear(latest);
-      loadYearData(latest, events);
+      const yearObj = yearsData.find((y) => y.con_year === latest) ?? null;
+      loadYearData(latest, events, yearObj);
     }
   }, [events.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -213,7 +229,11 @@ export default function Admin() {
   useEffect(() => {
     if (selectedYear === null || yearsData.length === 0) return;
     const yearObj = yearsData.find((y) => y.con_year === selectedYear);
-    if (yearObj) loadYearExtras(yearObj);
+    if (yearObj) {
+      loadYearExtras(yearObj);
+      // Re-resolve participants once years metadata is available (year_id linking)
+      loadYearData(selectedYear, events, yearObj);
+    }
   }, [selectedYear, yearsData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleYearSelect = (year: number) => {
@@ -223,8 +243,8 @@ export default function Admin() {
     setTab('overview');
     setYearInvites([]);
     setYearMembers([]);
-    loadYearData(year, events);
-    const yearObj = yearsData.find((y) => y.con_year === year);
+    const yearObj = yearsData.find((y) => y.con_year === year) ?? null;
+    loadYearData(year, events, yearObj);
     if (yearObj) loadYearExtras(yearObj);
   };
 
@@ -365,7 +385,7 @@ export default function Admin() {
                 <select
                   value={invitePanelYearId ?? ''}
                   onChange={(e) => setInvitePanelYearId(Number(e.target.value))}
-                  className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 text-sm rounded-lg px-3 py-2"
+                  className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white text-sm rounded-lg px-3 py-2"
                 >
                   {yearsData.map((y) => (
                     <option key={y.id} value={y.id}>{y.name}</option>
@@ -501,6 +521,7 @@ export default function Admin() {
                 inviteCount={yearInvites.length}
                 secret={secret}
                 onDeleted={() => handleYearDeleted(activeYear.con_year)}
+                onDummiesChanged={() => reloadAll()}
               />
             )}
             {tab === 'settings' && !activeYear && (
@@ -571,7 +592,7 @@ function CreateYearButton({ secret, onCreated }: { secret: string; onCreated: ()
             type="number"
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
-            className="w-28 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+            className="w-28 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
           />
           <p className="text-xs text-gray-600 mt-2">
             Creates Return &amp; Open Reg events with default prices. Customize prices in the Prices tab.
@@ -761,7 +782,7 @@ function EventCard({
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="flex-1 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+          className="flex-1 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
         />
         <button
           onClick={handleNameSave}
@@ -778,7 +799,9 @@ function EventCard({
             key={s}
             onClick={() => handleStatusChange(s)}
             className={`px-3 py-1 rounded text-xs font-medium transition-colors capitalize ${
-              status === s ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-300 hover:text-gray-900'
+              status === s
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'
             }`}
           >
             {s}
@@ -789,15 +812,15 @@ function EventCard({
       {/* Stats */}
       <div className="grid grid-cols-3 gap-2 text-center">
         {[
-          { label: 'Total', value: participants.length, color: 'text-gray-900' },
-          { label: 'Complete', value: complete, color: 'text-green-400' },
-          { label: 'Remaining', value: remaining, color: 'text-yellow-400' },
-          { label: 'Paid', value: paid, color: 'text-green-400' },
-          { label: 'Unpaid', value: participants.length - paid, color: 'text-red-400' },
+          { label: 'Total', value: participants.length, color: 'text-gray-900 dark:text-white' },
+          { label: 'Complete', value: complete, color: 'text-green-600 dark:text-green-400' },
+          { label: 'Remaining', value: remaining, color: 'text-amber-600 dark:text-yellow-400' },
+          { label: 'Paid', value: paid, color: 'text-green-600 dark:text-green-400' },
+          { label: 'Unpaid', value: participants.length - paid, color: 'text-red-600 dark:text-red-400' },
         ].map(({ label: lbl, value, color }) => (
-          <div key={lbl} className="bg-gray-100 rounded-lg p-2">
+          <div key={lbl} className="bg-gray-50 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-lg p-2">
             <div className={`text-xl font-bold font-mono ${color}`}>{value}</div>
-            <div className="text-gray-500 text-xs">{lbl}</div>
+            <div className="text-gray-500 dark:text-gray-400 text-xs">{lbl}</div>
           </div>
         ))}
       </div>
@@ -805,7 +828,7 @@ function EventCard({
       {/* Registration link */}
       <div className="space-y-1.5">
         <div className="flex gap-2 items-center">
-          <code className="bg-gray-100 text-green-400 text-xs px-2 py-1.5 rounded flex-1 break-all">
+          <code className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-emerald-700 dark:text-green-400 text-xs px-2 py-1.5 rounded flex-1 break-all">
             {origin}/register/{event.id}
           </code>
           <button
@@ -1321,7 +1344,7 @@ function GroupsPanel({
             onChange={(e) => setAddingName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') setAddOpen(false); }}
             placeholder="Group name"
-            className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-gray-900 text-xs focus:outline-none focus:border-blue-500 w-36"
+            className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-gray-900 dark:text-white text-xs focus:outline-none focus:border-blue-500 w-36"
           />
           <input
             type="color"
@@ -1350,7 +1373,7 @@ function GroupsPanel({
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleEditSave(g); if (e.key === 'Escape') setEditingId(null); }}
-                className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 text-gray-900 text-xs focus:outline-none focus:border-blue-500 w-28"
+                className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 text-gray-900 dark:text-white text-xs focus:outline-none focus:border-blue-500 w-28"
               />
               <input
                 type="color"
@@ -1608,7 +1631,7 @@ function PricesTab({
         min="0"
         value={values[key] ?? ''}
         onChange={(e) => setPrice(key, e.target.value)}
-        className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded pl-6 pr-2 py-1.5 text-gray-900 text-sm w-24 focus:outline-none focus:border-blue-500"
+        className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded pl-6 pr-2 py-1.5 text-gray-900 dark:text-white text-sm w-24 focus:outline-none focus:border-blue-500"
       />
     </div>
   );
@@ -1694,7 +1717,7 @@ function DatesTab({
         type="date"
         value={form[field]}
         onChange={(e) => set(field, e.target.value)}
-        className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+        className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
       />
     </div>
   );
@@ -1739,7 +1762,7 @@ function DatesTab({
           onChange={(e) => set('notes', e.target.value)}
           rows={3}
           placeholder="Any notes for this year…"
-          className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500 resize-none"
+          className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500 resize-none"
         />
       </div>
 
@@ -1813,7 +1836,7 @@ function CopyParticipantsModal({
             <select
               value={targetId}
               onChange={(e) => setTargetId(Number(e.target.value))}
-              className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+              className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
             >
               {otherEvents.map((e) => (
                 <option key={e.id} value={e.id}>{e.name} ({e.reg_type} / {e.status})</option>
@@ -2172,7 +2195,7 @@ function InvitesTab({
               max={100}
               value={bulkCount}
               onChange={(e) => setBulkCount(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
-              className="w-20 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 text-sm focus:outline-none focus:border-blue-500"
+              className="w-20 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
           <div className="flex-1 min-w-[12rem]">
@@ -2297,6 +2320,7 @@ function SettingsTab({
   inviteCount,
   secret,
   onDeleted,
+  onDummiesChanged,
 }: {
   year: Year;
   eventCount: number;
@@ -2304,11 +2328,63 @@ function SettingsTab({
   inviteCount: number;
   secret: string;
   onDeleted: () => void;
+  onDummiesChanged: () => void;
 }) {
   const [confirmText, setConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
 
+  const [dummyCount, setDummyCount] = useState<{ participants: number; groups: number } | null>(null);
+  const [seedCount, setSeedCount] = useState(40);
+  const [seeding, setSeeding] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [dummyMsg, setDummyMsg] = useState('');
+
   const canDelete = confirmText === String(year.con_year);
+
+  const refreshDummies = useCallback(async () => {
+    try {
+      const c = await api.admin.years.dummies.count(secret, year.id);
+      setDummyCount({ participants: c.participants, groups: c.groups });
+    } catch {
+      setDummyCount(null);
+    }
+  }, [secret, year.id]);
+
+  useEffect(() => { refreshDummies(); }, [refreshDummies]);
+
+  const handleSeed = async () => {
+    setSeeding(true);
+    setDummyMsg('');
+    try {
+      const res = await api.admin.years.dummies.seed(secret, year.id, {
+        count: seedCount,
+        clear_existing: true,
+      });
+      setDummyMsg(`Seeded ${res.created} participants and ${res.groups_created} groups across ${res.event_ids.length} event(s).`);
+      await refreshDummies();
+      onDummiesChanged();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to seed dummies');
+    } finally {
+      setSeeding(false);
+    }
+  };
+
+  const handleClearDummies = async () => {
+    if (!window.confirm(`Delete all dummy test participants for ${year.name}? Real members are not affected.`)) return;
+    setClearing(true);
+    setDummyMsg('');
+    try {
+      const res = await api.admin.years.dummies.clear(secret, year.id);
+      setDummyMsg(`Removed ${res.participants_deleted} participants and ${res.groups_deleted} groups.`);
+      await refreshDummies();
+      onDummiesChanged();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to clear dummies');
+    } finally {
+      setClearing(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!canDelete) return;
@@ -2328,11 +2404,62 @@ function SettingsTab({
   };
 
   return (
-    <div className="max-w-xl">
-      <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-2">Settings</h3>
-      <p className="text-gray-500 text-sm mb-6">
-        Manage configuration for <span className="text-gray-700">{year.name}</span>.
-      </p>
+    <div className="max-w-xl space-y-8">
+      <div>
+        <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-2">Settings</h3>
+        <p className="text-gray-500 text-sm">
+          Manage configuration for <span className="text-gray-700 dark:text-gray-300">{year.name}</span>.
+        </p>
+      </div>
+
+      {/* Test data */}
+      <div className="border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 rounded-xl p-5">
+        <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Test data</p>
+        <h4 className="text-gray-900 dark:text-white font-semibold mb-1">Dummy participants</h4>
+        <p className="text-gray-500 text-sm mb-4">
+          Seed fake roster rows for Live Board practice. Tagged with notes <code className="text-xs">[DUMMY]</code> and
+          Member IDs like <code className="text-xs">DUMMY-0001</code> — safe to wipe without touching real people.
+        </p>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Current dummies:{' '}
+          <span className="font-medium text-gray-900 dark:text-white">
+            {dummyCount == null ? '…' : `${dummyCount.participants} people / ${dummyCount.groups} groups`}
+          </span>
+        </p>
+        <div className="flex flex-wrap items-end gap-3 mb-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">People per event</label>
+            <input
+              type="number"
+              min={1}
+              max={120}
+              value={seedCount}
+              onChange={(e) => setSeedCount(Math.min(120, Math.max(1, Number(e.target.value) || 1)))}
+              className="w-24 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleSeed}
+            disabled={seeding || clearing || eventCount === 0}
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            {seeding ? 'Seeding…' : 'Seed dummies'}
+          </button>
+          <button
+            type="button"
+            onClick={handleClearDummies}
+            disabled={seeding || clearing || (dummyCount?.participants ?? 0) === 0}
+            className="bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white disabled:opacity-40 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            {clearing ? 'Clearing…' : 'Clear dummies'}
+          </button>
+        </div>
+        {eventCount === 0 && (
+          <p className="text-amber-600 dark:text-amber-400 text-xs">This year has no events yet.</p>
+        )}
+        {dummyMsg && <p className="text-green-600 dark:text-green-400 text-sm mt-2">{dummyMsg}</p>}
+      </div>
 
       <div className="border-2 border-red-200/80 bg-red-950/30 rounded-xl p-5">
         <p className="text-red-700 text-xs font-semibold uppercase tracking-wider mb-2">Danger zone</p>

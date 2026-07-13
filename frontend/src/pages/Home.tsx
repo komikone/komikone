@@ -803,14 +803,16 @@ function EventCard({ event }: { event: EventSummary }) {
             Registration open — invite link required.
           </p>
         )}
-        {isPurchasing && (
-          <Link
-            to={`/live/${event.id}`}
-            className="font-bangers tracking-wide text-base bg-red-600 hover:bg-red-700 text-white px-5 py-1.5 border-2 border-black comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all dark:bg-yellow-400 dark:hover:bg-yellow-300 dark:text-black"
-          >
-            Open Live Board →
-          </Link>
-        )}
+        <Link
+          to={`/live/${event.id}`}
+          className={`font-bangers tracking-wide text-base px-5 py-1.5 border-2 comic-shadow-sm hover:translate-x-px hover:translate-y-px transition-all ${
+            isPurchasing
+              ? 'bg-red-600 hover:bg-red-700 text-white border-black dark:bg-yellow-400 dark:hover:bg-yellow-300 dark:text-black'
+              : 'bg-zinc-900 hover:bg-zinc-800 text-white border-black'
+          }`}
+        >
+          {isPurchasing ? 'Open Live Board →' : 'View Live Board →'}
+        </Link>
         {(isPayment || isPurchasing) && (
           <Link
             to={`/payment/${event.id}`}
