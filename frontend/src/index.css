@@ -41,3 +41,15 @@ body {
 .whos-next-flash {
   animation: whos-next-flash 1.1s ease-in-out infinite;
 }
+
+/* Chrome/Safari autofill paints dark text — force readable contrast in dark mode */
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover,
+.dark input:-webkit-autofill:focus,
+.dark textarea:-webkit-autofill,
+.dark select:-webkit-autofill {
+  -webkit-text-fill-color: #f9fafb;
+  caret-color: #f9fafb;
+  box-shadow: 0 0 0px 1000px #1f2937 inset;
+  transition: background-color 99999s ease-in-out 0s;
+}

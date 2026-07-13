@@ -204,7 +204,10 @@ export function isClaimExpired(claimedAt: string | null): boolean {
 export function enrichParticipant(p: Participant, event: Event) {
   const claimActive = p.purchasing_claimed_by && !isClaimExpired(p.purchasing_claimed_at);
   const gaps = computeGaps(p);
-  const allPurchased =
+  const allRequested =
+    p.req_preview || p.req_thu || p.req_fri || p.req_sat || p.req_sun;
+  // Vacuous true when nobody requested days — treat as not done.
+  const allPurchased = allRequested &&
     (!p.req_preview || p.pur_preview) &&
     (!p.req_thu || p.pur_thu) &&
     (!p.req_fri || p.pur_fri) &&

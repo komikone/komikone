@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../lib/api';
 import { useDashboard } from './DashboardContext';
 import { PageShell, EmptyState } from './DashboardProfile';
+import { inputCls } from './styles';
 
 export default function DashboardInvitations() {
   const { member, invites, selectedYearId, tok, resolveYearId, reload } = useDashboard();
@@ -183,14 +184,16 @@ export default function DashboardInvitations() {
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="Name (for your reference)"
-            className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
+            className={inputCls}
+            autoComplete="off"
           />
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email (optional)"
-            className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
+            className={inputCls}
+            autoComplete="off"
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
           <button

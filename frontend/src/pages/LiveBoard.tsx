@@ -13,7 +13,7 @@ const DAY_GAP = 2;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type RowStatus = 'complete' | 'claiming' | 'partial' | 'none';
+type RowStatus = 'setup' | 'complete' | 'claiming' | 'partial' | 'none';
 type ColKey = 'idx' | 'first' | 'last' | 'actions' | 'return_eligible' | 'badge_type' | 'member_id' | 'requested' | 'purchased' | 'gaps' | 'status' | 'total' | 'who' | 'group';
 type SortDir = 'asc' | 'desc';
 
@@ -48,7 +48,12 @@ const DAY_COLS = new Set<ColKey>(['requested', 'purchased', 'gaps']);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function hasRequestedDays(p: Participant): boolean {
+  return !!(p.req_preview || p.req_thu || p.req_fri || p.req_sat || p.req_sun);
+}
+
 function rowStatus(p: Participant): RowStatus {
+  if (!hasRequestedDays(p)) return 'setup';
   if (p.all_purchased) return 'complete';
   if (p.claim_active) return 'claiming';
   if (p.any_purchased) return 'partial';
@@ -63,7 +68,7 @@ function sortValue(p: Participant, col: ColKey, naturalIdx: number): string | nu
     case 'member_id':  return p.member_id.toLowerCase();
     case 'badge_type': return p.badge_type;
     case 'requested':  return DAY_KEYS.filter((d) => p[`req_${d}` as keyof Participant]).length;
-    case 'status':     return ['none', 'partial', 'claiming', 'complete'].indexOf(rowStatus(p));
+    case 'status':     return ['setup', 'none', 'partial', 'claiming', 'complete'].indexOf(rowStatus(p));
     case 'purchased':  return DAY_KEYS.filter((d) => p[`pur_${d}` as keyof Participant]).length;
     case 'gaps':            return p.gaps.length;
     case 'total':           return p.purchase_total;
@@ -78,6 +83,7 @@ function statusAccentCls(status: RowStatus): string {
     case 'complete': return 'border-l-4 border-l-green-500';
     case 'claiming': return 'border-l-4 border-l-orange-500 dark:border-l-yellow-400';
     case 'partial':  return 'border-l-4 border-l-blue-500';
+    case 'setup':    return 'border-l-4 border-l-zinc-400';
     default:         return 'border-l-4 border-l-transparent';
   }
 }
@@ -194,12 +200,15 @@ export default function LiveBoard() {
     } catch { /* ignore */ }
   }, [simulation, eventId]);
 
-  // Column order
+  // Column order (sanitize localStorage — drop unknown keys like a stray empty-header col)
   const [movableCols, setMovableCols] = useState<ColKey[]>(() => {
     try {
       const saved = localStorage.getItem('komikone_livecols');
       if (saved) {
-        const parsed = JSON.parse(saved) as ColKey[];
+        const allowed = new Set<ColKey>(DEFAULT_MOVABLE);
+        const parsed = (JSON.parse(saved) as string[]).filter((c): c is ColKey =>
+          allowed.has(c as ColKey),
+        );
         const missing = DEFAULT_MOVABLE.filter((c) => !parsed.includes(c));
         return [...parsed, ...missing];
       }
@@ -578,14 +587,15 @@ export default function LiveBoard() {
       });
 
   const purchased  = participants.filter((p) => p.all_purchased).length;
-  const inProgress = participants.filter((p) => !p.all_purchased && p.claim_active).length;
-  const remaining  = participants.filter((p) => !p.all_purchased && !p.claim_active).length;
+  const inProgress = participants.filter((p) => hasRequestedDays(p) && !p.all_purchased && p.claim_active).length;
+  const remaining  = participants.filter((p) => hasRequestedDays(p) && !p.all_purchased && !p.claim_active).length;
   const withGaps   = participants.filter((p) => p.gaps.length > 0 && p.any_purchased).length;
+  const needsSetup = participants.filter((p) => !hasRequestedDays(p)).length;
 
   const [showNextUp, setShowNextUp] = useState(false);
 
   const priorityQueue = participants
-    .filter((p) => !p.all_purchased && !p.claim_active)
+    .filter((p) => hasRequestedDays(p) && !p.all_purchased && !p.claim_active)
     .sort((a, b) => {
       const diff = priorityScore(b, me, identityId) - priorityScore(a, me, identityId);
       return diff !== 0 ? diff : a.sort_order - b.sort_order;
@@ -825,6 +835,7 @@ export default function LiveBoard() {
         <span className="text-green-400 dark:text-green-300 text-xs font-mono">{purchased} <span className="text-zinc-600 dark:text-zinc-500">done</span></span>
         <span className="text-yellow-400 dark:text-yellow-300 text-xs font-mono">{inProgress} <span className="text-zinc-600 dark:text-zinc-500">claiming</span></span>
         <span className="text-gray-700 dark:text-gray-600 text-xs font-mono">{remaining} <span className="text-zinc-600 dark:text-zinc-500">left</span></span>
+        {needsSetup > 0 && <span className="text-zinc-400 text-xs font-mono">{needsSetup} <span className="text-zinc-600 dark:text-zinc-500">setup</span></span>}
         {withGaps > 0 && <span className="text-red-400 dark:text-red-700 text-xs font-mono font-bold">{withGaps} gaps</span>}
         <div className="ml-auto flex items-center gap-2">
           {showPurchaseChrome && (
@@ -899,6 +910,7 @@ export default function LiveBoard() {
             <div className="flex gap-1.5 flex-wrap">
               {([
                 ['all',      'All'],
+                ['setup',    'Setup'],
                 ['none',     'Remaining'],
                 ['claiming', 'Claiming'],
                 ['partial',  'Partial'],
@@ -1378,6 +1390,16 @@ function CellContent({
       );
 
     case 'status':
+      if (status === 'setup') {
+        return (
+          <span
+            className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 px-2 py-0.5 rounded-full"
+            title="No badge days requested yet"
+          >
+            Setup
+          </span>
+        );
+      }
       if (status === 'complete') {
         return (
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 border border-green-300 dark:border-green-800 px-2 py-0.5 rounded-full">
@@ -1761,7 +1783,7 @@ function BuyerQueuePanel({
             onClick={() => run(onJoin)}
             className="mt-2 w-full text-xs font-bold px-3 py-1.5 rounded bg-sky-500 hover:bg-sky-400 text-white disabled:opacity-50"
           >
-            {myActiveCount > 0 ? 'Add another cookie' : 'Join line'}
+            {myActiveCount > 0 ? 'Add another place in line' : 'Join line'}
           </button>
         )}
       </div>
