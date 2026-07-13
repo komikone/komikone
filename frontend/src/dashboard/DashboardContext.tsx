@@ -74,8 +74,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       .then(async (t) => {
         let ys = await api.years.list(t);
 
-        // Local/dev Clerk IDs differ from prod — auto-enroll into the current year if needed
-        if (ys.length === 0) {
+        // Local/dev only — prod users must join via invite accept so invites get marked used
+        if (ys.length === 0 && import.meta.env.DEV) {
           const current = await api.years.current(t).catch(() => null);
           if (current) {
             await api.years.enroll(current.id, t, {

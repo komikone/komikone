@@ -1180,11 +1180,26 @@ app.post('/api/invites/:code/accept', async (c) => {
   if (!invite) return err('Invite not found', 404);
   if (invite.used_at) return err('This invite has already been used', 409);
 
-  // Check not already a member of this year
+  // Already a member (e.g. dashboard enroll) — still mark this invite used
   const existing = await c.env.DB.prepare(
-    'SELECT id FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
-  ).bind(invite.year_id, access.userId).first();
-  if (existing) return err('You are already registered for this year', 409);
+    'SELECT * FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
+  ).bind(invite.year_id, access.userId).first<YearMember>();
+  if (existing) {
+    await c.env.DB.prepare(`
+      UPDATE invites SET used_by_clerk_user_id = ?, used_at = datetime('now')
+      WHERE code = ? AND used_at IS NULL
+    `).bind(access.userId, code).run();
+    if (!existing.sponsor_clerk_user_id) {
+      await c.env.DB.prepare(`
+        UPDATE year_members SET sponsor_clerk_user_id = ?
+        WHERE id = ?
+      `).bind(invite.invited_by_clerk_user_id, existing.id).run();
+    }
+    const member = await c.env.DB.prepare(
+      'SELECT * FROM year_members WHERE id = ?'
+    ).bind(existing.id).first<YearMember>();
+    return json({ ok: true, member: member ?? existing, already_registered: true });
+  }
 
   const db = c.env.DB;
   const yearId = invite.year_id;
@@ -1752,6 +1767,36 @@ app.delete('/api/years/:yearId/events/:eventId/my-group/participants/:pid', asyn
   return json({ ok: true });
 });
 
+/** Mark unused invites as used when a matching year member already exists (name or email path heal). */
+async function reconcileUnusedInvites(db: D1Database, yearId: number, invitedBy: string): Promise<void> {
+  const pending = await db.prepare(
+    `SELECT * FROM invites
+     WHERE year_id = ? AND invited_by_clerk_user_id = ? AND used_at IS NULL
+       AND TRIM(COALESCE(label, '')) != ''`
+  ).bind(yearId, invitedBy).all<Invite>();
+
+  for (const inv of pending.results) {
+    const label = inv.label.trim().toLowerCase();
+    const matches = await db.prepare(
+      `SELECT * FROM year_members
+       WHERE year_id = ?
+         AND LOWER(TRIM(first_name || ' ' || last_name)) = ?`
+    ).bind(yearId, label).all<YearMember>();
+
+    if (matches.results.length !== 1) continue;
+    const ym = matches.results[0];
+    await db.prepare(`
+      UPDATE invites SET used_by_clerk_user_id = ?, used_at = COALESCE(?, datetime('now'))
+      WHERE id = ? AND used_at IS NULL
+    `).bind(ym.clerk_user_id, ym.joined_at, inv.id).run();
+    if (!ym.sponsor_clerk_user_id) {
+      await db.prepare(
+        'UPDATE year_members SET sponsor_clerk_user_id = ? WHERE id = ?'
+      ).bind(invitedBy, ym.id).run();
+    }
+  }
+}
+
 // List invites created by the current user for a year
 app.get('/api/years/:yearId/invites', async (c) => {
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
@@ -1763,6 +1808,8 @@ app.get('/api/years/:yearId/invites', async (c) => {
     'SELECT id FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
   ).bind(yearId, access.userId).first();
   if (!member) return err('Not a member of this year', 403);
+
+  await reconcileUnusedInvites(c.env.DB, yearId, access.userId);
 
   const rows = await c.env.DB.prepare(
     'SELECT * FROM invites WHERE year_id = ? AND invited_by_clerk_user_id = ? ORDER BY created_at DESC'
