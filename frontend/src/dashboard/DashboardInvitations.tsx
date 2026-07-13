@@ -152,13 +152,15 @@ export default function DashboardInvitations() {
           >
             {copied === inv.code ? 'Copied!' : 'Copy link'}
           </button>
-          <button
-            onClick={() => handleResend(inv.id, inv.invited_email)}
-            disabled={busyId === inv.id}
-            className="text-xs text-gray-400 hover:text-gray-800 disabled:opacity-50"
-          >
-            {busyId === inv.id ? '…' : 'Resend email'}
-          </button>
+          {inv.invited_email && (
+            <button
+              onClick={() => handleResend(inv.id, inv.invited_email)}
+              disabled={busyId === inv.id}
+              className="text-xs text-gray-400 hover:text-gray-800 disabled:opacity-50"
+            >
+              {busyId === inv.id ? '…' : 'Resend email'}
+            </button>
+          )}
           <button
             onClick={() => handleDelete(inv.id, inv.label)}
             disabled={busyId === inv.id}

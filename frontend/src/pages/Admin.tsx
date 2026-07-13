@@ -73,7 +73,7 @@ export default function Admin() {
   const participants = activeRegType === 'return' ? returnParticipants : openParticipants;
 
   const getAuth = useCallback(async (): Promise<string> => {
-    const t = await getToken({ template: 'komikone' }) ?? '';
+    const t = await getToken({ template: 'komikone' }) ?? await getToken() ?? '';
     if (t) setSecret(t);
     return t;
   }, [getToken]);
@@ -519,7 +519,7 @@ export default function Admin() {
                 eventCount={yearEvents.length}
                 memberCount={yearMembers.length}
                 inviteCount={yearInvites.length}
-                secret={secret}
+                getAuth={getAuth}
                 onDeleted={() => handleYearDeleted(activeYear.con_year)}
                 onDummiesChanged={() => reloadAll()}
               />
@@ -2318,7 +2318,7 @@ function SettingsTab({
   eventCount,
   memberCount,
   inviteCount,
-  secret,
+  getAuth,
   onDeleted,
   onDummiesChanged,
 }: {
@@ -2326,7 +2326,7 @@ function SettingsTab({
   eventCount: number;
   memberCount: number;
   inviteCount: number;
-  secret: string;
+  getAuth: () => Promise<string>;
   onDeleted: () => void;
   onDummiesChanged: () => void;
 }) {
@@ -2341,14 +2341,21 @@ function SettingsTab({
 
   const canDelete = confirmText === String(year.con_year);
 
+  const requireAuth = useCallback(async () => {
+    const tok = await getAuth();
+    if (!tok) throw new Error('Not signed in — refresh the page and try again');
+    return tok;
+  }, [getAuth]);
+
   const refreshDummies = useCallback(async () => {
     try {
-      const c = await api.admin.years.dummies.count(secret, year.id);
+      const tok = await requireAuth();
+      const c = await api.admin.years.dummies.count(tok, year.id);
       setDummyCount({ participants: c.participants, groups: c.groups });
     } catch {
       setDummyCount(null);
     }
-  }, [secret, year.id]);
+  }, [requireAuth, year.id]);
 
   useEffect(() => { refreshDummies(); }, [refreshDummies]);
 
@@ -2356,7 +2363,8 @@ function SettingsTab({
     setSeeding(true);
     setDummyMsg('');
     try {
-      const res = await api.admin.years.dummies.seed(secret, year.id, {
+      const tok = await requireAuth();
+      const res = await api.admin.years.dummies.seed(tok, year.id, {
         count: seedCount,
         clear_existing: true,
       });
@@ -2375,7 +2383,8 @@ function SettingsTab({
     setClearing(true);
     setDummyMsg('');
     try {
-      const res = await api.admin.years.dummies.clear(secret, year.id);
+      const tok = await requireAuth();
+      const res = await api.admin.years.dummies.clear(tok, year.id);
       setDummyMsg(`Removed ${res.participants_deleted} participants and ${res.groups_deleted} groups.`);
       await refreshDummies();
       onDummiesChanged();
@@ -2394,7 +2403,8 @@ function SettingsTab({
 
     setDeleting(true);
     try {
-      await api.admin.years.delete(secret, year.id);
+      const tok = await requireAuth();
+      await api.admin.years.delete(tok, year.id);
       onDeleted();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to delete year');
