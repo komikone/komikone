@@ -42,7 +42,7 @@ body {
   animation: whos-next-flash 1.1s ease-in-out infinite;
 }
 
-/* Chrome/Safari autofill paints dark text — force readable contrast in dark mode */
+/* Autofill: keep readable text/background depending on form surface */
 .dark input:-webkit-autofill,
 .dark input:-webkit-autofill:hover,
 .dark input:-webkit-autofill:focus,
@@ -52,4 +52,14 @@ body {
   caret-color: #f9fafb;
   box-shadow: 0 0 0px 1000px #1f2937 inset;
   transition: background-color 99999s ease-in-out 0s;
+}
+
+/* Light-surface fields in dark mode (white/gray-100 cards) */
+.dark input.input-on-light:-webkit-autofill,
+.dark input.input-on-light:-webkit-autofill:hover,
+.dark input.input-on-light:-webkit-autofill:focus,
+.dark textarea.input-on-light:-webkit-autofill {
+  -webkit-text-fill-color: #111827;
+  caret-color: #111827;
+  box-shadow: 0 0 0px 1000px #f3f4f6 inset;
 }

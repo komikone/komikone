@@ -162,7 +162,7 @@ export default function Registration() {
                 required
                 value={form.first_name}
                 onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))}
-                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-gray-50 focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
@@ -172,7 +172,7 @@ export default function Registration() {
                 required
                 value={form.last_name}
                 onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))}
-                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-gray-50 focus:outline-none focus:border-blue-500"
               />
             </div>
           </div>
@@ -188,7 +188,7 @@ export default function Registration() {
               value={form.member_id}
               onChange={(e) => setForm((f) => ({ ...f, member_id: normalizeMemberIdInput(e.target.value) }))}
               placeholder="e.g. AB12CD34"
-              className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 font-mono uppercase tracking-wide"
+              className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-gray-50 placeholder-gray-400 focus:outline-none focus:border-blue-500 font-mono uppercase tracking-wide"
               autoCapitalize="characters"
               spellCheck={false}
             />

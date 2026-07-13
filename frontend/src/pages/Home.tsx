@@ -190,8 +190,8 @@ function InviteEntry({
   };
 
   const inputCls = variant === 'dark'
-    ? 'flex-1 bg-white/90 border-2 border-white/30 focus:border-yellow-400 text-white font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider'
-    : 'flex-1 bg-gray-50 dark:bg-gray-100 border-2 border-black dark:border-gray-300 focus:border-red-500 dark:focus:border-yellow-400 text-gray-900 dark:text-white font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider';
+    ? 'input-on-light flex-1 bg-white/95 border-2 border-white/40 focus:border-yellow-400 text-gray-900 placeholder:text-gray-500 font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider'
+    : 'input-on-light flex-1 bg-gray-50 dark:bg-gray-100 border-2 border-black dark:border-gray-300 focus:border-red-500 dark:focus:border-yellow-400 text-gray-900 dark:text-gray-900 placeholder:text-gray-500 font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider';
 
   const btnCls = variant === 'dark'
     ? 'font-bangers tracking-wide text-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-3 border-2 border-white comic-shadow-sm transition-all'
@@ -505,7 +505,7 @@ function InviteRequestModal({ onClose }: { onClose: () => void }) {
       setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const inputCls =
-    'w-full bg-gray-50 dark:bg-gray-100 border-2 border-black dark:border-gray-300 px-3 py-2 text-gray-900 dark:text-gray-900 text-sm focus:outline-none focus:border-red-500 dark:focus:border-yellow-400';
+    'input-on-light w-full bg-gray-50 dark:bg-gray-100 border-2 border-black dark:border-gray-300 px-3 py-2 text-gray-900 dark:text-gray-900 text-sm focus:outline-none focus:border-red-500 dark:focus:border-yellow-400 placeholder:text-gray-500';
 
   return (
     <div

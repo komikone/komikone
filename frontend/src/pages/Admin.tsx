@@ -2654,7 +2654,7 @@ function BackgroundsPanel({ secret }: { secret: string }) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const inputCls = 'w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500';
+const inputCls = 'w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-gray-50 text-sm placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-blue-500';
 
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

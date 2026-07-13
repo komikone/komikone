@@ -905,7 +905,7 @@ export default function LiveBoard() {
               placeholder="Search… (* wildcard)"
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
-              className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-white w-52 focus:outline-none focus:border-yellow-400 dark:focus:border-yellow-400 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-gray-50 w-52 focus:outline-none focus:border-yellow-400 dark:focus:border-yellow-400 placeholder:text-gray-400 dark:placeholder:text-gray-500"
             />
             <div className="flex gap-1.5 flex-wrap">
               {([
@@ -1556,7 +1556,7 @@ function LinkIdentityModal({
             placeholder="Search by name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full mt-3 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-yellow-500 placeholder-gray-500"
+            className="w-full mt-3 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-gray-50 text-sm focus:outline-none focus:border-yellow-500 placeholder:text-gray-500"
           />
         </div>
         <div className="overflow-y-auto max-h-72 py-1">
@@ -1625,7 +1625,7 @@ function EditParticipantModal({
           ...f,
           [key]: key === 'member_id' ? normalizeMemberIdInput(e.target.value) : e.target.value,
         }))}
-        className={`w-full mt-1 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500 ${mono ? 'font-mono uppercase tracking-wide' : ''}`}
+        className={`w-full mt-1 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-gray-50 text-sm focus:outline-none focus:border-blue-500 ${mono ? 'font-mono uppercase tracking-wide' : ''}`}
         autoCapitalize={key === 'member_id' ? 'characters' : undefined}
         spellCheck={key === 'member_id' ? false : undefined}
       />
@@ -1650,7 +1650,7 @@ function EditParticipantModal({
             <select
               value={form.badge_type}
               onChange={(e) => setForm((f) => ({ ...f, badge_type: e.target.value as 'ADULT' | 'JUNIOR' }))}
-              className="w-full mt-1 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
+              className="w-full mt-1 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-gray-50 text-sm focus:outline-none focus:border-blue-500"
             >
               <option value="ADULT">Adult</option>
               <option value="JUNIOR">Junior</option>
@@ -2168,7 +2168,7 @@ function WhoInput({ initial, onSave, onCancel }: { initial: string; onSave: (v: 
         value={val}
         onChange={(e) => setVal(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') onSave(val); if (e.key === 'Escape') onCancel(); }}
-        className="bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-600 rounded px-1.5 py-0.5 text-xs text-gray-900 dark:text-white w-24 focus:outline-none"
+        className="bg-white dark:bg-gray-800 border border-gray-400 dark:border-gray-600 rounded px-1.5 py-0.5 text-xs text-gray-900 dark:text-gray-50 w-24 focus:outline-none"
       />
       <button onClick={() => onSave(val)} className="text-xs text-green-600 hover:text-green-800 dark:text-green-400">✓</button>
       <button onClick={onCancel} className="text-xs text-gray-400 hover:text-red-600">✕</button>
