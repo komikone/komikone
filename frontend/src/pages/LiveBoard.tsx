@@ -7,6 +7,8 @@ import { useTheme } from '../lib/useTheme';
 import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
 
 const POLL_MS = 8000;
+/** Comic-Con purchase limit — matches worker MAX_ACTIVE_CLAIMS. */
+const MAX_ACTIVE_CLAIMS = 3;
 const DAY_SHORT: Record<string, string> = { preview: 'PV', thu: 'Th', fri: 'Fr', sat: 'Sa', sun: 'Su' };
 const DAY_SLOT_W = 26;
 const DAY_GAP = 2;
@@ -387,11 +389,17 @@ export default function LiveBoard() {
   const handleClaim = async (p: Participant) => {
     const me = participants.find((x) => x.id === identityId);
     if (!me) { setShowLinkModal(true); return; }
+    const myName = `${me.first_name} ${me.last_name}`;
+    const active = participants.filter((x) => hasClaimByMe(x, myName)).length;
+    if (active >= MAX_ACTIVE_CLAIMS) {
+      alert(`You can only claim ${MAX_ACTIVE_CLAIMS} people at a time (Comic-Con purchase limit). Release someone first.`);
+      return;
+    }
     try {
       const clerkToken = await getToken({ template: 'komikone' });
       if (!clerkToken) return;
       await api.participants.claim(
-        Number(eventId), p.id, clerkToken, `${me.first_name} ${me.last_name}`,
+        Number(eventId), p.id, clerkToken, myName,
         { simulation },
       );
       await fetchAll();
@@ -559,6 +567,10 @@ export default function LiveBoard() {
   const me = participants.find((p) => p.id === identityId) ?? null;
   const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
   const myClerkId = user?.id ?? me?.clerk_user_id ?? null;
+  const myClaimCount = myDisplayName
+    ? participants.filter((p) => hasClaimByMe(p, myDisplayName)).length
+    : 0;
+  const atClaimLimit = myClaimCount >= MAX_ACTIVE_CLAIMS;
 
   // Default: you + group pinned; during purchasing your active claims rise next (claim order).
   // Manual drag order applies outside purchase/simulation only — purchase toggles don't reshuffle.
@@ -834,6 +846,14 @@ export default function LiveBoard() {
       <div className="bg-black dark:bg-zinc-950 border-b-2 border-zinc-800 dark:border-yellow-950 px-4 py-1 flex items-center gap-5 shrink-0">
         <span className="text-green-400 dark:text-green-300 text-xs font-mono">{purchased} <span className="text-zinc-600 dark:text-zinc-500">done</span></span>
         <span className="text-yellow-400 dark:text-yellow-300 text-xs font-mono">{inProgress} <span className="text-zinc-600 dark:text-zinc-500">claiming</span></span>
+        {myDisplayName && (
+          <span
+            className={`text-xs font-mono ${atClaimLimit ? 'text-orange-400 font-bold' : 'text-zinc-400'}`}
+            title="Comic-Con lets you buy for at most 3 people at a time"
+          >
+            {myClaimCount}/{MAX_ACTIVE_CLAIMS} <span className="text-zinc-600 dark:text-zinc-500">yours</span>
+          </span>
+        )}
         <span className="text-gray-700 dark:text-gray-600 text-xs font-mono">{remaining} <span className="text-zinc-600 dark:text-zinc-500">left</span></span>
         {needsSetup > 0 && <span className="text-zinc-400 text-xs font-mono">{needsSetup} <span className="text-zinc-600 dark:text-zinc-500">setup</span></span>}
         {withGaps > 0 && <span className="text-red-400 dark:text-red-700 text-xs font-mono font-bold">{withGaps} gaps</span>}
@@ -872,6 +892,7 @@ export default function LiveBoard() {
           queue={priorityQueue}
           me={me}
           identityId={identityId}
+          claimSlotsLeft={Math.max(0, MAX_ACTIVE_CLAIMS - myClaimCount)}
           onClaim={handleClaim}
           onDismiss={() => setShowNextUp(false)}
         />
@@ -1129,6 +1150,7 @@ export default function LiveBoard() {
                             canEditRequested={!showPurchaseChrome && canEditIdentityRow(p, me, identityId, myClerkId)}
                             canEditProfile={canEditIdentityRow(p, me, identityId, myClerkId)}
                             canTogglePurchase={hasClaimByMe(p, myDisplayName)}
+                            atClaimLimit={atClaimLimit}
                             onClaim={handleClaim}
                             onUnclaim={handleUnclaim}
                             onRequestedToggle={handleRequestedToggle}
@@ -1214,7 +1236,7 @@ function CopyCell({ value, children }: { value: string; children?: React.ReactNo
 
 function CellContent({
   col, p, status, eventStatus, editingRow, setEditingRow, canEditRequested, canEditProfile, canTogglePurchase,
-  onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
+  atClaimLimit, onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
 }: {
   col: ColKey;
   p: Participant;
@@ -1226,6 +1248,7 @@ function CellContent({
   canEditRequested: boolean;
   canEditProfile: boolean;
   canTogglePurchase: boolean;
+  atClaimLimit: boolean;
   onClaim: (p: Participant) => void;
   onUnclaim: (p: Participant) => void;
   onRequestedToggle: (p: Participant, day: DayKey, checked: boolean) => void;
@@ -1421,7 +1444,13 @@ function CellContent({
       return (
         <button
           onClick={() => onClaim(p)}
-          className="text-xs font-bold px-3 py-1 rounded transition-colors bg-red-600 hover:bg-red-700 text-white border-2 border-black dark:bg-yellow-500 dark:hover:bg-yellow-400 dark:text-yellow-950 dark:border-transparent"
+          disabled={atClaimLimit}
+          title={atClaimLimit ? `Limit ${MAX_ACTIVE_CLAIMS} claims — release someone first` : undefined}
+          className={`text-xs font-bold px-3 py-1 rounded transition-colors border-2 ${
+            atClaimLimit
+              ? 'bg-gray-300 text-gray-500 border-gray-400 cursor-not-allowed dark:bg-zinc-700 dark:text-zinc-400 dark:border-zinc-600'
+              : 'bg-red-600 hover:bg-red-700 text-white border-black dark:bg-yellow-500 dark:hover:bg-yellow-400 dark:text-yellow-950 dark:border-transparent'
+          }`}
         >
           Claim
         </button>
@@ -2060,15 +2089,16 @@ function priorityReason(p: Participant, me: Participant | null, identityId: numb
 }
 
 function NextUpPanel({
-  queue, me, identityId, onClaim, onDismiss,
+  queue, me, identityId, claimSlotsLeft, onClaim, onDismiss,
 }: {
   queue: Participant[];
   me: Participant | null;
   identityId: number | null;
+  claimSlotsLeft: number;
   onClaim: (p: Participant) => Promise<void>;
   onDismiss: () => void;
 }) {
-  const [slots] = useState(() => queue.slice(0, 3));
+  const [slots] = useState(() => queue.slice(0, MAX_ACTIVE_CLAIMS));
   const [claimed, setClaimed] = useState<Set<number>>(new Set());
 
   if (slots.length === 0) return null;
@@ -2082,13 +2112,21 @@ function NextUpPanel({
     <div className="bg-white dark:bg-gray-900 border-b-4 border-yellow-400 px-4 py-3 shrink-0">
       <div className="flex items-center justify-between mb-2">
         <span className="text-yellow-400 text-[10px] font-bold uppercase tracking-widest">
-          Buy for next — up to 3
+          Buy for next — {claimSlotsLeft}/{MAX_ACTIVE_CLAIMS} claim slots left
         </span>
         <button onClick={onDismiss} className="text-zinc-500 hover:text-gray-700 text-xs px-1">✕</button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         {slots.map((p) => (
-          <NextUpCard key={p.id} p={p} me={me} identityId={identityId} claimed={claimed.has(p.id)} onClaim={handleClaim} />
+          <NextUpCard
+            key={p.id}
+            p={p}
+            me={me}
+            identityId={identityId}
+            claimed={claimed.has(p.id)}
+            canClaim={claimSlotsLeft > 0 && !claimed.has(p.id)}
+            onClaim={handleClaim}
+          />
         ))}
       </div>
     </div>
@@ -2096,12 +2134,13 @@ function NextUpPanel({
 }
 
 function NextUpCard({
-  p, me, identityId, claimed, onClaim,
+  p, me, identityId, claimed, canClaim, onClaim,
 }: {
   p: Participant;
   me: Participant | null;
   identityId: number | null;
   claimed: boolean;
+  canClaim: boolean;
   onClaim: (p: Participant) => Promise<void>;
 }) {
   const [claiming, setClaiming] = useState(false);
@@ -2148,10 +2187,11 @@ function NextUpCard({
       ) : (
         <button
           onClick={async () => { setClaiming(true); await onClaim(p); setClaiming(false); }}
-          disabled={claiming}
-          className="mt-auto text-xs font-bold py-1.5 rounded bg-yellow-400 hover:bg-yellow-300 text-black border border-yellow-200 disabled:opacity-50 transition-colors w-full"
+          disabled={claiming || !canClaim}
+          title={!canClaim ? `Limit ${MAX_ACTIVE_CLAIMS} claims — release someone first` : undefined}
+          className="mt-auto text-xs font-bold py-1.5 rounded bg-yellow-400 hover:bg-yellow-300 text-black border border-yellow-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full"
         >
-          {claiming ? 'Claiming…' : 'Claim'}
+          {claiming ? 'Claiming…' : !canClaim ? 'Limit reached' : 'Claim'}
         </button>
       )}
     </div>
