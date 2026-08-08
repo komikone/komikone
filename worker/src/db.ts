@@ -173,6 +173,8 @@ export type YearMeta = {
 };
 
 export const CLAIM_TIMEOUT_MINUTES = 10;
+/** Comic-Con lets you buy badges for at most 3 people per purchase session. */
+export const MAX_ACTIVE_CLAIMS = 3;
 
 export function computePurchaseTotal(p: Participant, event: Event): number {
   const tier = p.badge_type === 'ADULT' ? 'adult' : 'junior';

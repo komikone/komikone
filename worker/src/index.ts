@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, enrichParticipant, isClaimExpired } from './db';
+import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, enrichParticipant, isClaimExpired, MAX_ACTIVE_CLAIMS } from './db';
 import {
   assertRegistrationOpen,
   daysToSql,
@@ -603,11 +603,26 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
     return err(`Already claimed by ${p.purchasing_claimed_by}`, 409);
   }
 
+  const claimer = body.coordinator_name.trim();
+  const mine = await c.env.DB.prepare(`
+    SELECT purchasing_claimed_at FROM participants
+    WHERE event_id = ?
+      AND purchasing_claimed_by != ''
+      AND LOWER(TRIM(purchasing_claimed_by)) = LOWER(?)
+  `).bind(eventId, claimer).all<{ purchasing_claimed_at: string | null }>();
+  const activeClaims = mine.results.filter((r) => !isClaimExpired(r.purchasing_claimed_at)).length;
+  if (activeClaims >= MAX_ACTIVE_CLAIMS) {
+    return err(
+      `You can only claim ${MAX_ACTIVE_CLAIMS} people at a time (Comic-Con purchase limit). Release someone first.`,
+      400,
+    );
+  }
+
   await c.env.DB.prepare(`
     UPDATE participants
     SET purchasing_claimed_by = ?, purchasing_claimed_at = datetime('now'), updated_at = datetime('now')
     WHERE id = ?
-  `).bind(body.coordinator_name.trim(), pid).run();
+  `).bind(claimer, pid).run();
 
   return json({ ok: true });
 });
