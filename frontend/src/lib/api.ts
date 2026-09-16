@@ -252,11 +252,11 @@ export const api = {
         headers: authHeaders(clerkToken),
         body: JSON.stringify(data),
       }),
-    claim: (eventId: number, pid: number, clerkToken: string, coordinator_name: string, opts?: { simulation?: boolean }) =>
+    claim: (eventId: number, pid: number, clerkToken: string, coordinator_name: string) =>
       req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/claim`, {
         method: 'POST',
         headers: authHeaders(clerkToken),
-        body: JSON.stringify({ coordinator_name, simulation: opts?.simulation === true }),
+        body: JSON.stringify({ coordinator_name }),
       }),
     unclaim: (eventId: number, pid: number, clerkToken: string) =>
       req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/unclaim`, {
@@ -268,7 +268,7 @@ export const api = {
       eventId: number, pid: number, clerkToken: string,
       data: { pur_preview?: boolean; pur_thu?: boolean; pur_fri?: boolean; pur_sat?: boolean; pur_sun?: boolean; who_purchased?: string }
     ) =>
-      req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/purchased`, {
+      req<{ ok: boolean; claim_released?: boolean }>(`/api/events/${eventId}/participants/${pid}/purchased`, {
         method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),
       }),
     updateRequested: (
@@ -284,7 +284,10 @@ export const api = {
       }),
     updateProfile: (
       eventId: number, pid: number, clerkToken: string,
-      data: { first_name?: string; last_name?: string; member_id?: string; badge_type?: string; notes?: string }
+      data: {
+        first_name?: string; last_name?: string; member_id?: string; badge_type?: string;
+        notes?: string; return_eligible?: boolean;
+      }
     ) =>
       req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/profile`, {
         method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),

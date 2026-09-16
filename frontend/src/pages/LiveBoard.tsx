@@ -5,10 +5,28 @@ import { api, type EventDetail, type Participant, type PurchaseQueueEntry, type 
 import { HeaderUserMenu } from '../components/HeaderUserMenu';
 import { useTheme } from '../lib/useTheme';
 import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
+import { ToggleSwitch } from '../components/ToggleSwitch';
+import {
+  BLOCKER_LABEL,
+  CLAIM_TIMEOUT_MINUTES,
+  MAX_ACTIVE_CLAIMS,
+  type PurchaseBlocker,
+  type SimPatches,
+  applySimPatches,
+  claimRemainingMs,
+  formatClaimCountdown,
+  hasRequestedDays,
+  holdsClaimSlot,
+  isClaimLive,
+  isClaimable,
+  isClaimedBy,
+  parseClaimTimestamp,
+  purchaseBlockers,
+  purchasedByMe,
+  setSimPatch,
+} from '../lib/purchaseBoard';
 
 const POLL_MS = 8000;
-/** Comic-Con purchase limit — matches worker MAX_ACTIVE_CLAIMS. */
-const MAX_ACTIVE_CLAIMS = 3;
 const DAY_SHORT: Record<string, string> = { preview: 'PV', thu: 'Th', fri: 'Fr', sat: 'Sa', sun: 'Su' };
 const DAY_SLOT_W = 26;
 const DAY_GAP = 2;
@@ -43,26 +61,34 @@ const DEFAULT_WIDTHS: Record<ColKey, number> = {
   idx: 36, first: 90, last: 96, actions: 28, return_eligible: 52,
   badge_type: 88, member_id: 118,
   requested: 168, purchased: 168, gaps: 168,
-  status: 112, total: 74, who: 118, group: 110,
+  status: 128, total: 74, who: 118, group: 110,
 };
 
 const DAY_COLS = new Set<ColKey>(['requested', 'purchased', 'gaps']);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function hasRequestedDays(p: Participant): boolean {
-  return !!(p.req_preview || p.req_thu || p.req_fri || p.req_sat || p.req_sun);
+/** Claimed by you, or bought by you after the claim auto-released on Done. */
+function canEditPurchases(p: Participant, myDisplayName: string, now = Date.now()): boolean {
+  return isClaimedBy(p, myDisplayName, now) || (p.all_purchased && purchasedByMe(p, myDisplayName));
 }
 
-function rowStatus(p: Participant): RowStatus {
+/** Column-width friendly version of BLOCKER_LABEL. */
+const BLOCKER_SHORT: Record<PurchaseBlocker, string> = {
+  days: 'Needs badge days',
+  member_id: 'Needs Member ID',
+  return_eligible: 'Not return eligible',
+};
+
+function rowStatus(p: Participant, now = Date.now()): RowStatus {
   if (!hasRequestedDays(p)) return 'setup';
   if (p.all_purchased) return 'complete';
-  if (p.claim_active) return 'claiming';
+  if (isClaimLive(p, now)) return 'claiming';
   if (p.any_purchased) return 'partial';
   return 'none';
 }
 
-function sortValue(p: Participant, col: ColKey, naturalIdx: number): string | number {
+function sortValue(p: Participant, col: ColKey, naturalIdx: number, now = Date.now()): string | number {
   switch (col) {
     case 'idx':        return naturalIdx;
     case 'first':      return p.first_name.toLowerCase();
@@ -70,7 +96,7 @@ function sortValue(p: Participant, col: ColKey, naturalIdx: number): string | nu
     case 'member_id':  return p.member_id.toLowerCase();
     case 'badge_type': return p.badge_type;
     case 'requested':  return DAY_KEYS.filter((d) => p[`req_${d}` as keyof Participant]).length;
-    case 'status':     return ['setup', 'none', 'partial', 'claiming', 'complete'].indexOf(rowStatus(p));
+    case 'status':     return ['setup', 'none', 'partial', 'claiming', 'complete'].indexOf(rowStatus(p, now));
     case 'purchased':  return DAY_KEYS.filter((d) => p[`pur_${d}` as keyof Participant]).length;
     case 'gaps':            return p.gaps.length;
     case 'total':           return p.purchase_total;
@@ -139,13 +165,6 @@ function canEditIdentityRow(
   return false;
 }
 
-/** Claimed by you — required for purchase day toggles; no admin bypass. */
-function hasClaimByMe(p: Participant, myDisplayName: string): boolean {
-  if (!p.claim_active) return false;
-  if (!myDisplayName.trim()) return false;
-  return p.purchasing_claimed_by.trim().toLowerCase() === myDisplayName.trim().toLowerCase();
-}
-
 /** Lower tier = higher on the board. During purchasing, your active claims float below self/group. */
 function rowSortTier(
   p: Participant,
@@ -153,16 +172,17 @@ function rowSortTier(
   identityId: number | null,
   myDisplayName: string,
   purchaseMode: boolean,
+  now = Date.now(),
 ): number {
   if (identityId != null && p.id === identityId) return 0;
   if (me?.group_id != null && p.group_id === me.group_id) return 1;
-  if (purchaseMode && hasClaimByMe(p, myDisplayName) && !p.all_purchased) return 2;
+  if (purchaseMode && holdsClaimSlot(p, myDisplayName, now)) return 2;
   return 3;
 }
 
 function claimSortKey(p: Participant): number {
   if (!p.purchasing_claimed_at) return Number.MAX_SAFE_INTEGER;
-  return new Date(p.purchasing_claimed_at).getTime();
+  return parseClaimTimestamp(p.purchasing_claimed_at) ?? Number.MAX_SAFE_INTEGER;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -176,7 +196,7 @@ export default function LiveBoard() {
   const { toggle, isDark } = useTheme();
 
   const [event, setEvent] = useState<EventDetail | null>(null);
-  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [serverParticipants, setServerParticipants] = useState<Participant[]>([]);
   const [buyerQueue, setBuyerQueue] = useState<PurchaseQueueEntry[]>([]);
   const [showBuyerQueue, setShowBuyerQueue] = useState(true);
   const [error, setError] = useState('');
@@ -189,10 +209,14 @@ export default function LiveBoard() {
   const [simulation, setSimulation] = useState(() => {
     try { return localStorage.getItem(simStorageKey(eventId)) === '1'; } catch { return false; }
   });
+  /** Practice edits live here only — Simulate never writes to the roster. */
+  const [simPatches, setSimPatches] = useState<SimPatches>({});
   /** null = still checking; string = block reason before board access */
   const [accessBlock, setAccessBlock] = useState<'member_id' | 'return_eligible' | null | undefined>(undefined);
   const [openLiveEventId, setOpenLiveEventId] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const prevIds = useRef<Set<number>>(new Set());
+  const expiredFetchRef = useRef(false);
 
   const isPlatformAdmin = user?.publicMetadata?.role === 'admin';
 
@@ -201,6 +225,26 @@ export default function LiveBoard() {
       localStorage.setItem(simStorageKey(eventId), simulation ? '1' : '0');
     } catch { /* ignore */ }
   }, [simulation, eventId]);
+
+  const participants = simulation
+    ? applySimPatches(serverParticipants, simPatches, event, now)
+    : serverParticipants;
+
+  const exitSimulation = () => {
+    setSimulation(false);
+    setSimPatches({});
+    setEditingRow(null);
+  };
+
+  const hasSimEdits = Object.keys(simPatches).length > 0;
+
+  // Tick once per second while any claim is live so countdowns and slot counts stay fresh.
+  const hasLiveClaims = participants.some((p) => isClaimLive(p, now));
+  useEffect(() => {
+    if (!hasLiveClaims) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [hasLiveClaims]);
 
   // Column order (sanitize localStorage — drop unknown keys like a stray empty-header col)
   const [movableCols, setMovableCols] = useState<ColKey[]>(() => {
@@ -278,7 +322,8 @@ export default function LiveBoard() {
     try {
       const [ev, ps, queue] = await Promise.all([
         api.events.get(Number(eventId), clerkToken),
-        api.participants.list(Number(eventId), clerkToken),
+        // Include return-ineligible rows so group members are never silently missing.
+        api.participants.list(Number(eventId), clerkToken, { includeIneligible: true }),
         api.purchaseQueue.list(Number(eventId), clerkToken).catch(() => [] as PurchaseQueueEntry[]),
       ]);
       setEvent(ev);
@@ -286,7 +331,7 @@ export default function LiveBoard() {
       const newFlash: Record<number, boolean> = {};
       for (const p of ps) {
         if (prevIds.current.has(p.id)) {
-          const old = participants.find((x) => x.id === p.id);
+          const old = serverParticipants.find((x) => x.id === p.id);
           if (old && old.updated_at !== p.updated_at) newFlash[p.id] = true;
         }
       }
@@ -295,7 +340,7 @@ export default function LiveBoard() {
         setTimeout(() => setFlash({}), 1200);
       }
       prevIds.current = new Set(ps.map((p) => p.id));
-      setParticipants(ps);
+      setServerParticipants(ps);
       setCustomRowOrder((prev) => {
         if (!prev) return null;
         const pIdSet = new Set(ps.map((p) => p.id));
@@ -309,13 +354,25 @@ export default function LiveBoard() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     }
-  }, [eventId, getToken, participants]);
+  }, [eventId, getToken, serverParticipants]);
 
   useEffect(() => {
     fetchAll();
     const interval = setInterval(fetchAll, POLL_MS);
     return () => clearInterval(interval);
   }, [eventId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When a claim timer hits zero, refresh so server claim_active catches up.
+  useEffect(() => {
+    const anyExpiring = serverParticipants.some(
+      (p) => p.purchasing_claimed_by && claimRemainingMs(p.purchasing_claimed_at, now) === 0 && p.claim_active,
+    );
+    if (anyExpiring && !expiredFetchRef.current) {
+      expiredFetchRef.current = true;
+      void fetchAll();
+    }
+    if (!anyExpiring) expiredFetchRef.current = false;
+  }, [now, serverParticipants, fetchAll]);
 
   // Resolve Clerk identity → participant link, and gate Member ID / return eligibility
   useEffect(() => {
@@ -390,23 +447,39 @@ export default function LiveBoard() {
     const me = participants.find((x) => x.id === identityId);
     if (!me) { setShowLinkModal(true); return; }
     const myName = `${me.first_name} ${me.last_name}`;
-    const active = participants.filter((x) => hasClaimByMe(x, myName)).length;
+    const active = participants.filter((x) => holdsClaimSlot(x, myName, now)).length;
     if (active >= MAX_ACTIVE_CLAIMS) {
       alert(`You can only claim ${MAX_ACTIVE_CLAIMS} people at a time (Comic-Con purchase limit). Release someone first.`);
+      return;
+    }
+    const blockers = purchaseBlockers(p, event);
+    if (blockers.length > 0) {
+      alert(`Can't buy for ${p.first_name} yet — ${blockers.map((b) => BLOCKER_LABEL[b].toLowerCase()).join(', ')}.`);
+      return;
+    }
+    if (simulation) {
+      setSimPatches((prev) => setSimPatch(prev, p.id, {
+        purchasing_claimed_by: myName,
+        purchasing_claimed_at: new Date().toISOString(),
+      }));
       return;
     }
     try {
       const clerkToken = await getToken({ template: 'komikone' });
       if (!clerkToken) return;
-      await api.participants.claim(
-        Number(eventId), p.id, clerkToken, myName,
-        { simulation },
-      );
+      await api.participants.claim(Number(eventId), p.id, clerkToken, myName);
       await fetchAll();
     } catch (e) { alert(e instanceof Error ? e.message : 'Failed'); }
   };
 
   const handleUnclaim = async (p: Participant) => {
+    if (simulation) {
+      setSimPatches((prev) => setSimPatch(prev, p.id, {
+        purchasing_claimed_by: '',
+        purchasing_claimed_at: null,
+      }));
+      return;
+    }
     try {
       const clerkToken = await getToken({ template: 'komikone' });
       if (!clerkToken) return;
@@ -418,8 +491,15 @@ export default function LiveBoard() {
   const handlePurchaseToggle = async (p: Participant, day: DayKey, checked: boolean) => {
     const me = participants.find((x) => x.id === identityId);
     const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
-    if (!hasClaimByMe(p, myDisplayName)) {
+    if (!canEditPurchases(p, myDisplayName, now)) {
       alert('Claim this person first before marking purchase days');
+      return;
+    }
+    if (simulation) {
+      setSimPatches((prev) => setSimPatch(prev, p.id, {
+        [`pur_${day}`]: checked,
+        who_purchased: p.who_purchased || myDisplayName,
+      }));
       return;
     }
     const clerkToken = await getToken({ template: 'komikone' });
@@ -456,8 +536,13 @@ export default function LiveBoard() {
   const handleWhoChange = async (p: Participant, who: string) => {
     const me = participants.find((x) => x.id === identityId);
     const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
-    if (!hasClaimByMe(p, myDisplayName)) {
+    if (!canEditPurchases(p, myDisplayName, now)) {
       alert('Claim this person first before editing who bought');
+      setEditingRow(null);
+      return;
+    }
+    if (simulation) {
+      setSimPatches((prev) => setSimPatch(prev, p.id, { who_purchased: who }));
       setEditingRow(null);
       return;
     }
@@ -556,7 +641,7 @@ export default function LiveBoard() {
     : participants;
 
   const filtered = orderedParticipants.filter((p) => {
-    if (filterStatus !== 'all' && rowStatus(p) !== filterStatus) return false;
+    if (filterStatus !== 'all' && rowStatus(p, now) !== filterStatus) return false;
     if (!filterText) return true;
     const q = filterText.includes('*') ? filterText : `*${filterText}*`;
     const re = wildcardToRegex(q);
@@ -567,8 +652,9 @@ export default function LiveBoard() {
   const me = participants.find((p) => p.id === identityId) ?? null;
   const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
   const myClerkId = user?.id ?? me?.clerk_user_id ?? null;
+  // Finished people keep their "who bought" record but stop consuming a slot.
   const myClaimCount = myDisplayName
-    ? participants.filter((p) => hasClaimByMe(p, myDisplayName)).length
+    ? participants.filter((p) => holdsClaimSlot(p, myDisplayName, now)).length
     : 0;
   const atClaimLimit = myClaimCount >= MAX_ACTIVE_CLAIMS;
 
@@ -577,8 +663,8 @@ export default function LiveBoard() {
   const displayRows = customRowOrder && !showPurchaseChrome
     ? filtered
     : [...filtered].sort((a, b) => {
-        const ta = rowSortTier(a, me, identityId, myDisplayName, showPurchaseChrome);
-        const tb = rowSortTier(b, me, identityId, myDisplayName, showPurchaseChrome);
+        const ta = rowSortTier(a, me, identityId, myDisplayName, showPurchaseChrome, now);
+        const tb = rowSortTier(b, me, identityId, myDisplayName, showPurchaseChrome, now);
         if (ta !== tb) return ta - tb;
 
         if (ta === 2) {
@@ -589,8 +675,8 @@ export default function LiveBoard() {
         if (sortCol) {
           const ai = participants.indexOf(a);
           const bi = participants.indexOf(b);
-          const av = sortValue(a, sortCol, ai);
-          const bv = sortValue(b, sortCol, bi);
+          const av = sortValue(a, sortCol, ai, now);
+          const bv = sortValue(b, sortCol, bi, now);
           const cmp = av < bv ? -1 : av > bv ? 1 : 0;
           return sortDir === 'asc' ? cmp : -cmp;
         }
@@ -598,16 +684,24 @@ export default function LiveBoard() {
         return a.sort_order - b.sort_order || a.id - b.id;
       });
 
+  // People you're responsible for who can't be claimed yet — fix before purchase day.
+  const blockedInMyGroup = participants
+    .filter((p) => !p.all_purchased && canEditIdentityRow(p, me, identityId, myClerkId))
+    .map((p) => ({ p, blockers: purchaseBlockers(p, event) }))
+    .filter(({ blockers }) => blockers.length > 0);
+
   const purchased  = participants.filter((p) => p.all_purchased).length;
-  const inProgress = participants.filter((p) => hasRequestedDays(p) && !p.all_purchased && p.claim_active).length;
-  const remaining  = participants.filter((p) => hasRequestedDays(p) && !p.all_purchased && !p.claim_active).length;
+  const inProgress = participants.filter((p) => hasRequestedDays(p) && !p.all_purchased && isClaimLive(p, now)).length;
+  // "left" means buyable right now, so blocked people are counted separately.
+  const remaining  = participants.filter((p) => isClaimable(p, event) && !isClaimLive(p, now)).length;
   const withGaps   = participants.filter((p) => p.gaps.length > 0 && p.any_purchased).length;
-  const needsSetup = participants.filter((p) => !hasRequestedDays(p)).length;
+  const needsSetup = participants.filter((p) => !p.all_purchased && purchaseBlockers(p, event).length > 0).length;
 
   const [showNextUp, setShowNextUp] = useState(false);
 
+  // Only offer people who can actually be bought for right now.
   const priorityQueue = participants
-    .filter((p) => hasRequestedDays(p) && !p.all_purchased && !p.claim_active)
+    .filter((p) => isClaimable(p, event) && !isClaimLive(p, now))
     .sort((a, b) => {
       const diff = priorityScore(b, me, identityId) - priorityScore(a, me, identityId);
       return diff !== 0 ? diff : a.sort_order - b.sort_order;
@@ -804,13 +898,13 @@ export default function LiveBoard() {
           </span>
           <button
             type="button"
-            onClick={() => setSimulation((v) => !v)}
+            onClick={() => (simulation ? exitSimulation() : setSimulation(true))}
             className={`text-xs font-bold px-2.5 py-0.5 rounded border transition-colors ${
               simulation
                 ? 'bg-fuchsia-500 text-white border-fuchsia-300 shadow-[0_0_12px_rgba(217,70,239,0.55)]'
                 : 'text-zinc-400 dark:text-zinc-300 border-zinc-700 dark:border-zinc-600 hover:text-fuchsia-300 hover:border-fuchsia-500'
             }`}
-            title={simulation ? 'Exit simulation mode' : 'Practice claim & purchase without waiting for purchase day'}
+            title={simulation ? 'Exit practice mode and discard practice changes' : 'Practice claim & purchase without touching the real roster'}
           >
             {simulation ? 'Sim ON' : 'Simulate'}
           </button>
@@ -828,17 +922,28 @@ export default function LiveBoard() {
 
       {simulation && (
         <div className="bg-fuchsia-600 text-white px-4 py-2 shrink-0 flex items-center gap-3 border-b-2 border-fuchsia-300">
-          <span className="text-xs font-black uppercase tracking-[0.2em]">Simulation mode</span>
+          <span className="text-xs font-black uppercase tracking-[0.2em]">Practice mode</span>
           <span className="text-xs text-fuchsia-100">
-            Practice the full claim → purchase flow. Changes still write to this event&apos;s roster.
+            Nothing is saved. Practice claims and purchases stay on your screen — the real roster is untouched.
           </span>
-          <button
-            type="button"
-            onClick={() => setSimulation(false)}
-            className="ml-auto text-xs font-bold underline hover:no-underline shrink-0"
-          >
-            Exit
-          </button>
+          <div className="ml-auto flex items-center gap-3 shrink-0">
+            {hasSimEdits && (
+              <button
+                type="button"
+                onClick={() => setSimPatches({})}
+                className="text-xs font-bold underline hover:no-underline"
+              >
+                Reset practice
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={exitSimulation}
+              className="text-xs font-bold underline hover:no-underline"
+            >
+              Exit
+            </button>
+          </div>
         </div>
       )}
 
@@ -855,7 +960,11 @@ export default function LiveBoard() {
           </span>
         )}
         <span className="text-gray-700 dark:text-gray-600 text-xs font-mono">{remaining} <span className="text-zinc-600 dark:text-zinc-500">left</span></span>
-        {needsSetup > 0 && <span className="text-zinc-400 text-xs font-mono">{needsSetup} <span className="text-zinc-600 dark:text-zinc-500">setup</span></span>}
+        {needsSetup > 0 && (
+          <span className="text-amber-400 text-xs font-mono" title="Missing badge days, Member ID, or return eligibility">
+            {needsSetup} <span className="text-zinc-600 dark:text-zinc-500">blocked</span>
+          </span>
+        )}
         {withGaps > 0 && <span className="text-red-400 dark:text-red-700 text-xs font-mono font-bold">{withGaps} gaps</span>}
         <div className="ml-auto flex items-center gap-2">
           {showPurchaseChrome && (
@@ -890,12 +999,44 @@ export default function LiveBoard() {
       {showPurchaseChrome && showNextUp && priorityQueue.length > 0 && (
         <NextUpPanel
           queue={priorityQueue}
+          participants={participants}
           me={me}
           identityId={identityId}
+          myDisplayName={myDisplayName}
           claimSlotsLeft={Math.max(0, MAX_ACTIVE_CLAIMS - myClaimCount)}
+          now={now}
           onClaim={handleClaim}
           onDismiss={() => setShowNextUp(false)}
         />
+      )}
+
+      {/* ── Group readiness: who can't be bought for yet ── */}
+      {blockedInMyGroup.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-950/30 border-b-2 border-amber-400 dark:border-amber-800 px-4 py-2 shrink-0">
+          <div className="flex items-start gap-2 flex-wrap">
+            <span className="text-amber-800 dark:text-amber-300 text-xs font-bold uppercase tracking-wider shrink-0">
+              {blockedInMyGroup.length} can&apos;t be bought for ·
+            </span>
+            {blockedInMyGroup.map(({ p, blockers }) => (
+              <span key={p.id} className="text-xs text-amber-800 dark:text-amber-200">
+                <button
+                  onClick={() => setEditParticipant(p)}
+                  className="font-semibold underline hover:no-underline"
+                >
+                  {p.first_name} {p.last_name}
+                </button>
+                <span className="text-amber-700 dark:text-amber-400">
+                  {' '}({blockers.map((b) => BLOCKER_LABEL[b].toLowerCase()).join(', ')})
+                </span>
+              </span>
+            ))}
+            {blockedInMyGroup.some(({ blockers }) => blockers.includes('days')) && (
+              <span className="text-[11px] text-amber-700 dark:text-amber-400 basis-full">
+                Badge days are set in the Requested column before purchase day opens.
+              </span>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ── Pre-purchase tip banners (hidden while simulating) ── */}
@@ -1072,7 +1213,7 @@ export default function LiveBoard() {
 
           <tbody>
             {displayRows.map((p, dispIdx) => {
-              const status = rowStatus(p);
+              const status = rowStatus(p, now);
               const naturalIdx = participants.indexOf(p);
               const isFlashing = flash[p.id];
               const isRowDragTarget = rowDragTarget === p.id;
@@ -1149,8 +1290,10 @@ export default function LiveBoard() {
                             setEditingRow={setEditingRow}
                             canEditRequested={!showPurchaseChrome && canEditIdentityRow(p, me, identityId, myClerkId)}
                             canEditProfile={canEditIdentityRow(p, me, identityId, myClerkId)}
-                            canTogglePurchase={hasClaimByMe(p, myDisplayName)}
+                            canTogglePurchase={canEditPurchases(p, myDisplayName, now)}
                             atClaimLimit={atClaimLimit}
+                            blockers={purchaseBlockers(p, event)}
+                            now={now}
                             onClaim={handleClaim}
                             onUnclaim={handleUnclaim}
                             onRequestedToggle={handleRequestedToggle}
@@ -1236,7 +1379,7 @@ function CopyCell({ value, children }: { value: string; children?: React.ReactNo
 
 function CellContent({
   col, p, status, eventStatus, editingRow, setEditingRow, canEditRequested, canEditProfile, canTogglePurchase,
-  atClaimLimit, onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
+  atClaimLimit, blockers, now, onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
 }: {
   col: ColKey;
   p: Participant;
@@ -1249,6 +1392,8 @@ function CellContent({
   canEditProfile: boolean;
   canTogglePurchase: boolean;
   atClaimLimit: boolean;
+  blockers: PurchaseBlocker[];
+  now: number;
   onClaim: (p: Participant) => void;
   onUnclaim: (p: Participant) => void;
   onRequestedToggle: (p: Participant, day: DayKey, checked: boolean) => void;
@@ -1378,7 +1523,7 @@ function CellContent({
                   />
                 ) : (
                   <div
-                    title={p.claim_active ? 'Only the claimer can mark purchases' : 'Claim this person first to mark purchases'}
+                    title={isClaimLive(p, now) ? 'Only the claimer can mark purchases' : 'Claim this person first to mark purchases'}
                     className={`w-4 h-4 rounded-sm border-2 cursor-not-allowed ${
                       bought
                         ? 'bg-green-500/70 border-green-600/70 dark:bg-green-500/60 dark:border-green-400/60'
@@ -1413,16 +1558,6 @@ function CellContent({
       );
 
     case 'status':
-      if (status === 'setup') {
-        return (
-          <span
-            className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 px-2 py-0.5 rounded-full"
-            title="No badge days requested yet"
-          >
-            Setup
-          </span>
-        );
-      }
       if (status === 'complete') {
         return (
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 border border-green-300 dark:border-green-800 px-2 py-0.5 rounded-full">
@@ -1430,13 +1565,46 @@ function CellContent({
           </span>
         );
       }
+      if (blockers.length > 0) {
+        const reasons = blockers.map((b) => BLOCKER_LABEL[b]).join(' · ');
+        return (
+          <div className="flex flex-col items-start gap-0.5" title={`Can't buy for this person yet — ${reasons}`}>
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/50 border border-amber-400 dark:border-amber-700 px-2 py-0.5 rounded-full">
+              ⚠ Setup
+            </span>
+            <span className="text-[10px] leading-tight text-amber-700 dark:text-amber-400">{BLOCKER_SHORT[blockers[0]]}</span>
+            {canEditProfile && (
+              <button
+                onClick={() => onEditParticipant(p)}
+                className="text-[11px] font-bold text-blue-600 dark:text-blue-400 underline hover:no-underline"
+              >
+                Fix setup
+              </button>
+            )}
+          </div>
+        );
+      }
       if (eventStatus !== 'purchasing') {
         return <span className="text-gray-400 dark:text-gray-600 text-xs">—</span>;
       }
-      if (p.claim_active) {
+      if (isClaimLive(p, now)) {
+        const remainingMs = claimRemainingMs(p.purchasing_claimed_at, now);
+        const urgent = remainingMs <= 30_000;
+        const warn = remainingMs <= 120_000;
+        const timerCls = urgent
+          ? 'text-red-600 dark:text-red-400 font-bold'
+          : warn
+            ? 'text-orange-600 dark:text-yellow-400 font-semibold'
+            : 'text-zinc-500 dark:text-zinc-400';
         return (
-          <div className="flex flex-col items-start gap-1">
+          <div className="flex flex-col items-start gap-0.5">
             <span className="text-xs font-bold text-orange-600 dark:text-yellow-400">{p.purchasing_claimed_by}</span>
+            <span
+              className={`font-mono text-[11px] tabular-nums leading-none ${timerCls}`}
+              title={`Claim auto-releases after ${CLAIM_TIMEOUT_MINUTES} minutes`}
+            >
+              {formatClaimCountdown(remainingMs)}
+            </span>
             <button onClick={() => onUnclaim(p)} className="text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400 underline">Release</button>
           </div>
         );
@@ -1635,6 +1803,7 @@ function EditParticipantModal({
     member_id: participant.member_id,
     badge_type: participant.badge_type as 'ADULT' | 'JUNIOR',
     notes: participant.notes,
+    return_eligible: participant.return_eligible,
   });
   const [saving, setSaving] = useState(false);
 
@@ -1685,6 +1854,11 @@ function EditParticipantModal({
               <option value="JUNIOR">Junior</option>
             </select>
           </div>
+          <ToggleSwitch
+            checked={form.return_eligible}
+            onChange={(v) => setForm((f) => ({ ...f, return_eligible: v }))}
+            label="Return eligible"
+          />
           {field('Notes', 'notes')}
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-1.5 text-sm text-gray-400 hover:text-gray-900 dark:hover:text-white">
@@ -2089,23 +2263,34 @@ function priorityReason(p: Participant, me: Participant | null, identityId: numb
 }
 
 function NextUpPanel({
-  queue, me, identityId, claimSlotsLeft, onClaim, onDismiss,
+  queue, participants, me, identityId, myDisplayName, claimSlotsLeft, now, onClaim, onDismiss,
 }: {
   queue: Participant[];
+  participants: Participant[];
   me: Participant | null;
   identityId: number | null;
+  myDisplayName: string;
   claimSlotsLeft: number;
+  now: number;
   onClaim: (p: Participant) => Promise<void>;
   onDismiss: () => void;
 }) {
-  const [slots] = useState(() => queue.slice(0, MAX_ACTIVE_CLAIMS));
-  const [claimed, setClaimed] = useState<Set<number>>(new Set());
+  const [justClaimed, setJustClaimed] = useState<number[]>([]);
+
+  // Cards you just claimed stay for confirmation until they're done or released;
+  // everything else comes from the live queue so finished people never linger.
+  const heldCards = justClaimed
+    .map((id) => participants.find((p) => p.id === id))
+    .filter((p): p is Participant => !!p && holdsClaimSlot(p, myDisplayName, now));
+  const heldIds = new Set(heldCards.map((p) => p.id));
+  const slots = [...heldCards, ...queue.filter((p) => !heldIds.has(p.id))]
+    .slice(0, MAX_ACTIVE_CLAIMS);
 
   if (slots.length === 0) return null;
 
   const handleClaim = async (p: Participant) => {
     await onClaim(p);
-    setClaimed((prev) => new Set(prev).add(p.id));
+    setJustClaimed((prev) => (prev.includes(p.id) ? prev : [...prev, p.id]));
   };
 
   return (
@@ -2117,17 +2302,20 @@ function NextUpPanel({
         <button onClick={onDismiss} className="text-zinc-500 hover:text-gray-700 text-xs px-1">✕</button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-        {slots.map((p) => (
-          <NextUpCard
-            key={p.id}
-            p={p}
-            me={me}
-            identityId={identityId}
-            claimed={claimed.has(p.id)}
-            canClaim={claimSlotsLeft > 0 && !claimed.has(p.id)}
-            onClaim={handleClaim}
-          />
-        ))}
+        {slots.map((p) => {
+          const claimed = heldIds.has(p.id);
+          return (
+            <NextUpCard
+              key={p.id}
+              p={p}
+              me={me}
+              identityId={identityId}
+              claimed={claimed}
+              canClaim={!claimed && claimSlotsLeft > 0}
+              onClaim={handleClaim}
+            />
+          );
+        })}
       </div>
     </div>
   );
