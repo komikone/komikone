@@ -197,24 +197,46 @@ export function computeGaps(p: Participant): string[] {
   return gaps;
 }
 
+/** D1 `datetime('now')` is UTC without a timezone suffix — parse as UTC. */
+export function parseClaimTimestamp(claimedAt: string): number | null {
+  const normalized = /Z$|[+-]\d{2}:?\d{2}$/.test(claimedAt)
+    ? claimedAt
+    : claimedAt.includes('T')
+      ? `${claimedAt}Z`
+      : `${claimedAt.replace(' ', 'T')}Z`;
+  const t = new Date(normalized).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
 export function isClaimExpired(claimedAt: string | null): boolean {
   if (!claimedAt) return true;
-  const claimed = new Date(claimedAt).getTime();
+  const claimed = parseClaimTimestamp(claimedAt);
+  if (claimed == null) return true;
   return Date.now() - claimed > CLAIM_TIMEOUT_MINUTES * 60 * 1000;
+}
+
+type PurchaseDayFlags = Pick<Participant,
+  'req_preview' | 'req_thu' | 'req_fri' | 'req_sat' | 'req_sun' |
+  'pur_preview' | 'pur_thu' | 'pur_fri' | 'pur_sat' | 'pur_sun'
+>;
+
+/** Every requested day bought. Vacuous true when nobody requested days — treat as not done. */
+export function computeAllPurchased(p: PurchaseDayFlags): boolean {
+  const anyRequested = p.req_preview || p.req_thu || p.req_fri || p.req_sat || p.req_sun;
+  if (!anyRequested) return false;
+  return Boolean(
+    (!p.req_preview || p.pur_preview) &&
+    (!p.req_thu || p.pur_thu) &&
+    (!p.req_fri || p.pur_fri) &&
+    (!p.req_sat || p.pur_sat) &&
+    (!p.req_sun || p.pur_sun),
+  );
 }
 
 export function enrichParticipant(p: Participant, event: Event) {
   const claimActive = p.purchasing_claimed_by && !isClaimExpired(p.purchasing_claimed_at);
   const gaps = computeGaps(p);
-  const allRequested =
-    p.req_preview || p.req_thu || p.req_fri || p.req_sat || p.req_sun;
-  // Vacuous true when nobody requested days — treat as not done.
-  const allPurchased = allRequested &&
-    (!p.req_preview || p.pur_preview) &&
-    (!p.req_thu || p.pur_thu) &&
-    (!p.req_fri || p.pur_fri) &&
-    (!p.req_sat || p.pur_sat) &&
-    (!p.req_sun || p.pur_sun);
+  const allPurchased = computeAllPurchased(p);
   const anyPurchased = p.pur_preview || p.pur_thu || p.pur_fri || p.pur_sat || p.pur_sun;
 
   return {

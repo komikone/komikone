@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, enrichParticipant, isClaimExpired, MAX_ACTIVE_CLAIMS } from './db';
+import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, computeAllPurchased, enrichParticipant, isClaimExpired, MAX_ACTIVE_CLAIMS } from './db';
 import {
   assertRegistrationOpen,
   daysToSql,
@@ -143,7 +143,10 @@ async function canEditParticipantIdentity(
   return false;
 }
 
-/** Active claim by the authenticated user (admins must claim too). */
+/**
+ * Active claim by the authenticated user (admins must claim too). Once a claim
+ * auto-releases on Done, the recorded buyer can still correct their own purchase.
+ */
 async function canActOnClaimedParticipant(
   db: D1Database,
   access: { userId: string },
@@ -151,19 +154,23 @@ async function canActOnClaimedParticipant(
   pid: number,
 ): Promise<boolean> {
   const target = await db.prepare(
-    'SELECT purchasing_claimed_by, purchasing_claimed_at FROM participants WHERE id = ? AND event_id = ?'
-  ).bind(pid, eventId).first<{ purchasing_claimed_by: string; purchasing_claimed_at: string | null }>();
+    'SELECT purchasing_claimed_by, purchasing_claimed_at, who_purchased FROM participants WHERE id = ? AND event_id = ?'
+  ).bind(pid, eventId).first<{ purchasing_claimed_by: string; purchasing_claimed_at: string | null; who_purchased: string }>();
   if (!target) return false;
 
   const claimActive = !!target.purchasing_claimed_by && !isClaimExpired(target.purchasing_claimed_at);
-  if (!claimActive) return false;
+  const buyerOnRecord = target.who_purchased?.trim() ?? '';
+  if (!claimActive && !buyerOnRecord) return false;
   if (access.userId === 'admin') return true;
 
   const me = await db.prepare(
     'SELECT first_name, last_name FROM participants WHERE event_id = ? AND clerk_user_id = ?'
   ).bind(eventId, access.userId).first<{ first_name: string; last_name: string }>();
-  const myName = me ? `${me.first_name} ${me.last_name}`.trim() : '';
-  return !!myName && target.purchasing_claimed_by.trim().toLowerCase() === myName.toLowerCase();
+  const myName = me ? `${me.first_name} ${me.last_name}`.trim().toLowerCase() : '';
+  if (!myName) return false;
+
+  if (claimActive) return target.purchasing_claimed_by.trim().toLowerCase() === myName;
+  return buyerOnRecord.toLowerCase() === myName;
 }
 
 /** Resolve (and self-heal) the years row for an event. Never leaves year_id null when a years row exists. */
@@ -588,10 +595,11 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
   const event = await getEvent(c.env.DB, eventId);
   if (!event) return err('Event not found', 404);
 
-  const body = await c.req.json<{ coordinator_name: string; simulation?: boolean }>();
+  const body = await c.req.json<{ coordinator_name: string }>();
   if (!body.coordinator_name?.trim()) return err('coordinator_name required');
 
-  if (event.status !== 'purchasing' && !body.simulation) {
+  // Practice mode is client-side only, so claims always require a live purchase window.
+  if (event.status !== 'purchasing') {
     return err('Not in purchasing phase', 403);
   }
 
@@ -605,12 +613,18 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
 
   const claimer = body.coordinator_name.trim();
   const mine = await c.env.DB.prepare(`
-    SELECT purchasing_claimed_at FROM participants
+    SELECT purchasing_claimed_at,
+           req_preview, req_thu, req_fri, req_sat, req_sun,
+           pur_preview, pur_thu, pur_fri, pur_sat, pur_sun
+    FROM participants
     WHERE event_id = ?
       AND purchasing_claimed_by != ''
       AND LOWER(TRIM(purchasing_claimed_by)) = LOWER(?)
-  `).bind(eventId, claimer).all<{ purchasing_claimed_at: string | null }>();
-  const activeClaims = mine.results.filter((r) => !isClaimExpired(r.purchasing_claimed_at)).length;
+  `).bind(eventId, claimer).all<Participant>();
+  // A finished person keeps the "who bought" record but no longer ties up a slot.
+  const activeClaims = mine.results.filter(
+    (r) => !isClaimExpired(r.purchasing_claimed_at) && !computeAllPurchased(r),
+  ).length;
   if (activeClaims >= MAX_ACTIVE_CLAIMS) {
     return err(
       `You can only claim ${MAX_ACTIVE_CLAIMS} people at a time (Comic-Con purchase limit). Release someone first.`,
@@ -681,7 +695,23 @@ app.patch('/api/events/:id/participants/:pid/purchased', async (c) => {
     pid, eventId,
   ).run();
 
-  return json({ ok: true });
+  // Finishing someone frees one of the buyer's 3 slots without a manual release.
+  const updated = await c.env.DB.prepare(`
+    SELECT req_preview, req_thu, req_fri, req_sat, req_sun,
+           pur_preview, pur_thu, pur_fri, pur_sat, pur_sun
+    FROM participants WHERE id = ? AND event_id = ?
+  `).bind(pid, eventId).first<Participant>();
+
+  const claimReleased = !!updated && computeAllPurchased(updated);
+  if (claimReleased) {
+    await c.env.DB.prepare(`
+      UPDATE participants
+      SET purchasing_claimed_by = '', purchasing_claimed_at = NULL, updated_at = datetime('now')
+      WHERE id = ? AND event_id = ?
+    `).bind(pid, eventId).run();
+  }
+
+  return json({ ok: true, claim_released: claimReleased });
 });
 
 app.patch('/api/events/:id/participants/:pid/requested', async (c) => {
@@ -1014,7 +1044,8 @@ app.patch('/api/events/:id/participants/:pid/profile', async (c) => {
   if (!event) return err('Event not found', 404);
 
   const body = await c.req.json<{
-    first_name?: string; last_name?: string; member_id?: string; badge_type?: string; notes?: string;
+    first_name?: string; last_name?: string; member_id?: string; badge_type?: string;
+    notes?: string; return_eligible?: boolean;
   }>();
 
   if (!(await canEditParticipantIdentity(c.env.DB, access, eventId, pid))) {
@@ -1029,6 +1060,7 @@ app.patch('/api/events/:id/participants/:pid/profile', async (c) => {
   if (body.member_id !== undefined) { fields.push('member_id = ?'); values.push(body.member_id.trim().toUpperCase()); }
   if (body.badge_type !== undefined) { fields.push('badge_type = ?'); values.push(body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT'); }
   if (body.notes !== undefined) { fields.push('notes = ?'); values.push(body.notes.trim()); }
+  if (body.return_eligible !== undefined) { fields.push('return_eligible = ?'); values.push(body.return_eligible ? 1 : 0); }
 
   if (fields.length === 0) return err('No fields to update');
   fields.push("updated_at = datetime('now')");
