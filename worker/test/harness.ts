@@ -138,6 +138,13 @@ function base64urlJson(value: unknown): string {
 
 const KID = 'test-key';
 
+/** Verified emails the stubbed Clerk Backend API will report, keyed by Clerk user id. */
+const clerkEmails = new Map<string, string>();
+
+export function setClerkUserEmail(userId: string, email: string): void {
+  clerkEmails.set(userId, email.toLowerCase());
+}
+
 type TokenSigner = (sub: string, opts?: { admin?: boolean; expired?: boolean }) => Promise<string>;
 
 /**
@@ -169,6 +176,19 @@ async function setUpClerkAuth(): Promise<TokenSigner> {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url === JWKS_URL) return Response.json({ keys: [jwk] });
+
+    const clerkUser = url.match(/^https:\/\/api\.clerk\.com\/v1\/users\/([^/?]+)$/);
+    if (clerkUser) {
+      const email = clerkEmails.get(decodeURIComponent(clerkUser[1]));
+      if (!email) return new Response('Not Found', { status: 404 });
+      return Response.json({
+        primary_email_address_id: 'idn_primary',
+        email_addresses: [
+          { id: 'idn_primary', email_address: email, verification: { status: 'verified' } },
+        ],
+      });
+    }
+
     throw new Error(`Unexpected fetch in tests: ${url}`);
   }) as typeof fetch;
 
@@ -202,11 +222,13 @@ export async function createHarness(): Promise<TestHarness> {
   applySchema(db);
 
   const signToken = await getSigner();
+  clerkEmails.clear();
   const env = {
     DB: new TestD1Database(db) as unknown as D1Database,
     ADMIN_SECRET,
     FRONTEND_URL: 'https://komikone.test',
     CLERK_JWKS_URL: JWKS_URL,
+    CLERK_SECRET_KEY: 'sk_test',
   };
 
   return {
@@ -235,10 +257,11 @@ export function insertEvent(db: DatabaseSync, over: {
   reg_type?: 'return' | 'open';
   status?: string;
   price_sat_adult?: number;
+  year_id?: number | null;
 } = {}): number {
   const res = db.prepare(`
-    INSERT INTO events (year, name, reg_type, status, price_sat_adult, price_sun_adult)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO events (year, name, reg_type, status, price_sat_adult, price_sun_adult, year_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     over.year ?? 2027,
     over.name ?? 'SDCC 2027 Return Reg',
@@ -246,7 +269,50 @@ export function insertEvent(db: DatabaseSync, over: {
     over.status ?? 'purchasing',
     over.price_sat_adult ?? 8000,
     4000,
+    over.year_id ?? null,
   );
+  return Number(res.lastInsertRowid);
+}
+
+export function insertYear(db: DatabaseSync, over: { con_year?: number; name?: string } = {}): number {
+  const conYear = over.con_year ?? 2027;
+  const res = db.prepare(
+    'INSERT INTO years (name, con_year) VALUES (?, ?)'
+  ).run(over.name ?? `SDCC ${conYear}`, conYear);
+  return Number(res.lastInsertRowid);
+}
+
+export function insertYearMember(db: DatabaseSync, yearId: number, clerkUserId: string, over: {
+  first_name?: string;
+  last_name?: string;
+  member_id?: string;
+  return_eligible?: number;
+} = {}): number {
+  const res = db.prepare(`
+    INSERT INTO year_members (year_id, clerk_user_id, role, first_name, last_name, member_id, return_eligible)
+    VALUES (?, ?, 'registered', ?, ?, ?, ?)
+  `).run(
+    yearId,
+    clerkUserId,
+    over.first_name ?? 'Henry',
+    over.last_name ?? 'Garcia',
+    over.member_id ?? 'HGARC014',
+    over.return_eligible ?? 1,
+  );
+  return Number(res.lastInsertRowid);
+}
+
+export function insertGroup(db: DatabaseSync, eventId: number, ownerClerkUserId: string, name = "Henry's Group"): number {
+  const res = db.prepare(
+    'INSERT INTO groups (event_id, name, owner_clerk_user_id) VALUES (?, ?, ?)'
+  ).run(eventId, name, ownerClerkUserId);
+  return Number(res.lastInsertRowid);
+}
+
+export function insertInvite(db: DatabaseSync, yearId: number, code: string, invitedBy: string): number {
+  const res = db.prepare(
+    'INSERT INTO invites (year_id, code, label, invited_by_clerk_user_id) VALUES (?, ?, ?, ?)'
+  ).run(yearId, code, '', invitedBy);
   return Number(res.lastInsertRowid);
 }
 
@@ -266,14 +332,15 @@ export function insertParticipant(db: DatabaseSync, eventId: number, over: {
   who_purchased?: string;
   clerk_user_id?: string | null;
   group_id?: number | null;
+  email?: string;
 } = {}): number {
   const res = db.prepare(`
     INSERT INTO participants (
       event_id, first_name, last_name, member_id, return_eligible,
       req_sat, req_sun, pur_sat, pur_sun,
       purchasing_claimed_by, purchasing_claimed_at, who_purchased,
-      clerk_user_id, group_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      clerk_user_id, group_id, email
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     eventId,
     over.first_name ?? 'Avery',
@@ -290,6 +357,7 @@ export function insertParticipant(db: DatabaseSync, eventId: number, over: {
     over.who_purchased ?? '',
     over.clerk_user_id ?? null,
     over.group_id ?? null,
+    over.email ?? '',
   );
   return Number(res.lastInsertRowid);
 }

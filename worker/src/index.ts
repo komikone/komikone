@@ -9,7 +9,7 @@ import {
   normalizeDays,
   resolveSelfParticipant,
 } from './persistence';
-import { sendClerkInvitationEmail, revokeClerkInvitation } from './clerk';
+import { sendClerkInvitationEmail, revokeClerkInvitation, fetchClerkUserEmail } from './clerk';
 import { seedDummies, clearDummies, countDummies } from './seedDummies';
 
 type Bindings = {
@@ -368,6 +368,8 @@ const PARTICIPANTS_QUERY = `
   FROM participants p
   LEFT JOIN groups g ON g.id = p.group_id
 `;
+
+const REQ_DAY_KEYS = ['req_preview', 'req_thu', 'req_fri', 'req_sat', 'req_sun'] as const;
 
 // Avoids confusable chars (0/O, 1/I)
 const INVITE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -1263,6 +1265,10 @@ app.post('/api/invites/:code/accept', async (c) => {
   const memberId = body.member_id?.trim() ?? '';
   const badgeType = body.badge_type ?? 'ADULT';
   const returnEligible = body.return_eligible ? 1 : 0;
+  const signupEmail = await fetchClerkUserEmail({
+    secretKey: c.env.CLERK_SECRET_KEY ?? '',
+    userId: access.userId,
+  });
 
   const stmts: D1PreparedStatement[] = [];
 
@@ -1296,24 +1302,38 @@ app.post('/api/invites/:code/accept', async (c) => {
     ).bind(ev.id, access.userId).first<{ id: number }>();
     if (!group) continue;
 
-    // Check if participant with this member_id already exists in the event
-    const existingP = memberId
-      ? await db.prepare(
-          'SELECT id FROM participants WHERE event_id = ? AND UPPER(member_id) = UPPER(?)'
-        ).bind(ev.id, memberId).first<{ id: number }>()
-      : null;
+    // Match on Member ID first, then on the email whoever added this person recorded.
+    // Without the email fallback, a family member who later signs up for their own account
+    // gets a second participant row and their original one is orphaned.
+    const existingP =
+      (memberId
+        ? await db.prepare(
+            'SELECT id FROM participants WHERE event_id = ? AND UPPER(member_id) = UPPER(?)'
+          ).bind(ev.id, memberId).first<{ id: number }>()
+        : null)
+      ?? (signupEmail
+        ? await db.prepare(`
+            SELECT id FROM participants
+            WHERE event_id = ? AND LOWER(email) = ?
+              AND (clerk_user_id IS NULL OR clerk_user_id = '' OR clerk_user_id = ?)
+          `).bind(ev.id, signupEmail, access.userId).first<{ id: number }>()
+        : null);
 
     if (existingP) {
       await db.prepare(`
-        UPDATE participants SET clerk_user_id = ?, group_id = ?, registered_by_clerk_user_id = ? WHERE id = ?
-      `).bind(access.userId, group.id, access.userId, existingP.id).run();
+        UPDATE participants
+        SET clerk_user_id = ?, group_id = ?, registered_by_clerk_user_id = ?,
+            member_id = CASE WHEN member_id = '' THEN ? ELSE member_id END,
+            email = CASE WHEN email = '' THEN ? ELSE email END
+        WHERE id = ?
+      `).bind(access.userId, group.id, access.userId, memberId, signupEmail, existingP.id).run();
     } else {
       await db.prepare(`
         INSERT INTO participants (event_id, first_name, last_name, member_id, badge_type,
-          return_eligible, clerk_user_id, registered_by_clerk_user_id, group_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          return_eligible, clerk_user_id, registered_by_clerk_user_id, group_id, email)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(ev.id, firstName, lastName, memberId, badgeType,
-        returnEligible, access.userId, access.userId, group.id).run();
+        returnEligible, access.userId, access.userId, group.id, signupEmail).run();
     }
   }
 
@@ -1590,12 +1610,32 @@ app.post('/api/years/:yearId/events/:eventId/my-group/participants', async (c) =
     first_name: string;
     last_name: string;
     member_id?: string;
+    email?: string;
     badge_type?: 'ADULT' | 'JUNIOR';
     return_eligible?: boolean;
+    req_preview?: boolean;
+    req_thu?: boolean;
+    req_fri?: boolean;
+    req_sat?: boolean;
+    req_sun?: boolean;
   }>();
   if (!body.first_name?.trim() || !body.last_name?.trim()) return err('First and last name required');
 
   const memberId = body.member_id?.trim() ?? '';
+  const email = body.email?.trim().toLowerCase() ?? '';
+
+  const event = await getEvent(c.env.DB, eventId);
+  const reqDays = REQ_DAY_KEYS.map((key) => (body[key] ? 1 : 0));
+
+  // A person with no Member ID cannot be bought for on a return event, and a person with no
+  // requested days is invisible to the purchase board. Reject both up front rather than
+  // creating a row that silently blocks on purchase day.
+  if (!memberId && event?.reg_type === 'return') {
+    return err('Member ID is required for return registration');
+  }
+  if (event?.status === 'registration' && !reqDays.some((d) => d === 1)) {
+    return err('Select at least one badge day');
+  }
 
   // Link to existing participant if member_id matches — only if ungrouped or already ours
   if (memberId) {
@@ -1610,9 +1650,19 @@ app.post('/api/years/:yearId/events/:eventId/my-group/participants', async (c) =
       if (existingP.group_id && existingP.group_id !== group.id) {
         return err('That Member ID is already in another group', 409);
       }
-      await c.env.DB.prepare(
-        'UPDATE participants SET group_id = ?, registered_by_clerk_user_id = ? WHERE id = ?'
-      ).bind(group.id, access.userId, existingP.id).run();
+      const dayClauses = event?.status === 'registration'
+        ? REQ_DAY_KEYS.map((key) => `${key} = ?`)
+        : [];
+      await c.env.DB.prepare(`
+        UPDATE participants
+        SET group_id = ?, registered_by_clerk_user_id = ?${dayClauses.length ? `, ${dayClauses.join(', ')}` : ''}
+        WHERE id = ?
+      `).bind(
+        group.id,
+        access.userId,
+        ...(dayClauses.length ? reqDays : []),
+        existingP.id,
+      ).run();
       const updated = await c.env.DB.prepare(
         `${PARTICIPANTS_QUERY} WHERE p.id = ?`
       ).bind(existingP.id).first<Participant>();
@@ -1622,8 +1672,9 @@ app.post('/api/years/:yearId/events/:eventId/my-group/participants', async (c) =
 
   const result = await c.env.DB.prepare(`
     INSERT INTO participants (event_id, first_name, last_name, member_id, badge_type,
-      return_eligible, registered_by_clerk_user_id, group_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      return_eligible, registered_by_clerk_user_id, group_id, email,
+      ${REQ_DAY_KEYS.join(', ')})
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     eventId,
     body.first_name.trim(),
@@ -1633,6 +1684,8 @@ app.post('/api/years/:yearId/events/:eventId/my-group/participants', async (c) =
     body.return_eligible ? 1 : 0,
     access.userId,
     group.id,
+    email,
+    ...reqDays,
   ).run();
 
   const created = await c.env.DB.prepare(
@@ -1712,7 +1765,7 @@ app.patch('/api/years/:yearId/events/:eventId/my-group/participants/:pid', async
   if (!p) return err('Participant not found', 404);
 
   const body = await c.req.json<Partial<{
-    first_name: string; last_name: string; member_id: string;
+    first_name: string; last_name: string; member_id: string; email: string;
     badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean;
     req_preview: boolean; req_thu: boolean; req_fri: boolean; req_sat: boolean; req_sun: boolean;
   }>>();
@@ -1735,6 +1788,7 @@ app.patch('/api/years/:yearId/events/:eventId/my-group/participants/:pid', async
     'first_name = COALESCE(?, first_name)',
     'last_name = COALESCE(?, last_name)',
     'member_id = COALESCE(?, member_id)',
+    'email = COALESCE(?, email)',
     'badge_type = COALESCE(?, badge_type)',
     'return_eligible = COALESCE(?, return_eligible)',
     ...reqFields,
@@ -1748,6 +1802,7 @@ app.patch('/api/years/:yearId/events/:eventId/my-group/participants/:pid', async
     body.first_name?.trim() ?? null,
     body.last_name?.trim() ?? null,
     body.member_id?.trim() ?? null,
+    body.email != null ? body.email.trim().toLowerCase() : null,
     body.badge_type ?? null,
     body.return_eligible != null ? (body.return_eligible ? 1 : 0) : null,
     ...reqValues,

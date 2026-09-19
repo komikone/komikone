@@ -35,6 +35,7 @@ export type Participant = {
   first_name: string;
   last_name: string;
   member_id: string;
+  email: string;
   badge_type: 'ADULT' | 'JUNIOR';
   return_eligible: number;
   notes: string;

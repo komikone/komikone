@@ -105,6 +105,8 @@ export type Participant = {
   first_name: string;
   last_name: string;
   member_id: string;
+  /** Used to auto-link this person to their account if they later sign up themselves. */
+  email: string;
   badge_type: 'ADULT' | 'JUNIOR';
   return_eligible: boolean;
   notes: string;
@@ -427,14 +429,16 @@ export const api = {
         method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify(data),
       }),
     addParticipant: (yearId: number, eventId: number, clerkToken: string, data: {
-      first_name: string; last_name: string; member_id?: string;
+      first_name: string; last_name: string; member_id?: string; email?: string;
       badge_type?: 'ADULT' | 'JUNIOR'; return_eligible?: boolean;
+      req_preview?: boolean; req_thu?: boolean; req_fri?: boolean;
+      req_sat?: boolean; req_sun?: boolean;
     }) =>
       req<Participant>(`/api/years/${yearId}/events/${eventId}/my-group/participants`, {
         method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify(data),
       }),
     updateParticipant: (yearId: number, eventId: number, pid: number, clerkToken: string, data: Partial<{
-      first_name: string; last_name: string; member_id: string;
+      first_name: string; last_name: string; member_id: string; email: string;
       badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean;
       req_preview: boolean; req_thu: boolean; req_fri: boolean; req_sat: boolean; req_sun: boolean;
     }>) =>
