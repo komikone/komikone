@@ -79,6 +79,15 @@ export type Invite = {
   created_at: string;
 };
 
+/** Details an organizer recorded ahead of time, matched to the signer's verified email. */
+export type InvitePrefill = {
+  first_name: string;
+  last_name: string;
+  member_id: string;
+  badge_type: 'ADULT' | 'JUNIOR';
+  return_eligible: boolean;
+};
+
 export type InviteRequest = {
   id: number;
   email: string;
@@ -372,6 +381,10 @@ export const api = {
       req<{ invite: Pick<Invite, 'code' | 'label' | 'year_id'>; year: Pick<Year, 'id' | 'name' | 'con_year'> }>(
         `/api/invites/${code.toUpperCase()}`
       ),
+    prefill: (code: string, clerkToken: string) =>
+      req<{ prefill: InvitePrefill | null }>(`/api/invites/${code.toUpperCase()}/prefill`, {
+        headers: authHeaders(clerkToken),
+      }),
     accept: (code: string, clerkToken: string, data: {
       first_name: string; last_name: string; member_id: string;
       badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean;

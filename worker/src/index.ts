@@ -1206,6 +1206,58 @@ app.get('/api/invites/:code', async (c) => {
   return json({ invite: { code: invite.code, label: invite.label, year_id: invite.year_id }, year });
 });
 
+/**
+ * Details an organizer already recorded for this person, so the join form can be confirmed
+ * rather than retyped. Matching is on the caller's *verified* Clerk email — an unverified
+ * address is attacker-controlled, so fetchClerkUserEmail returns '' for those and nothing
+ * is disclosed. Requires auth for the same reason: the invite code alone must not reveal
+ * a name and Member ID to whoever holds the link.
+ */
+app.get('/api/invites/:code/prefill', async (c) => {
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access || access.userId === 'admin') return err('Sign in required', 401);
+
+  const code = c.req.param('code').toUpperCase();
+  const invite = await c.env.DB.prepare(
+    'SELECT * FROM invites WHERE code = ?'
+  ).bind(code).first<Invite>();
+  if (!invite) return err('Invite not found', 404);
+
+  const email = await fetchClerkUserEmail({
+    secretKey: c.env.CLERK_SECRET_KEY ?? '',
+    userId: access.userId,
+  });
+  if (!email) return json({ prefill: null });
+
+  const match = await c.env.DB.prepare(`
+    SELECT p.first_name, p.last_name, p.member_id, p.badge_type, p.return_eligible
+    FROM participants p
+    JOIN events e ON e.id = p.event_id
+    WHERE e.year_id = ?
+      AND LOWER(p.email) = ?
+      AND (p.clerk_user_id IS NULL OR p.clerk_user_id = '' OR p.clerk_user_id = ?)
+    ORDER BY p.id
+    LIMIT 1
+  `).bind(invite.year_id, email, access.userId).first<{
+    first_name: string;
+    last_name: string;
+    member_id: string;
+    badge_type: string;
+    return_eligible: number;
+  }>();
+  if (!match) return json({ prefill: null });
+
+  return json({
+    prefill: {
+      first_name: match.first_name,
+      last_name: match.last_name,
+      member_id: match.member_id,
+      badge_type: match.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT',
+      return_eligible: !!match.return_eligible,
+    },
+  });
+});
+
 // ── Accept invite / register ──────────────────────────────────────────────────
 
 app.post('/api/invites/:code/accept', async (c) => {

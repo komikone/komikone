@@ -33,7 +33,8 @@ export default function JoinPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
-  const [regEventId, setRegEventId] = useState<number | null>(null);
+  const [regEvents, setRegEvents] = useState<{ id: number; name: string }[]>([]);
+  const [prefilled, setPrefilled] = useState(false);
 
   // Step 1: validate the invite code
   useEffect(() => {
@@ -56,6 +57,33 @@ export default function JoinPage() {
     }
   }, [isLoaded, isSignedIn, step]);
 
+  // Step 3: adopt whatever the organizer already recorded for this email, so the
+  // invitee confirms rather than retypes. Silent on failure — typing still works.
+  useEffect(() => {
+    if (!code || !isLoaded || !isSignedIn || step !== 'form' || prefilled) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const tok = await getToken({ template: 'komikone' });
+        if (!tok) return;
+        const { prefill } = await api.invites.prefill(code, tok);
+        if (cancelled || !prefill) return;
+        setForm((f) => ({
+          ...f,
+          first_name: f.first_name || prefill.first_name,
+          last_name: f.last_name || prefill.last_name,
+          member_id: f.member_id || prefill.member_id,
+          badge_type: prefill.badge_type,
+          return_eligible: prefill.return_eligible,
+        }));
+        setPrefilled(true);
+      } catch {
+        // No prefill available; the form stays blank and manual entry works as before.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [code, isLoaded, isSignedIn, step, prefilled, getToken]);
+
   const set = (key: keyof typeof form, val: unknown) => setForm(f => ({ ...f, [key]: val }));
 
   const handleSubmit = async () => {
@@ -75,11 +103,14 @@ export default function JoinPage() {
       await api.invites.accept(code!, tok, form);
       const events = await api.events.list();
       const conYear = inviteInfo?.year.con_year;
-      const openRegs = events.filter((e) => e.year === conYear && e.status === 'registration');
-      const target = form.return_eligible
-        ? openRegs.find((e) => e.reg_type === 'return') ?? openRegs.find((e) => e.reg_type === 'open')
-        : openRegs.find((e) => e.reg_type === 'open') ?? openRegs.find((e) => e.reg_type === 'return');
-      setRegEventId(target?.id ?? null);
+      // Days are per-event, so list every open registration rather than guessing one.
+      // Picking a single target silently stranded people when a year had more than one
+      // open event — they never saw the other and showed up to purchase day with no days.
+      const preferred = form.return_eligible ? 'return' : 'open';
+      const openRegs = events
+        .filter((e) => e.year === conYear && e.status === 'registration')
+        .sort((a, b) => Number(b.reg_type === preferred) - Number(a.reg_type === preferred));
+      setRegEvents(openRegs.map((e) => ({ id: e.id, name: e.name })));
       setStep('done');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Registration failed';
@@ -127,21 +158,24 @@ export default function JoinPage() {
           <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">You're in!</h2>
           <p className="text-gray-400 text-sm mb-6">
             Welcome to {inviteInfo?.year.name}.
-            {regEventId ? ' Select your badge days next, or head to your dashboard.' : ' Head to your dashboard to manage your group.'}
+            {regEvents.length
+              ? ' Pick your badge days for each registration below.'
+              : ' Head to your dashboard to manage your group.'}
           </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            {regEventId && (
+          <div className="flex flex-col gap-3 justify-center">
+            {regEvents.map((e) => (
               <Link
-                to={`/register/${regEventId}`}
+                key={e.id}
+                to={`/register/${e.id}`}
                 className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2.5 rounded-lg transition-colors"
               >
-                Select badge days →
+                Select badge days — {e.name} →
               </Link>
-            )}
+            ))}
             <button
               onClick={() => navigate('/dashboard')}
               className={`font-medium px-6 py-2.5 rounded-lg transition-colors ${
-                regEventId
+                regEvents.length
                   ? 'bg-gray-100 hover:bg-gray-300 text-gray-800'
                   : 'bg-blue-600 hover:bg-blue-500 text-white'
               }`}
@@ -178,6 +212,12 @@ export default function JoinPage() {
       </div>
 
       <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-6 space-y-4">
+        {prefilled && (
+          <p className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-lg px-3 py-2">
+            We filled this in from what your organizer already entered. Check it over and fix
+            anything that's wrong.
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={labelCls}>First Name *</label>

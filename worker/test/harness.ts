@@ -333,14 +333,15 @@ export function insertParticipant(db: DatabaseSync, eventId: number, over: {
   clerk_user_id?: string | null;
   group_id?: number | null;
   email?: string;
+  badge_type?: 'ADULT' | 'JUNIOR';
 } = {}): number {
   const res = db.prepare(`
     INSERT INTO participants (
       event_id, first_name, last_name, member_id, return_eligible,
       req_sat, req_sun, pur_sat, pur_sun,
       purchasing_claimed_by, purchasing_claimed_at, who_purchased,
-      clerk_user_id, group_id, email
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      clerk_user_id, group_id, email, badge_type
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     eventId,
     over.first_name ?? 'Avery',
@@ -358,6 +359,7 @@ export function insertParticipant(db: DatabaseSync, eventId: number, over: {
     over.clerk_user_id ?? null,
     over.group_id ?? null,
     over.email ?? '',
+    over.badge_type ?? 'ADULT',
   );
   return Number(res.lastInsertRowid);
 }

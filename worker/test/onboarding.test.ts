@@ -283,3 +283,90 @@ describe('POST /invites/:code/accept — identity linking', () => {
     expect(row.email).toBe('');
   });
 });
+
+describe('GET /invites/:code/prefill', () => {
+  /** Henry recorded David's details ahead of time against david@example.com. */
+  function seedPreEntered(over: { email?: string; clerk_user_id?: string | null } = {}) {
+    const yearId = insertYear(h.db);
+    const eventId = insertEvent(h.db, { year_id: yearId, status: 'registration' });
+    insertYearMember(h.db, yearId, HENRY);
+    const groupId = insertGroup(h.db, eventId, HENRY);
+    insertInvite(h.db, yearId, 'PREFILL00001', HENRY);
+    const pid = insertParticipant(h.db, eventId, {
+      first_name: 'David',
+      last_name: 'Garcia',
+      member_id: 'DGARC01',
+      badge_type: 'JUNIOR',
+      return_eligible: 1,
+      email: over.email ?? 'david@example.com',
+      group_id: groupId,
+      clerk_user_id: over.clerk_user_id ?? null,
+    });
+    return { yearId, eventId, pid };
+  }
+
+  const getPrefill = (as?: string) =>
+    h.request('/api/invites/PREFILL00001/prefill', as ? { as } : {});
+
+  it('returns what the organizer recorded for the signer\'s verified email', async () => {
+    seedPreEntered();
+    setClerkUserEmail(DAVID, 'david@example.com');
+
+    const res = await getPrefill(DAVID);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      prefill: {
+        first_name: 'David',
+        last_name: 'Garcia',
+        member_id: 'DGARC01',
+        badge_type: 'JUNIOR',
+        return_eligible: true,
+      },
+    });
+  });
+
+  it('matches case-insensitively on the recorded email', async () => {
+    seedPreEntered({ email: 'david@example.com' });
+    setClerkUserEmail(DAVID, 'DAVID@Example.com');
+
+    const res = await getPrefill(DAVID);
+
+    const body = await res.json() as { prefill: { member_id: string } | null };
+    expect(body.prefill?.member_id).toBe('DGARC01');
+  });
+
+  it('discloses nothing when no row matches the signer', async () => {
+    seedPreEntered({ email: 'someone.else@example.com' });
+    setClerkUserEmail(DAVID, 'david@example.com');
+
+    await expect((await getPrefill(DAVID)).json()).resolves.toEqual({ prefill: null });
+  });
+
+  it('discloses nothing for a row already claimed by another account', async () => {
+    seedPreEntered({ clerk_user_id: 'user_someone_else' });
+    setClerkUserEmail(DAVID, 'david@example.com');
+
+    await expect((await getPrefill(DAVID)).json()).resolves.toEqual({ prefill: null });
+  });
+
+  it('discloses nothing when Clerk has no verified email for the signer', async () => {
+    seedPreEntered();
+
+    await expect((await getPrefill(DAVID)).json()).resolves.toEqual({ prefill: null });
+  });
+
+  it('requires sign-in, so the invite code alone reveals no personal details', async () => {
+    seedPreEntered();
+
+    expect((await getPrefill()).status).toBe(401);
+  });
+
+  it('404s on an unknown invite code', async () => {
+    seedPreEntered();
+    setClerkUserEmail(DAVID, 'david@example.com');
+
+    const res = await h.request('/api/invites/NOSUCHCODE12/prefill', { as: DAVID });
+    expect(res.status).toBe(404);
+  });
+});
