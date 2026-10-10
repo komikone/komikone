@@ -42,7 +42,7 @@ describe('sendClerkInvitationEmail', () => {
         email_address: 'friend@example.com',
         redirect_url: 'https://komikone.com/join/XYZ123',
         notify: true,
-        ignore_existing: false,
+        ignore_existing: true,
       }),
     });
   });

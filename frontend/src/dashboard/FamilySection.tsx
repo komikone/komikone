@@ -1,18 +1,56 @@
 import { useState } from 'react';
-import { api } from '../lib/api';
+import { api, DAY_KEYS, dayLabel } from '../lib/api';
 import { useDashboard } from './DashboardContext';
 import { inputCls, labelCls } from './styles';
 import type { GroupView } from './DashboardContext';
 import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
 import { ToggleSwitch } from '../components/ToggleSwitch';
+import { selectedDays } from './participantDays';
+
+type DayFlags = Partial<Record<`req_${(typeof DAY_KEYS)[number]}`, boolean>>;
 
 type ParticipantFormData = {
   first_name: string;
   last_name: string;
   member_id: string;
+  email: string;
   badge_type: 'ADULT' | 'JUNIOR';
   return_eligible: boolean;
-};
+} & DayFlags;
+
+const emptyDays = (): DayFlags =>
+  Object.fromEntries(DAY_KEYS.map((d) => [`req_${d}`, false])) as DayFlags;
+
+const daysFrom = (p: { [k: string]: unknown }): DayFlags =>
+  Object.fromEntries(DAY_KEYS.map((d) => [`req_${d}`, !!p[`req_${d}`]])) as DayFlags;
+
+const hasAnyDay = (f: DayFlags) => DAY_KEYS.some((d) => f[`req_${d}`]);
+
+/** Shared day checkbox row — the family add/edit forms previously had no way to set days at all. */
+function DayPicker({
+  value, onChange, disabled,
+}: {
+  value: DayFlags;
+  onChange: (next: DayFlags) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-2">
+      {DAY_KEYS.map((day) => (
+        <label key={day} className="flex items-center gap-2 cursor-pointer select-none text-sm">
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={!!value[`req_${day}`]}
+            onChange={(e) => onChange({ ...value, [`req_${day}`]: e.target.checked })}
+            className="w-4 h-4 rounded border-gray-300 bg-gray-100 accent-blue-500"
+          />
+          <span className="text-gray-700 dark:text-gray-300">{dayLabel(day)}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
 
 export function FamilySection({
   view,
@@ -41,6 +79,7 @@ export function FamilySection({
 
       {addOpen && (
         <AddParticipantForm
+          event={view.event}
           onSave={async (data) => {
             const t = await tok();
             const yearId = resolveYearId();
@@ -64,6 +103,7 @@ export function FamilySection({
               <tr className="border-b border-gray-200 dark:border-gray-700 text-gray-500 text-xs bg-gray-50/80 dark:bg-gray-800/80">
                 <th className="text-left px-4 py-2">Name</th>
                 <th className="text-left px-4 py-2">Member ID</th>
+                <th className="text-left px-4 py-2">Days</th>
                 <th className="text-left px-4 py-2">Type</th>
                 <th className="text-left px-4 py-2">Return</th>
                 <th className="px-4 py-2" />
@@ -75,6 +115,7 @@ export function FamilySection({
                   <EditParticipantRow
                     key={p.id}
                     participant={p}
+                    event={view.event}
                     onSave={async (data) => {
                       const t = await tok();
                       const yearId = resolveYearId();
@@ -92,11 +133,28 @@ export function FamilySection({
                       {p.first_name} {p.last_name}
                     </td>
                     <td className="px-4 py-2.5">
-                      <MemberId
-                        value={p.member_id}
-                        letterClassName="text-gray-400"
-                        digitClassName="text-amber-400"
-                      />
+                      {p.member_id ? (
+                        <MemberId
+                          value={p.member_id}
+                          letterClassName="text-gray-400"
+                          digitClassName="text-amber-400"
+                        />
+                      ) : (
+                        <span className="text-amber-500 text-xs" title="Needed before purchase day">
+                          ⚠ Missing
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs">
+                      {selectedDays(p, 'req').length > 0 ? (
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {selectedDays(p, 'req').map(dayLabel).join(', ')}
+                        </span>
+                      ) : (
+                        <span className="text-amber-500" title="Needed before purchase day">
+                          ⚠ None
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-gray-400 text-xs">
                       {p.badge_type === 'ADULT' ? 'Adult' : 'Jr/Sr/Mil'}
@@ -141,17 +199,23 @@ export function FamilySection({
 }
 
 function AddParticipantForm({
-  onSave, onCancel,
+  event, onSave, onCancel,
 }: {
+  event: GroupView['event'];
   onSave: (data: ParticipantFormData) => Promise<void>;
   onCancel: () => void;
 }) {
   const [form, setForm] = useState<ParticipantFormData>({
-    first_name: '', last_name: '', member_id: '', badge_type: 'ADULT', return_eligible: false,
+    first_name: '', last_name: '', member_id: '', email: '',
+    badge_type: 'ADULT', return_eligible: false,
+    ...emptyDays(),
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const set = (k: keyof ParticipantFormData, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
+
+  const memberIdRequired = event.reg_type === 'return';
+  const daysEditable = event.status === 'registration';
 
   return (
     <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-3">
@@ -165,7 +229,7 @@ function AddParticipantForm({
           <input type="text" value={form.last_name} onChange={(e) => set('last_name', e.target.value)} className={inputCls} />
         </div>
         <div>
-          <label className={labelCls}>Member ID</label>
+          <label className={labelCls}>Member ID {memberIdRequired && '*'}</label>
           <input
             type="text"
             value={form.member_id}
@@ -183,17 +247,46 @@ function AddParticipantForm({
           </select>
         </div>
       </div>
+      <div className="mb-3">
+        <label className={labelCls}>Email</label>
+        <input
+          type="email"
+          value={form.email}
+          onChange={(e) => set('email', e.target.value)}
+          className={inputCls}
+          placeholder="Optional"
+          autoComplete="off"
+        />
+        <p className="text-gray-500 text-xs mt-1">
+          If they ever make their own account, this links them to this record instead of creating a duplicate.
+        </p>
+      </div>
+      {daysEditable && (
+        <div className="mb-3">
+          <label className={`${labelCls} block mb-2`}>Badge days desired *</label>
+          <DayPicker value={form} onChange={(next) => setForm((f) => ({ ...f, ...next }))} />
+        </div>
+      )}
       <ToggleSwitch
         checked={form.return_eligible}
         onChange={(v) => set('return_eligible', v)}
         label="Return eligible"
-        className="mb-3"
+        className="mb-1"
       />
+      <p className="text-gray-500 text-xs mb-3">
+        Turn on if this person attended last year and can buy during Return Registration.
+      </p>
       {err && <p className="text-red-400 text-xs mb-2">{err}</p>}
       <div className="flex gap-2">
         <button
           onClick={async () => {
             if (!form.first_name.trim() || !form.last_name.trim()) { setErr('Name required'); return; }
+            if (memberIdRequired && !form.member_id.trim()) {
+              setErr('Member ID is required for return registration.'); return;
+            }
+            if (daysEditable && !hasAnyDay(form)) {
+              setErr('Select at least one badge day.'); return;
+            }
             setSaving(true);
             try { await onSave(form); } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); }
             finally { setSaving(false); }
@@ -210,9 +303,10 @@ function AddParticipantForm({
 }
 
 function EditParticipantRow({
-  participant, onSave, onCancel, onError,
+  participant, event, onSave, onCancel, onError,
 }: {
-  participant: { id: number; first_name: string; last_name: string; member_id: string; badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean };
+  participant: { id: number; first_name: string; last_name: string; member_id: string; email: string; badge_type: 'ADULT' | 'JUNIOR'; return_eligible: boolean };
+  event: GroupView['event'];
   onSave: (data: Partial<ParticipantFormData>) => Promise<void>;
   onCancel: () => void;
   onError?: (msg: string) => void;
@@ -221,15 +315,19 @@ function EditParticipantRow({
     first_name: participant.first_name,
     last_name: participant.last_name,
     member_id: participant.member_id,
+    email: participant.email ?? '',
     badge_type: participant.badge_type,
     return_eligible: participant.return_eligible,
+    ...daysFrom(participant as unknown as { [k: string]: unknown }),
   });
   const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof form, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
 
+  const daysEditable = event.status === 'registration';
+
   return (
     <tr className="bg-gray-100/50">
-      <td colSpan={5} className="px-4 py-3">
+      <td colSpan={6} className="px-4 py-3">
         <div className="grid grid-cols-2 gap-2 mb-2">
           <input type="text" value={form.first_name} onChange={(e) => set('first_name', e.target.value)} placeholder="First name" className={inputCls} />
           <input type="text" value={form.last_name} onChange={(e) => set('last_name', e.target.value)} placeholder="Last name" className={inputCls} />
@@ -246,7 +344,21 @@ function EditParticipantRow({
             <option value="ADULT">Adult</option>
             <option value="JUNIOR">Jr / Sr / Military</option>
           </select>
+          <input
+            type="email"
+            value={form.email}
+            onChange={(e) => set('email', e.target.value)}
+            placeholder="Email (optional)"
+            className={inputCls}
+            autoComplete="off"
+          />
         </div>
+        {daysEditable && (
+          <div className="mb-3">
+            <p className={`${labelCls} mb-2`}>Badge days desired</p>
+            <DayPicker value={form} onChange={(next) => setForm((f) => ({ ...f, ...next }))} />
+          </div>
+        )}
         <div className="flex items-center gap-4">
           <ToggleSwitch
             checked={form.return_eligible}
