@@ -2200,8 +2200,8 @@ admin.post('/events/:id/participants', async (c) => {
       INSERT INTO participants
         (event_id, first_name, last_name, member_id, badge_type, return_eligible, notes,
          req_preview, req_thu, req_fri, req_sat, req_sun, sort_order, purchasing_coordinator,
-         clerk_user_id, registered_by_clerk_user_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         clerk_user_id, registered_by_clerk_user_id, email)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       eventId,
       body.first_name.trim(), body.last_name.trim(),
@@ -2215,6 +2215,7 @@ admin.post('/events/:id/participants', async (c) => {
       body.purchasing_coordinator?.trim() ?? '',
       body.clerk_user_id ?? null,
       body.registered_by_clerk_user_id ?? null,
+      (body.email ?? '').trim().toLowerCase(),
     ).run();
   } catch (e) {
     if (e instanceof Error && e.message.includes('UNIQUE')) return err('Member ID already used in this event', 409);
@@ -2257,6 +2258,13 @@ admin.patch('/events/:id/participants/:pid', async (c) => {
   if ('group_id' in body) {
     fields.push('group_id = ?');
     values.push((body as Partial<Participant & { group_id: number | null }>).group_id === null ? null : Number((body as Partial<Participant & { group_id: number | null }>).group_id));
+  }
+
+  // Stored lowercase because invite-accept matches on LOWER(email) to link a signup to the
+  // row an organizer already recorded.
+  if ('email' in body) {
+    fields.push('email = ?');
+    values.push((body.email ?? '').trim().toLowerCase());
   }
 
   for (const key of allowed) {

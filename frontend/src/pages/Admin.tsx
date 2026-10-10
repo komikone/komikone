@@ -1558,6 +1558,20 @@ function ParticipantForm({
           </select>
         </Field>
       </div>
+      <Field label="Email">
+        <input
+          type="email"
+          value={value.email ?? ''}
+          onChange={(e) => set('email', e.target.value)}
+          className={inputCls}
+          placeholder="name@example.com"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          Links this row to their account when they sign up, and prefills their join form.
+        </p>
+      </Field>
       {groups.length > 0 && (
         <Field label="Group">
           <select

@@ -375,6 +375,49 @@ describe('POST /invites/:code/accept — identity linking', () => {
   });
 });
 
+describe('admin participant email', () => {
+  it('stores a lowercased email that then links a signup to the row', async () => {
+    const yearId = insertYear(h.db);
+    const eventId = insertEvent(h.db, { year_id: yearId, status: 'registration' });
+    insertYearMember(h.db, yearId, HENRY);
+    insertInvite(h.db, yearId, 'JOINCODE5555', HENRY);
+
+    // Imported from last year's roster with no email, the way the Oct 17 board was seeded.
+    const pid = insertParticipant(h.db, eventId, {
+      first_name: 'Ken',
+      last_name: 'Cabaong',
+      member_id: 'T4477UCWY',
+      email: '',
+    });
+
+    const patch = await h.request(`/api/admin/events/${eventId}/participants/${pid}`, {
+      method: 'PATCH',
+      adminSecret: true,
+      body: JSON.stringify({ email: 'KCaba5@Yahoo.com' }),
+    });
+    expect(patch.status).toBe(200);
+    expect(getParticipant(h.db, pid).email).toBe('kcaba5@yahoo.com');
+
+    // With the email on file, a signup links even when the Member ID is mistyped.
+    setClerkUserEmail(DAVID, 'kcaba5@yahoo.com');
+    const res = await h.request('/api/invites/JOINCODE5555/accept', {
+      method: 'POST',
+      as: DAVID,
+      body: JSON.stringify({ first_name: 'Ken', last_name: 'Cabaong', member_id: 'TYPO999' }),
+    });
+
+    expect(res.status).toBe(201);
+    const row = getParticipant(h.db, pid);
+    expect(row.clerk_user_id).toBe(DAVID);
+    expect(row.member_id).toBe('TYPO999');
+
+    const count = h.db.prepare(
+      'SELECT COUNT(*) AS n FROM participants WHERE event_id = ? AND last_name = ?'
+    ).get(eventId, 'Cabaong') as { n: number };
+    expect(count.n).toBe(1);
+  });
+});
+
 describe('GET /invites/:code/prefill', () => {
   /** Henry recorded David's details ahead of time against david@example.com. */
   function seedPreEntered(over: { email?: string; clerk_user_id?: string | null } = {}) {
