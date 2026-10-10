@@ -23,12 +23,42 @@ import { ToggleSwitch } from '../components/ToggleSwitch';
 
 const STATUS_OPTIONS: EventDetail['status'][] = ['setup', 'registration', 'purchasing', 'payment', 'complete'];
 
+/**
+ * The export URL carries the token as a query param, so it has to be built at click time
+ * from a live token — a href rendered once pointed at an expired token by the time anyone
+ * pressed it.
+ */
+function ExportCsvLink({
+  eventId, auth, className, children,
+}: {
+  eventId: number;
+  auth: () => Promise<string>;
+  className: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={async () => {
+        const token = await auth();
+        if (!token) return;
+        const a = document.createElement('a');
+        a.href = api.admin.exportUrl(eventId, token);
+        a.download = '';
+        a.click();
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 // ─── Admin ────────────────────────────────────────────────────────────────────
 
 export default function Admin() {
   const { getToken } = useAuth();
   const { user, isLoaded: userLoaded } = useUser();
-  const [secret, setSecret] = useState('');
 
   const [events, setEvents] = useState<EventDetail[]>([]);
   const [yearsData, setYearsData] = useState<Year[]>([]);
@@ -72,14 +102,18 @@ export default function Admin() {
   const activeEvent = yearEvents.find((e) => e.reg_type === activeRegType) ?? yearEvents[0] ?? null;
   const participants = activeRegType === 'return' ? returnParticipants : openParticipants;
 
-  const getAuth = useCallback(async (): Promise<string> => {
-    const t = await getToken({ template: 'komikone' }) ?? await getToken() ?? '';
-    if (t) setSecret(t);
-    return t;
+  /**
+   * Panels get this getter rather than a token string. Clerk session tokens are
+   * short-lived, so a token captured into state went stale while the page sat open and
+   * every write after that failed with "Unauthorized". getToken() is cheap — Clerk
+   * caches it and only refreshes near expiry — so fetching per request is the cheap fix.
+   */
+  const auth = useCallback(async (): Promise<string> => {
+    return await getToken({ template: 'komikone' }) ?? await getToken() ?? '';
   }, [getToken]);
 
   const loadEvents = useCallback(async (): Promise<EventDetail[]> => {
-    const tok = await getAuth();
+    const tok = await auth();
     if (!tok) return [];
     setLoading(true);
     try {
@@ -93,10 +127,10 @@ export default function Admin() {
     } finally {
       setLoading(false);
     }
-  }, [getAuth]);
+  }, [auth]);
 
   const loadYearData = useCallback(async (year: number, evts: EventDetail[], yearRow?: Year | null) => {
-    const tok = await getAuth();
+    const tok = await auth();
     if (!tok) return;
     const linked = yearRow ? evts.filter((e) => e.year_id === yearRow.id) : [];
     const pool = linked.length > 0 ? linked : evts.filter((e) => e.year === year);
@@ -113,30 +147,30 @@ export default function Admin() {
     setReturnParticipants(retPs);
     setOpenParticipants(openPs);
     setYearMeta(meta);
-  }, [getAuth]);
+  }, [auth]);
 
   const reloadEventData = useCallback(async (regType: 'return' | 'open', evts: EventDetail[], year: number) => {
-    const tok = await getAuth();
+    const tok = await auth();
     if (!tok) return;
     const evt = evts.find((e) => e.year === year && e.reg_type === regType);
     if (!evt) return;
     const ps = await api.participants.list(evt.id, tok, { includeIneligible: true }).catch(() => []);
     if (regType === 'return') setReturnParticipants(ps);
     else setOpenParticipants(ps);
-  }, [getAuth]);
+  }, [auth]);
 
   const loadYearsData = useCallback(async (): Promise<Year[]> => {
-    const tok = await getAuth();
+    const tok = await auth();
     if (!tok) return [];
     try {
       const ys = await api.admin.years.list(tok);
       setYearsData(ys);
       return ys;
     } catch { return []; }
-  }, [getAuth]);
+  }, [auth]);
 
   const loadYearExtras = useCallback(async (yearObj: Year) => {
-    const tok = await getAuth();
+    const tok = await auth();
     if (!tok) return;
     const [invs, mems] = await Promise.all([
       api.admin.invites.list(tok, yearObj.id).catch(() => []),
@@ -144,17 +178,17 @@ export default function Admin() {
     ]);
     setYearInvites(invs);
     setYearMembers(mems);
-  }, [getAuth]);
+  }, [auth]);
 
   const loadInvitePanel = useCallback(async (yearObj: Year) => {
-    const tok = await getAuth();
+    const tok = await auth();
     if (!tok) return;
     const invs = await api.admin.invites.list(tok, yearObj.id).catch(() => []);
     setInvitePanelInvites(invs);
-  }, [getAuth]);
+  }, [auth]);
 
   const loadAccessRequests = useCallback(async () => {
-    const tok = await getAuth();
+    const tok = await auth();
     if (!tok) return;
     try {
       const list = await api.admin.inviteRequests.list(tok);
@@ -162,7 +196,7 @@ export default function Admin() {
     } catch {
       setAccessRequests([]);
     }
-  }, [getAuth]);
+  }, [auth]);
 
   const reloadAll = useCallback(async (year?: number) => {
     const [fresh, freshYears] = await Promise.all([loadEvents(), loadYearsData()]);
@@ -316,7 +350,7 @@ export default function Admin() {
                 </button>
               );
             })}
-            <CreateYearButton secret={secret} onCreated={() => reloadAll()} />
+            <CreateYearButton auth={auth} onCreated={() => reloadAll()} />
           </div>
 
           {/* Invites */}
@@ -362,7 +396,7 @@ export default function Admin() {
         {adminView === 'requests' ? (
           <div className="flex-1 overflow-auto p-6">
             <AccessRequestsPanel
-              secret={secret}
+              auth={auth}
               requests={accessRequests}
               inviteYear={activeYear ?? yearsData[0] ?? null}
               onUpdate={loadAccessRequests}
@@ -370,7 +404,7 @@ export default function Admin() {
           </div>
         ) : adminView === 'backgrounds' ? (
           <div className="flex-1 overflow-auto p-6">
-            <BackgroundsPanel secret={secret} />
+            <BackgroundsPanel auth={auth} />
           </div>
         ) : adminView === 'invites' ? (
           <div className="flex-1 overflow-auto p-6">
@@ -399,7 +433,7 @@ export default function Admin() {
               <InvitesTab
                 year={invitePanelYear}
                 invites={invitePanelInvites}
-                secret={secret}
+                auth={auth}
                 onUpdate={() => loadInvitePanel(invitePanelYear)}
               />
             ) : (
@@ -423,13 +457,13 @@ export default function Admin() {
                 </div>
                 {activeEvent && (
                   <div className="flex gap-2">
-                    <a
-                      href={api.admin.exportUrl(activeEvent.id, secret)}
+                    <ExportCsvLink
+                      eventId={activeEvent.id}
+                      auth={auth}
                       className="text-sm bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white px-3 py-1.5 rounded transition-colors"
-                      download
                     >
                       Export CSV
-                    </a>
+                    </ExportCsvLink>
                     <Link
                       to={`/live/${activeEvent.id}`}
                       target="_blank"
@@ -473,7 +507,7 @@ export default function Admin() {
               <OverviewTab
                 returnEvent={returnEvent}
                 openEvent={openEvent}
-                secret={secret}
+                auth={auth}
                 returnParticipants={returnParticipants}
                 openParticipants={openParticipants}
                 allEvents={events}
@@ -488,7 +522,7 @@ export default function Admin() {
                 returnEvent={returnEvent}
                 openEvent={openEvent}
                 onRegTypeChange={handleRegTypeSwitch}
-                secret={secret}
+                auth={auth}
                 participants={participants}
                 allEvents={events}
                 onUpdate={() => { if (selectedYear) reloadEventData(activeRegType, events, selectedYear); }}
@@ -501,16 +535,19 @@ export default function Admin() {
                 returnEvent={returnEvent}
                 openEvent={openEvent}
                 onRegTypeChange={handleRegTypeSwitch}
-                secret={secret}
+                auth={auth}
                 onUpdate={loadEvents}
               />
             )}
             {tab === 'dates' && selectedYear !== null && (
               <DatesTab
                 year={selectedYear}
-                secret={secret}
+                auth={auth}
                 meta={yearMeta}
-                onUpdate={() => selectedYear !== null && api.admin.yearMeta.get(secret, selectedYear).then(setYearMeta).catch(() => {})}
+                onUpdate={async () => {
+                  if (selectedYear === null) return;
+                  api.admin.yearMeta.get(await auth(), selectedYear).then(setYearMeta).catch(() => {});
+                }}
               />
             )}
             {tab === 'settings' && activeYear && (
@@ -519,7 +556,7 @@ export default function Admin() {
                 eventCount={yearEvents.length}
                 memberCount={yearMembers.length}
                 inviteCount={yearInvites.length}
-                getAuth={getAuth}
+                auth={auth}
                 onDeleted={() => handleYearDeleted(activeYear.con_year)}
                 onDummiesChanged={() => reloadAll()}
               />
@@ -545,7 +582,7 @@ const SDCC_DEFAULTS = {
   price_sat_junior: 4300, price_sun_junior: 3200,
 };
 
-function CreateYearButton({ secret, onCreated }: { secret: string; onCreated: () => void }) {
+function CreateYearButton({ auth, onCreated }: { auth: () => Promise<string>; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [year, setYear] = useState(new Date().getFullYear() + 1);
   const [loading, setLoading] = useState(false);
@@ -553,11 +590,12 @@ function CreateYearButton({ secret, onCreated }: { secret: string; onCreated: ()
   const handleCreate = async () => {
     setLoading(true);
     try {
-      await api.admin.years.create(secret, { con_year: year });
+      await api.admin.years.create(await auth(), { con_year: year });
       const summaries = await api.events.list();
       const newEvents = summaries.filter((e) => e.year === year);
+      const token = await auth();
       await Promise.all(
-        newEvents.map((e) => api.admin.events.update(secret, e.id, SDCC_DEFAULTS))
+        newEvents.map((e) => api.admin.events.update(token, e.id, SDCC_DEFAULTS))
       );
       setOpen(false);
       onCreated();
@@ -652,13 +690,13 @@ function EventToggle({
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 
 function OverviewTab({
-  returnEvent, openEvent, secret,
+  returnEvent, openEvent, auth,
   returnParticipants, openParticipants,
   allEvents, onUpdate,
 }: {
   returnEvent: EventDetail | null;
   openEvent: EventDetail | null;
-  secret: string;
+  auth: () => Promise<string>;
   returnParticipants: Participant[];
   openParticipants: Participant[];
   allEvents: EventDetail[];
@@ -671,7 +709,7 @@ function OverviewTab({
         {returnEvent && (
           <EventCard
             event={returnEvent}
-            secret={secret}
+            auth={auth}
             participants={returnParticipants}
             allEvents={allEvents}
             onUpdate={onUpdate}
@@ -680,7 +718,7 @@ function OverviewTab({
         {openEvent && (
           <EventCard
             event={openEvent}
-            secret={secret}
+            auth={auth}
             participants={openParticipants}
             allEvents={allEvents}
             onUpdate={onUpdate}
@@ -702,10 +740,10 @@ function OverviewTab({
 }
 
 function EventCard({
-  event, secret, participants, allEvents, onUpdate,
+  event, auth, participants, allEvents, onUpdate,
 }: {
   event: EventDetail;
-  secret: string;
+  auth: () => Promise<string>;
   participants: Participant[];
   allEvents: EventDetail[];
   onUpdate: () => void;
@@ -721,7 +759,7 @@ function EventCard({
 
   const handleStatusChange = async (s: EventDetail['status']) => {
     try {
-      await api.admin.events.update(secret, event.id, { status: s });
+      await api.admin.events.update(await auth(), event.id, { status: s });
       setStatus(s);
       onUpdate();
     } catch (e) {
@@ -731,7 +769,7 @@ function EventCard({
 
   const handleNameSave = async () => {
     try {
-      await api.admin.events.update(secret, event.id, { name });
+      await api.admin.events.update(await auth(), event.id, { name });
       setNameSaved(true);
       setTimeout(() => setNameSaved(false), 2000);
       onUpdate();
@@ -753,13 +791,13 @@ function EventCard({
           {label}
         </span>
         <div className="flex gap-1.5">
-          <a
-            href={api.admin.exportUrl(event.id, secret)}
+          <ExportCsvLink
+            eventId={event.id}
+            auth={auth}
             className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white px-2 py-1 rounded transition-colors"
-            download
           >
             CSV
-          </a>
+          </ExportCsvLink>
           <Link
             to={`/live/${event.id}`}
             target="_blank"
@@ -843,7 +881,7 @@ function EventCard({
       {copyOpen && (
         <CopyParticipantsModal
           event={event}
-          secret={secret}
+          auth={auth}
           allEvents={allEvents}
           onDone={() => { setCopyOpen(false); onUpdate(); }}
           onClose={() => setCopyOpen(false)}
@@ -915,7 +953,7 @@ function AccountMembersTable({ members }: { members: YearMember[] }) {
 function PeopleTab({
   members,
   event, activeRegType, returnEvent, openEvent, onRegTypeChange,
-  secret, participants, allEvents, onUpdate,
+  auth, participants, allEvents, onUpdate,
 }: {
   members: YearMember[];
   event: EventDetail | null;
@@ -923,7 +961,7 @@ function PeopleTab({
   returnEvent: EventDetail | null;
   openEvent: EventDetail | null;
   onRegTypeChange: (t: 'return' | 'open') => void;
-  secret: string;
+  auth: () => Promise<string>;
   participants: Participant[];
   allEvents: EventDetail[];
   onUpdate: () => void;
@@ -939,7 +977,7 @@ function PeopleTab({
 
   const loadGroups = async (evt: EventDetail) => {
     try {
-      const gs = await api.groups.list(evt.id, secret);
+      const gs = await api.groups.list(evt.id, await auth());
       setGroups(gs);
     } catch {
       setGroups([]);
@@ -964,7 +1002,7 @@ function PeopleTab({
     if (!event) return;
     if (!window.confirm(`Delete ${p.first_name} ${p.last_name}?`)) return;
     try {
-      await api.admin.participants.delete(secret, event.id, p.id);
+      await api.admin.participants.delete(await auth(), event.id, p.id);
       onUpdate();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed');
@@ -978,7 +1016,7 @@ function PeopleTab({
       return;
     }
     try {
-      await api.admin.participants.add(secret, event.id, newParticipant);
+      await api.admin.participants.add(await auth(), event.id, newParticipant);
       setNewParticipant({ badge_type: 'ADULT' });
       setAddOpen(false);
       onUpdate();
@@ -1004,7 +1042,7 @@ function PeopleTab({
       next.splice(ti, 0, srcId);
       setLocalParticipantOrder(next);
       try {
-        await api.admin.participants.reorder(secret, event!.id, next);
+        await api.admin.participants.reorder(await auth(), event!.id, next);
         onUpdate();
       } catch (e) {
         alert(e instanceof Error ? e.message : 'Failed');
@@ -1059,7 +1097,7 @@ function PeopleTab({
 
       <GroupsPanel
         eventId={event.id}
-        secret={secret}
+        auth={auth}
         groups={groups}
         onUpdate={() => { reloadGroups(); onUpdate(); }}
       />
@@ -1151,7 +1189,7 @@ function PeopleTab({
                   </span>
                 </td>
                 <td className="px-2 py-2 text-center">
-                  <ReturnToggle p={p} secret={secret} eventId={event.id} onUpdate={onUpdate} />
+                  <ReturnToggle p={p} auth={auth} eventId={event.id} onUpdate={onUpdate} />
                 </td>
                 <td className="px-2 py-2 text-center text-xs text-gray-400">
                   {DAY_KEYS.filter((d) => p[`req_${d}` as keyof Participant]).map((d) => d.slice(0, 2).toUpperCase()).join(' ')}
@@ -1200,7 +1238,7 @@ function PeopleTab({
       {copyOpen && (
         <CopyParticipantsModal
           event={event}
-          secret={secret}
+          auth={auth}
           allEvents={allEvents}
           onDone={() => { setCopyOpen(false); onUpdate(); }}
           onClose={() => setCopyOpen(false)}
@@ -1210,7 +1248,7 @@ function PeopleTab({
       {editingId !== null && event && (
         <EditParticipantModal
           participant={participants.find((p) => p.id === editingId)!}
-          secret={secret}
+          auth={auth}
           eventId={event.id}
           groups={groups}
           onSave={() => { setEditingId(null); onUpdate(); }}
@@ -1227,10 +1265,10 @@ function PeopleTab({
 // ─── Groups Panel ─────────────────────────────────────────────────────────────
 
 function GroupsPanel({
-  eventId, secret, groups, onUpdate,
+  eventId, auth, groups, onUpdate,
 }: {
   eventId: number;
-  secret: string;
+  auth: () => Promise<string>;
   groups: Group[];
   onUpdate: () => void;
 }) {
@@ -1257,7 +1295,7 @@ function GroupsPanel({
     if (!addingName.trim()) return;
     setSaving(true);
     try {
-      await api.admin.groups.create(secret, eventId, { name: addingName.trim(), color: addingColor });
+      await api.admin.groups.create(await auth(), eventId, { name: addingName.trim(), color: addingColor });
       setAddingName('');
       setAddingColor('#6366f1');
       setAddOpen(false);
@@ -1272,7 +1310,7 @@ function GroupsPanel({
   const handleDelete = async (g: Group) => {
     if (!confirm(`Delete group "${g.name}"? Participants will be unassigned.`)) return;
     try {
-      await api.admin.groups.delete(secret, eventId, g.id);
+      await api.admin.groups.delete(await auth(), eventId, g.id);
       onUpdate();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed');
@@ -1287,7 +1325,7 @@ function GroupsPanel({
 
   const handleEditSave = async (g: Group) => {
     try {
-      await api.admin.groups.update(secret, eventId, g.id, { name: editName, color: editColor });
+      await api.admin.groups.update(await auth(), eventId, g.id, { name: editName, color: editColor });
       setEditingId(null);
       onUpdate();
     } catch (e) {
@@ -1312,7 +1350,7 @@ function GroupsPanel({
       next.splice(ti, 0, srcId);
       setLocalOrder(next);
       try {
-        await api.admin.groups.reorder(secret, eventId, next);
+        await api.admin.groups.reorder(await auth(), eventId, next);
         onUpdate();
       } catch (e) {
         alert(e instanceof Error ? e.message : 'Failed');
@@ -1417,13 +1455,13 @@ function GroupsPanel({
 }
 
 function ReturnToggle({
-  p, secret, eventId, onUpdate,
-}: { p: Participant; secret: string; eventId: number; onUpdate: () => void }) {
+  p, auth, eventId, onUpdate,
+}: { p: Participant; auth: () => Promise<string>; eventId: number; onUpdate: () => void }) {
   const [loading, setLoading] = useState(false);
   const toggle = async () => {
     setLoading(true);
     try {
-      await api.admin.participants.update(secret, eventId, p.id, { return_eligible: !p.return_eligible });
+      await api.admin.participants.update(await auth(), eventId, p.id, { return_eligible: !p.return_eligible });
       onUpdate();
     } finally {
       setLoading(false);
@@ -1443,10 +1481,10 @@ function ReturnToggle({
 }
 
 function EditParticipantModal({
-  participant, secret, eventId, groups, onSave, onClose,
+  participant, auth, eventId, groups, onSave, onClose,
 }: {
   participant: Participant;
-  secret: string;
+  auth: () => Promise<string>;
   eventId: number;
   groups: Group[];
   onSave: () => void;
@@ -1456,7 +1494,7 @@ function EditParticipantModal({
 
   const handleSave = async () => {
     try {
-      await api.admin.participants.update(secret, eventId, participant.id, form);
+      await api.admin.participants.update(await auth(), eventId, participant.id, form);
       onSave();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed');
@@ -1569,14 +1607,14 @@ function ParticipantForm({
 
 function PricesTab({
   event, activeRegType, returnEvent, openEvent, onRegTypeChange,
-  secret, onUpdate,
+  auth, onUpdate,
 }: {
   event: EventDetail | null;
   activeRegType: 'return' | 'open';
   returnEvent: EventDetail | null;
   openEvent: EventDetail | null;
   onRegTypeChange: (t: 'return' | 'open') => void;
-  secret: string;
+  auth: () => Promise<string>;
   onUpdate: () => void;
 }) {
   const priceDays = [
@@ -1613,7 +1651,7 @@ function PricesTab({
   const handleSave = async () => {
     const patch = Object.fromEntries(allPriceKeys.map((key) => [key, dollarsToCents(values[key])]));
     try {
-      await api.admin.events.update(secret, event.id, patch);
+      await api.admin.events.update(await auth(), event.id, patch);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       onUpdate();
@@ -1683,10 +1721,10 @@ const EMPTY_DATES: DateFields = {
 };
 
 function DatesTab({
-  year, secret, meta, onUpdate,
+  year, auth, meta, onUpdate,
 }: {
   year: number;
-  secret: string;
+  auth: () => Promise<string>;
   meta: YearMeta | null;
   onUpdate: () => void;
 }) {
@@ -1701,7 +1739,7 @@ function DatesTab({
 
   const handleSave = async () => {
     try {
-      await api.admin.yearMeta.upsert(secret, year, form);
+      await api.admin.yearMeta.upsert(await auth(), year, form);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       onUpdate();
@@ -1779,10 +1817,10 @@ function DatesTab({
 // ─── Copy / Transfer Modal ────────────────────────────────────────────────────
 
 function CopyParticipantsModal({
-  event, secret, allEvents, onDone, onClose,
+  event, auth, allEvents, onDone, onClose,
 }: {
   event: EventDetail;
-  secret: string;
+  auth: () => Promise<string>;
   allEvents: EventDetail[];
   onDone: () => void;
   onClose: () => void;
@@ -1802,7 +1840,7 @@ function CopyParticipantsModal({
     if (!confirm(`${action === 'transfer' ? 'Move' : 'Copy'} all ${event.name} participants to ${target?.name}?`)) return;
     setLoading(true);
     try {
-      const res = await api.admin.participants.copy(secret, event.id, {
+      const res = await api.admin.participants.copy(await auth(), event.id, {
         target_event_id: targetId,
         reset_purchasing: resetPurchasing,
         transfer: mode === 'transfer',
@@ -1907,9 +1945,9 @@ function CopyParticipantsModal({
 // ─── Access Requests Panel ────────────────────────────────────────────────────
 
 function AccessRequestsPanel({
-  secret, requests, inviteYear, onUpdate,
+  auth, requests, inviteYear, onUpdate,
 }: {
-  secret: string;
+  auth: () => Promise<string>;
   requests: InviteRequest[];
   inviteYear: Year | null;
   onUpdate: () => void;
@@ -1928,8 +1966,8 @@ function AccessRequestsPanel({
     }
     setApprovingId(req.id);
     try {
-      await api.admin.inviteRequests.update(secret, req.id, { status: 'approved' });
-      const res = await api.admin.invites.create(secret, inviteYear.id, {
+      await api.admin.inviteRequests.update(await auth(), req.id, { status: 'approved' });
+      const res = await api.admin.invites.create(await auth(), inviteYear.id, {
         label: req.email,
         email: req.email,
       });
@@ -1954,7 +1992,7 @@ function AccessRequestsPanel({
 
   const handleReject = async (id: number) => {
     try {
-      await api.admin.inviteRequests.update(secret, id, { status: 'rejected' });
+      await api.admin.inviteRequests.update(await auth(), id, { status: 'rejected' });
       onUpdate();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed');
@@ -1964,7 +2002,7 @@ function AccessRequestsPanel({
   const handleDelete = async (id: number) => {
     if (!confirm('Delete this request?')) return;
     try {
-      await api.admin.inviteRequests.delete(secret, id);
+      await api.admin.inviteRequests.delete(await auth(), id);
       onUpdate();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed');
@@ -2059,11 +2097,11 @@ function AccessRequestsPanel({
 // ─── Invites Tab ──────────────────────────────────────────────────────────────
 
 function InvitesTab({
-  year, invites, secret, onUpdate,
+  year, invites, auth, onUpdate,
 }: {
   year: Year;
   invites: Invite[];
-  secret: string;
+  auth: () => Promise<string>;
   onUpdate: () => void;
 }) {
   const [label, setLabel] = useState('');
@@ -2100,7 +2138,7 @@ function InvitesTab({
   const handleBulkCreate = async () => {
     setBulkCreating(true);
     try {
-      const { invites: created } = await api.admin.invites.bulkCreate(secret, year.id, {
+      const { invites: created } = await api.admin.invites.bulkCreate(await auth(), year.id, {
         count: bulkCount,
         label_prefix: bulkPrefix.trim() || undefined,
       });
@@ -2121,7 +2159,7 @@ function InvitesTab({
       if (label.trim()) payload.label = label.trim();
       if (email.trim()) payload.email = email.trim().toLowerCase();
 
-      const res = await api.admin.invites.create(secret, year.id, payload);
+      const res = await api.admin.invites.create(await auth(), year.id, payload);
       setLabel('');
       setEmail('');
       onUpdate();
@@ -2148,7 +2186,7 @@ function InvitesTab({
   const handleDelete = async (inv: Invite) => {
     if (inv.used_by_clerk_user_id && !confirm(`This invite has been used. Delete "${inv.label || inv.code}" anyway?`)) return;
     try {
-      await api.admin.invites.delete(secret, year.id, inv.id);
+      await api.admin.invites.delete(await auth(), year.id, inv.id);
       onUpdate();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed');
@@ -2318,7 +2356,7 @@ function SettingsTab({
   eventCount,
   memberCount,
   inviteCount,
-  getAuth,
+  auth,
   onDeleted,
   onDummiesChanged,
 }: {
@@ -2326,7 +2364,7 @@ function SettingsTab({
   eventCount: number;
   memberCount: number;
   inviteCount: number;
-  getAuth: () => Promise<string>;
+  auth: () => Promise<string>;
   onDeleted: () => void;
   onDummiesChanged: () => void;
 }) {
@@ -2342,10 +2380,10 @@ function SettingsTab({
   const canDelete = confirmText === String(year.con_year);
 
   const requireAuth = useCallback(async () => {
-    const tok = await getAuth();
+    const tok = await auth();
     if (!tok) throw new Error('Not signed in — refresh the page and try again');
     return tok;
-  }, [getAuth]);
+  }, [auth]);
 
   const refreshDummies = useCallback(async () => {
     try {
@@ -2505,7 +2543,7 @@ function SettingsTab({
 
 // ─── Backgrounds Panel ────────────────────────────────────────────────────────
 
-function BackgroundsPanel({ secret }: { secret: string }) {
+function BackgroundsPanel({ auth }: { auth: () => Promise<string> }) {
   const [items, setItems] = useState<Background[]>([]);
   const [loading, setLoading] = useState(true);
   const [url, setUrl] = useState('');
@@ -2516,14 +2554,14 @@ function BackgroundsPanel({ secret }: { secret: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await api.admin.backgrounds.list(secret);
+      const list = await api.admin.backgrounds.list(await auth());
       setItems(list);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
-  }, [secret]);
+  }, [auth]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -2533,7 +2571,7 @@ function BackgroundsPanel({ secret }: { secret: string }) {
     setAdding(true);
     setErr('');
     try {
-      await api.admin.backgrounds.create(secret, { url: url.trim(), label: label.trim() || undefined });
+      await api.admin.backgrounds.create(await auth(), { url: url.trim(), label: label.trim() || undefined });
       setUrl('');
       setLabel('');
       invalidateBackgroundCache();
@@ -2547,7 +2585,7 @@ function BackgroundsPanel({ secret }: { secret: string }) {
 
   const handleToggle = async (bg: Background) => {
     try {
-      await api.admin.backgrounds.update(secret, bg.id, { active: !bg.active });
+      await api.admin.backgrounds.update(await auth(), bg.id, { active: !bg.active });
       invalidateBackgroundCache();
       await load();
     } catch (e) {
@@ -2558,7 +2596,7 @@ function BackgroundsPanel({ secret }: { secret: string }) {
   const handleDelete = async (bg: Background) => {
     if (!confirm('Remove this background URL?')) return;
     try {
-      await api.admin.backgrounds.delete(secret, bg.id);
+      await api.admin.backgrounds.delete(await auth(), bg.id);
       invalidateBackgroundCache();
       await load();
     } catch (e) {
