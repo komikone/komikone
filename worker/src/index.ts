@@ -1222,6 +1222,9 @@ app.post('/api/invites/:code/accept', async (c) => {
   }>();
 
   if (!body.first_name?.trim() || !body.last_name?.trim()) return err('First and last name required');
+  // The Live Board refuses anyone without a Member ID, so accepting without one lets people
+  // finish signing up and then get locked out of the thing they signed up for.
+  if (!body.member_id?.trim()) return err('SDCC Member ID is required');
 
   const invite = await c.env.DB.prepare(
     'SELECT * FROM invites WHERE code = ?'

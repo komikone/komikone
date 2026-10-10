@@ -235,11 +235,32 @@ describe('POST /invites/:code/accept — identity linking', () => {
     const res = await h.request('/api/invites/JOINCODE5678/accept', {
       method: 'POST',
       as: DAVID,
-      body: JSON.stringify({ first_name: 'David', last_name: 'Garcia' }),
+      body: JSON.stringify({ first_name: 'David', last_name: 'Garcia', member_id: 'DGARC88' }),
     });
 
     expect(res.status).toBe(201);
     expect(getParticipant(h.db, takenPid).clerk_user_id).toBe('user_someone_else');
+  });
+
+  it('refuses to accept without a Member ID, which the board requires', async () => {
+    const yearId = insertYear(h.db);
+    insertEvent(h.db, { year_id: yearId, status: 'registration' });
+    insertYearMember(h.db, yearId, HENRY);
+    insertInvite(h.db, yearId, 'JOINCODE0001', HENRY);
+
+    const res = await h.request('/api/invites/JOINCODE0001/accept', {
+      method: 'POST',
+      as: DAVID,
+      body: JSON.stringify({ first_name: 'David', last_name: 'Garcia' }),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: 'SDCC Member ID is required' });
+
+    // The invite must stay usable so they can retry with their ID.
+    const invite = h.db.prepare('SELECT used_at FROM invites WHERE code = ?')
+      .get('JOINCODE0001') as { used_at: string | null };
+    expect(invite.used_at).toBeNull();
   });
 
   it('still works when Clerk has no email on file', async () => {

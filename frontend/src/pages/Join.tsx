@@ -63,6 +63,10 @@ export default function JoinPage() {
       setSubmitError('First and last name are required.');
       return;
     }
+    if (!form.member_id.trim()) {
+      setSubmitError('SDCC Member ID is required — the purchase board uses it to identify you.');
+      return;
+    }
     setSubmitting(true);
     setSubmitError('');
     try {
@@ -186,7 +190,7 @@ export default function JoinPage() {
         </div>
 
         <div>
-          <label className={labelCls}>SDCC Member ID</label>
+          <label className={labelCls}>SDCC Member ID *</label>
           <input
             type="text"
             value={form.member_id}
@@ -196,7 +200,10 @@ export default function JoinPage() {
             autoCapitalize="characters"
             spellCheck={false}
           />
-          <p className="text-xs text-gray-600 mt-1">Found in your SDCC account. Used to link your registration.</p>
+          <p className="text-xs text-gray-600 mt-1">
+            Found in your SDCC account. This is what links you to your badge — without it the
+            purchase board can't let you in.
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
