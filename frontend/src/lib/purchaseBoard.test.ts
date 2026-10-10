@@ -43,6 +43,7 @@ function participant(over: Partial<Participant> = {}): Participant {
     first_name: 'Avery',
     last_name: 'Smith',
     member_id: 'AVERY1',
+    email: '',
     badge_type: 'ADULT',
     return_eligible: true,
     notes: '',

@@ -9,6 +9,7 @@ function emptyParticipant(overrides: Partial<Participant> = {}): Participant {
     first_name: 'Tony',
     last_name: 'N',
     member_id: 'ABC',
+    email: '',
     badge_type: 'ADULT',
     return_eligible: false,
     notes: '',
