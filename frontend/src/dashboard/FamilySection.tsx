@@ -101,12 +101,13 @@ export function FamilySection({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-700 text-gray-500 text-xs bg-gray-50/80 dark:bg-gray-800/80">
-                <th className="text-left px-4 py-2">Name</th>
-                <th className="text-left px-4 py-2">Member ID</th>
-                <th className="text-left px-4 py-2">Days</th>
-                <th className="text-left px-4 py-2">Type</th>
-                <th className="text-left px-4 py-2">Return</th>
-                <th className="px-4 py-2" />
+                <th className="text-left px-2 sm:px-4 py-2">Name</th>
+                <th className="text-left px-2 sm:px-4 py-2">Member ID</th>
+                <th className="text-left px-2 sm:px-4 py-2">Days</th>
+                {/* Secondary detail; dropped on phones so the warning columns stay readable. */}
+                <th className="text-left px-4 py-2 hidden sm:table-cell">Type</th>
+                <th className="text-left px-4 py-2 hidden sm:table-cell">Return</th>
+                <th className="px-2 sm:px-4 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -129,10 +130,10 @@ export function FamilySection({
                   />
                 ) : (
                   <tr key={p.id} className="group hover:bg-gray-100 dark:hover:bg-gray-800/40">
-                    <td className="px-4 py-2.5 text-gray-900 dark:text-white font-medium">
+                    <td className="px-2 sm:px-4 py-2.5 text-gray-900 dark:text-white font-medium">
                       {p.first_name} {p.last_name}
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-2 sm:px-4 py-2.5">
                       {p.member_id ? (
                         <MemberId
                           value={p.member_id}
@@ -145,7 +146,7 @@ export function FamilySection({
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-xs">
+                    <td className="px-2 sm:px-4 py-2.5 text-xs">
                       {selectedDays(p, 'req').length > 0 ? (
                         <span className="text-gray-500 dark:text-gray-400">
                           {selectedDays(p, 'req').map(dayLabel).join(', ')}
@@ -156,16 +157,17 @@ export function FamilySection({
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-gray-400 text-xs">
+                    <td className="px-4 py-2.5 text-gray-400 text-xs hidden sm:table-cell">
                       {p.badge_type === 'ADULT' ? 'Adult' : 'Jr/Sr/Mil'}
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-4 py-2.5 hidden sm:table-cell">
                       {p.return_eligible
                         ? <span className="text-green-400 text-xs">✓</span>
                         : <span className="text-gray-600 text-xs">—</span>}
                     </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <div className="flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                    <td className="px-2 sm:px-4 py-2.5 text-right">
+                      {/* Always visible on touch: there is no hover to reveal them with. */}
+                      <div className="flex gap-2 justify-end sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={() => setEditingId(p.id)}
                           className="text-xs text-gray-400 hover:text-gray-900"
@@ -219,7 +221,7 @@ function AddParticipantForm({
 
   return (
     <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-3">
-      <div className="grid grid-cols-2 gap-3 mb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
         <div>
           <label className={labelCls}>First name *</label>
           <input type="text" value={form.first_name} onChange={(e) => set('first_name', e.target.value)} className={inputCls} autoFocus />
@@ -328,7 +330,7 @@ function EditParticipantRow({
   return (
     <tr className="bg-gray-100/50">
       <td colSpan={6} className="px-4 py-3">
-        <div className="grid grid-cols-2 gap-2 mb-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
           <input type="text" value={form.first_name} onChange={(e) => set('first_name', e.target.value)} placeholder="First name" className={inputCls} />
           <input type="text" value={form.last_name} onChange={(e) => set('last_name', e.target.value)} placeholder="Last name" className={inputCls} />
           <input

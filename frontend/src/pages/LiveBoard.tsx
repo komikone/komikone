@@ -1423,7 +1423,8 @@ function CellContent({
         <div className="flex items-center justify-center">
           <button
             onClick={() => onEditParticipant(p)}
-            className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-400"
+            // Always visible on touch, where there is no hover to reveal it with.
+            className="sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-400"
             title="Edit participant"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

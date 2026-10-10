@@ -246,7 +246,9 @@ export default function JoinPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        {/* Stacked on phones: "Junior / Senior / Military" and the toggle label both
+            overflow a half-width column at 390px. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className={labelCls}>Badge Type</label>
             <select value={form.badge_type} onChange={e => set('badge_type', e.target.value as 'ADULT' | 'JUNIOR')} className={inputCls}>

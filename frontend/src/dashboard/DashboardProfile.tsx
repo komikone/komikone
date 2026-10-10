@@ -138,7 +138,7 @@ export function PageShell({
 }) {
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-8 py-10">
+      <div className="max-w-3xl mx-auto px-4 sm:px-8 py-6 sm:py-10">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h1>
         {subtitle && <p className="text-gray-400 text-sm mt-1 mb-8">{subtitle}</p>}
         {!subtitle && <div className="mb-8" />}
