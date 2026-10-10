@@ -242,6 +242,97 @@ describe('POST /invites/:code/accept — identity linking', () => {
     expect(getParticipant(h.db, takenPid).clerk_user_id).toBe('user_someone_else');
   });
 
+  it('takes the Member ID they typed over a stale one an organizer recorded', async () => {
+    const yearId = insertYear(h.db);
+    const eventId = insertEvent(h.db, { year_id: yearId, status: 'registration' });
+    insertYearMember(h.db, yearId, HENRY);
+    insertInvite(h.db, yearId, 'JOINCODE2222', HENRY);
+
+    // Imported from last year's roster, where the ID was recorded wrong.
+    const pid = insertParticipant(h.db, eventId, {
+      first_name: 'Andre',
+      last_name: 'Velazquez',
+      member_id: 'ANDRE VELAZQUEZ',
+      email: 'andre@example.com',
+      clerk_user_id: null,
+    });
+
+    setClerkUserEmail(DAVID, 'andre@example.com');
+
+    const res = await h.request('/api/invites/JOINCODE2222/accept', {
+      method: 'POST',
+      as: DAVID,
+      body: JSON.stringify({ first_name: 'Andre', last_name: 'Velazquez', member_id: 'ANDREV123' }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(getParticipant(h.db, pid).member_id).toBe('ANDREV123');
+  });
+
+  it('adopts the row already holding their Member ID rather than the one matched by email', async () => {
+    const yearId = insertYear(h.db);
+    const eventId = insertEvent(h.db, { year_id: yearId, status: 'registration' });
+    insertYearMember(h.db, yearId, HENRY);
+    insertInvite(h.db, yearId, 'JOINCODE3333', HENRY);
+
+    const byMemberId = insertParticipant(h.db, eventId, {
+      member_id: 'ANDREV123',
+      clerk_user_id: null,
+    });
+    const byEmail = insertParticipant(h.db, eventId, {
+      member_id: 'ANDRE VELAZQUEZ',
+      email: 'andre@example.com',
+      clerk_user_id: null,
+    });
+
+    setClerkUserEmail(DAVID, 'andre@example.com');
+
+    const res = await h.request('/api/invites/JOINCODE3333/accept', {
+      method: 'POST',
+      as: DAVID,
+      body: JSON.stringify({ first_name: 'Andre', last_name: 'Velazquez', member_id: 'ANDREV123' }),
+    });
+
+    // Member ID wins over email, so the stale duplicate is left alone for a human to merge
+    // rather than being silently overwritten into a unique-index violation.
+    expect(res.status).toBe(201);
+    expect(getParticipant(h.db, byMemberId).clerk_user_id).toBe(DAVID);
+    expect(getParticipant(h.db, byEmail).clerk_user_id).toBeNull();
+  });
+
+  it('refuses to hand over a row whose Member ID belongs to another account', async () => {
+    const yearId = insertYear(h.db);
+    const eventId = insertEvent(h.db, { year_id: yearId, status: 'registration' });
+    insertYearMember(h.db, yearId, HENRY);
+    insertInvite(h.db, yearId, 'JOINCODE4444', HENRY);
+
+    const victim = insertParticipant(h.db, eventId, {
+      first_name: 'Henry',
+      last_name: 'Garcia',
+      member_id: 'HGARC014',
+      clerk_user_id: 'user_henry_account',
+    });
+
+    const res = await h.request('/api/invites/JOINCODE4444/accept', {
+      method: 'POST',
+      as: DAVID,
+      body: JSON.stringify({ first_name: 'Not', last_name: 'Henry', member_id: 'HGARC014' }),
+    });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error: 'That Member ID is already registered to another account',
+    });
+
+    expect(getParticipant(h.db, victim).clerk_user_id).toBe('user_henry_account');
+    expect(getParticipant(h.db, victim).first_name).toBe('Henry');
+
+    // Nothing was written, so the real owner of this invite can still use it.
+    const invite = h.db.prepare('SELECT used_at FROM invites WHERE code = ?')
+      .get('JOINCODE4444') as { used_at: string | null };
+    expect(invite.used_at).toBeNull();
+  });
+
   it('refuses to accept without a Member ID, which the board requires', async () => {
     const yearId = insertYear(h.db);
     insertEvent(h.db, { year_id: yearId, status: 'registration' });

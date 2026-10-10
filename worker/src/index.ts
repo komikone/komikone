@@ -1284,6 +1284,20 @@ app.post('/api/invites/:code/accept', async (c) => {
   if (!invite) return err('Invite not found', 404);
   if (invite.used_at) return err('This invite has already been used', 409);
 
+  // Reject a Member ID that already belongs to someone else before anything is written,
+  // so the invite stays usable. Letting it through either hands over their row or trips
+  // the per-event unique index halfway through and leaves a half-built registration.
+  const claimedByOther = await c.env.DB.prepare(`
+    SELECT p.id FROM participants p
+    JOIN events e ON e.id = p.event_id
+    WHERE e.year_id = ? AND UPPER(p.member_id) = UPPER(?)
+      AND p.clerk_user_id IS NOT NULL AND p.clerk_user_id != '' AND p.clerk_user_id != ?
+    LIMIT 1
+  `).bind(invite.year_id, body.member_id.trim(), access.userId).first();
+  if (claimedByOther) {
+    return err('That Member ID is already registered to another account', 409);
+  }
+
   // Already a member (e.g. dashboard enroll) — still mark this invite used
   const existing = await c.env.DB.prepare(
     'SELECT * FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
@@ -1359,29 +1373,39 @@ app.post('/api/invites/:code/accept', async (c) => {
 
     // Match on Member ID first, then on the email whoever added this person recorded.
     // Without the email fallback, a family member who later signs up for their own account
-    // gets a second participant row and their original one is orphaned.
+    // gets a second participant row and their original one is orphaned. Both lookups skip
+    // rows that belong to a different account, or typing someone else's Member ID would
+    // hand you their row.
+    const unclaimed = "(clerk_user_id IS NULL OR clerk_user_id = '' OR clerk_user_id = ?)";
     const existingP =
       (memberId
-        ? await db.prepare(
-            'SELECT id FROM participants WHERE event_id = ? AND UPPER(member_id) = UPPER(?)'
-          ).bind(ev.id, memberId).first<{ id: number }>()
+        ? await db.prepare(`
+            SELECT id, member_id FROM participants
+            WHERE event_id = ? AND UPPER(member_id) = UPPER(?) AND ${unclaimed}
+          `).bind(ev.id, memberId, access.userId).first<{ id: number; member_id: string }>()
         : null)
       ?? (signupEmail
         ? await db.prepare(`
-            SELECT id FROM participants
-            WHERE event_id = ? AND LOWER(email) = ?
-              AND (clerk_user_id IS NULL OR clerk_user_id = '' OR clerk_user_id = ?)
-          `).bind(ev.id, signupEmail, access.userId).first<{ id: number }>()
+            SELECT id, member_id FROM participants
+            WHERE event_id = ? AND LOWER(email) = ? AND ${unclaimed}
+          `).bind(ev.id, signupEmail, access.userId).first<{ id: number; member_id: string }>()
         : null);
 
     if (existingP) {
+      // They are reading their own SDCC account, so their Member ID beats whatever an
+      // organizer recorded from a previous year. Overwriting cannot trip the per-event
+      // unique index here: any other row holding this ID is either unclaimed, in which
+      // case the lookup above matched it instead, or owned by someone else and already
+      // rejected before we got here.
       await db.prepare(`
         UPDATE participants
         SET clerk_user_id = ?, group_id = ?, registered_by_clerk_user_id = ?,
-            member_id = CASE WHEN member_id = '' THEN ? ELSE member_id END,
+            member_id = ?,
             email = CASE WHEN email = '' THEN ? ELSE email END
         WHERE id = ?
-      `).bind(access.userId, group.id, access.userId, memberId, signupEmail, existingP.id).run();
+      `).bind(
+        access.userId, group.id, access.userId, memberId, signupEmail, existingP.id,
+      ).run();
     } else {
       await db.prepare(`
         INSERT INTO participants (event_id, first_name, last_name, member_id, badge_type,
