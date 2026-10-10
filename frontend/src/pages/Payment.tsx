@@ -129,7 +129,7 @@ export default function Payment() {
           <p className="text-gray-400 text-sm mb-4">
             Enter your payment handles so participants know how to pay you.
           </p>
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
               <label className="block text-xs text-gray-400 mb-1">Your Name (as listed in the board)</label>
               <input

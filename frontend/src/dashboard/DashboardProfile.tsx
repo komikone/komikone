@@ -63,7 +63,7 @@ export default function DashboardProfile() {
       {saved && <p className="text-green-400 text-sm mb-4">Saved.</p>}
 
       <form onSubmit={handleSave} className="max-w-lg space-y-5">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className={labelCls}>First name</label>
             <input

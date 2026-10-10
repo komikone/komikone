@@ -14,12 +14,16 @@ body {
 }
 
 /* iOS Safari zooms the whole page when a focused field is under 16px, and every field
-   here is text-sm. Phone-only so the denser desktop sizing is untouched. */
+   here is text-sm. Phone-only so the denser desktop sizing is untouched.
+   !important is load-bearing: .text-sm is a class, so it outranks a bare element
+   selector no matter where this sits in the file, and without it this rule silently
+   loses and the page keeps zooming. No field asks for more than 16px on a phone, so
+   there is nothing for the override to trample. */
 @media (max-width: 639px) {
   input,
   select,
   textarea {
-    font-size: 16px;
+    font-size: 16px !important;
   }
 }
 

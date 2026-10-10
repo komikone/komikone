@@ -154,7 +154,7 @@ export default function Registration() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">First Name *</label>
               <input
