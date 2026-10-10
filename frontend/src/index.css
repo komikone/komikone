@@ -13,6 +13,16 @@ body {
   letter-spacing: 0.06em;
 }
 
+/* iOS Safari zooms the whole page when a focused field is under 16px, and every field
+   here is text-sm. Phone-only so the denser desktop sizing is untouched. */
+@media (max-width: 639px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
 /* Light mode: dark dots on colored header */
 .halftone-bg {
   background-image: radial-gradient(circle, rgba(0, 0, 0, 0.14) 1.5px, transparent 1.5px);
