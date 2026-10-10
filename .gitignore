@@ -4,6 +4,8 @@ dist/
 .wrangler/
 .env.local
 *.local
+# Generated working files carry live invite codes, emails and real names.
+*.local.*
 .DS_Store
 
 .dev.vars*
