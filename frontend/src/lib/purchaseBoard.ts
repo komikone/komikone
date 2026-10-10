@@ -87,6 +87,9 @@ export function computeAnyPurchased(p: Participant): boolean {
   return !!(p.pur_preview || p.pur_thu || p.pur_fri || p.pur_sat || p.pur_sun);
 }
 
+/** Mirrors HANDLING_FEE_CENTS in worker/src/db.ts — Comic-Con charges it once per member. */
+export const HANDLING_FEE_CENTS = 1500;
+
 export function computePurchaseTotal(p: Participant, event: EventDetail | null): number {
   if (!event) return 0;
   const tier = p.badge_type === 'ADULT' ? 'adult' : 'junior';
@@ -97,7 +100,21 @@ export function computePurchaseTotal(p: Participant, event: EventDetail | null):
   if (p.pur_fri) total += price('fri');
   if (p.pur_sat) total += price('sat');
   if (p.pur_sun) total += price('sun');
+  if (computeAnyPurchased(p)) total += HANDLING_FEE_CENTS;
   return total;
+}
+
+/**
+ * Comic-Con only sells Preview Night alongside all four main days. Mirrors
+ * previewRequiresAllDays in worker/src/db.ts so the picker can block it before the
+ * server has to.
+ */
+export function previewRequiresAllDays(d: {
+  req_preview?: boolean; req_thu?: boolean; req_fri?: boolean;
+  req_sat?: boolean; req_sun?: boolean;
+}): boolean {
+  if (!d.req_preview) return true;
+  return Boolean(d.req_thu && d.req_fri && d.req_sat && d.req_sun);
 }
 
 // ─── Purchase readiness ──────────────────────────────────────────────────────

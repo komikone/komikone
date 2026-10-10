@@ -83,6 +83,40 @@ describe('POST /my-group/participants', () => {
     expect(res.status).toBe(201);
   });
 
+  it('refuses Preview Night without all four main days', async () => {
+    const { yearId, eventId } = seedYearWithOwner({ reg_type: 'open' });
+
+    const res = await addPerson(yearId, eventId, {
+      first_name: 'David',
+      last_name: 'Garcia',
+      req_preview: true,
+      req_thu: true,
+      req_fri: true,
+      req_sat: true,
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: expect.stringMatching(/all four main days/i),
+    });
+  });
+
+  it('accepts Preview Night once all four main days are there', async () => {
+    const { yearId, eventId } = seedYearWithOwner({ reg_type: 'open' });
+
+    const res = await addPerson(yearId, eventId, {
+      first_name: 'David',
+      last_name: 'Garcia',
+      req_preview: true,
+      req_thu: true,
+      req_fri: true,
+      req_sat: true,
+      req_sun: true,
+    });
+
+    expect(res.status).toBe(201);
+  });
+
   it('rejects a person with no badge days during registration', async () => {
     const { yearId, eventId } = seedYearWithOwner();
 

@@ -249,7 +249,7 @@ export default function Payment() {
                     <tr className="text-gray-400 text-xs">
                       <th className="text-left py-1">Participant</th>
                       <th className="text-left py-1">Days Purchased</th>
-                      <th className="text-right py-1">Amount</th>
+                      <th className="text-right py-1">Amount<span className="font-normal text-gray-400"> (incl. $15 fee)</span></th>
                       <th className="text-center py-1">Paid?</th>
                     </tr>
                   </thead>

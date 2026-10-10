@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, computeAllPurchased, enrichParticipant, isClaimExpired, MAX_ACTIVE_CLAIMS } from './db';
 import {
+  assertPreviewNightAllowed,
   assertRegistrationOpen,
   daysToSql,
   groupDisplayName,
@@ -547,6 +548,8 @@ app.post('/api/events/:id/register', async (c) => {
     badge_type: (body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT') as 'ADULT' | 'JUNIOR',
   };
   const days = normalizeDays(body);
+  const previewErr = assertPreviewNightAllowed(days);
+  if (previewErr) return err(previewErr);
 
   // Prefer group-linked upsert so dashboard my-group sees the row
   if (clerkUserId) {
@@ -736,6 +739,9 @@ app.patch('/api/events/:id/participants/:pid/requested', async (c) => {
     req_preview?: boolean; req_thu?: boolean; req_fri?: boolean;
     req_sat?: boolean; req_sun?: boolean;
   }>();
+
+  const previewErr = assertPreviewNightAllowed(normalizeDays(body));
+  if (previewErr) return err(previewErr);
 
   await c.env.DB.prepare(`
     UPDATE participants
@@ -1715,6 +1721,8 @@ app.post('/api/years/:yearId/events/:eventId/my-group/participants', async (c) =
   if (event?.status === 'registration' && !reqDays.some((d) => d === 1)) {
     return err('Select at least one badge day');
   }
+  const previewErr = assertPreviewNightAllowed(normalizeDays(body));
+  if (previewErr) return err(previewErr);
 
   // Link to existing participant if member_id matches — only if ungrouped or already ours
   if (memberId) {
@@ -1803,6 +1811,8 @@ app.patch('/api/years/:yearId/events/:eventId/my-group/days', async (c) => {
     req_preview: boolean; req_thu: boolean; req_fri: boolean; req_sat: boolean; req_sun: boolean;
   }>>();
   const days = normalizeDays(body);
+  const previewErr = assertPreviewNightAllowed(days);
+  if (previewErr) return err(previewErr);
 
   const pid = await upsertSelfParticipantDays(c.env.DB, {
     eventId,
@@ -1839,8 +1849,9 @@ app.patch('/api/years/:yearId/events/:eventId/my-group/participants/:pid', async
 
   // Ensure participant belongs to this group
   const p = await c.env.DB.prepare(
-    'SELECT id FROM participants WHERE id = ? AND event_id = ? AND group_id = ?'
-  ).bind(pid, eventId, group.id).first();
+    `SELECT id, req_preview, req_thu, req_fri, req_sat, req_sun
+     FROM participants WHERE id = ? AND event_id = ? AND group_id = ?`
+  ).bind(pid, eventId, group.id).first<Participant>();
   if (!p) return err('Participant not found', 404);
 
   const body = await c.req.json<Partial<{
@@ -1851,6 +1862,14 @@ app.patch('/api/years/:yearId/events/:eventId/my-group/participants/:pid', async
 
   const event = await getEvent(c.env.DB, eventId);
   const canEditDays = event?.status === 'registration';
+
+  // The body only carries the days the caller touched, so validate the row as it will
+  // look afterwards — checking the body alone would wave through unticking Thursday on
+  // someone who already has Preview Night.
+  if (canEditDays) {
+    const previewErr = assertPreviewNightAllowed(normalizeDays({ ...normalizeDays(p), ...body }));
+    if (previewErr) return err(previewErr);
+  }
 
   const reqFields: string[] = [];
   const reqValues: number[] = [];

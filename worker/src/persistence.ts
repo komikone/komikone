@@ -123,3 +123,14 @@ export function assertPurchasingOpen(status: string): string | null {
   if (status !== 'purchasing') return 'Not in purchasing phase';
   return null;
 }
+
+/**
+ * Comic-Con only sells Preview Night to people taking all four main days, so a request
+ * for Preview without them can never be filled. Rejecting it at write time keeps the
+ * board honest — otherwise it shows a gap during the sale that no buyer can ever close.
+ */
+export function assertPreviewNightAllowed(days: DayFlags): string | null {
+  if (!days.req_preview) return null;
+  if (days.req_thu && days.req_fri && days.req_sat && days.req_sun) return null;
+  return 'Preview Night is only sold with all four main days — add Thursday, Friday, Saturday and Sunday, or drop Preview Night.';
+}

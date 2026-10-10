@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertPurchasingOpen,
+  assertPreviewNightAllowed,
   assertRegistrationOpen,
   bool01,
   daysToSql,
@@ -136,6 +137,17 @@ describe('status gates', () => {
   it('purchasing gate', () => {
     expect(assertPurchasingOpen('purchasing')).toBeNull();
     expect(assertPurchasingOpen('registration')).toMatch(/purchasing/i);
+  });
+
+  it('Preview Night gate', () => {
+    expect(assertPreviewNightAllowed(normalizeDays({ req_sat: true }))).toBeNull();
+    expect(assertPreviewNightAllowed(normalizeDays({
+      req_preview: true, req_thu: true, req_fri: true, req_sat: true, req_sun: true,
+    }))).toBeNull();
+    expect(assertPreviewNightAllowed(normalizeDays({ req_preview: true }))).toMatch(/all four main days/i);
+    expect(assertPreviewNightAllowed(normalizeDays({
+      req_preview: true, req_thu: true, req_fri: true, req_sat: true,
+    }))).toMatch(/all four main days/i);
   });
 });
 

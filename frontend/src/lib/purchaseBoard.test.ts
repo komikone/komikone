@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type { EventDetail, Participant } from './api';
 import {
   CLAIM_TIMEOUT_MS,
+  HANDLING_FEE_CENTS,
   applySimPatches,
   claimRemainingMs,
   computeAllPurchased,
+  computePurchaseTotal,
   formatClaimCountdown,
   holdsClaimSlot,
   isClaimLive,
   isClaimable,
   parseClaimTimestamp,
+  previewRequiresAllDays,
   purchaseBlockers,
   purchasedByMe,
   setSimPatch,
@@ -183,7 +186,8 @@ describe('simulation sandbox', () => {
 
     expect(view[0].all_purchased).toBe(true);
     expect(view[0].gaps).toEqual([]);
-    expect(view[0].purchase_total).toBe(8000);
+    // One Saturday badge plus Comic-Con's per-member handling fee.
+    expect(view[0].purchase_total).toBe(8000 + HANDLING_FEE_CENTS);
     expect(view[0].claim_active).toBe(true);
     // Untouched rows and the underlying roster objects are unchanged.
     expect(view[1]).toBe(roster[1]);
@@ -205,5 +209,51 @@ describe('simulation sandbox', () => {
     });
     const view = applySimPatches(roster, patches, event, now);
     expect(holdsClaimSlot(view[0], 'Tony Nguyen', now)).toBe(false);
+  });
+});
+
+describe('purchase total', () => {
+  it('is zero before anything is bought, fee included', () => {
+    expect(computePurchaseTotal(participant(), event)).toBe(0);
+  });
+
+  it('charges the handling fee once, not per day', () => {
+    const oneDay = computePurchaseTotal(participant({ pur_sat: true }), event);
+    const allDays = computePurchaseTotal(
+      participant({ pur_preview: true, pur_thu: true, pur_fri: true, pur_sat: true, pur_sun: true }),
+      event,
+    );
+    expect(oneDay).toBe(8000 + HANDLING_FEE_CENTS);
+    expect(allDays).toBe(5000 + 6000 + 7000 + 8000 + 4000 + HANDLING_FEE_CENTS);
+  });
+
+  it('prices juniors at the junior tier and still charges one fee', () => {
+    const junior = participant({ badge_type: 'JUNIOR', pur_sat: true, pur_sun: true });
+    expect(computePurchaseTotal(junior, event)).toBe(4000 + 2000 + HANDLING_FEE_CENTS);
+  });
+
+  it('still charges the fee when the event has no prices set yet', () => {
+    const priceless = { ...event, price_sat_adult: 0 } as EventDetail;
+    expect(computePurchaseTotal(participant({ pur_sat: true }), priceless)).toBe(HANDLING_FEE_CENTS);
+  });
+});
+
+describe('Preview Night rule', () => {
+  it('allows any combination that does not include Preview', () => {
+    expect(previewRequiresAllDays({ req_sat: true })).toBe(true);
+    expect(previewRequiresAllDays({})).toBe(true);
+  });
+
+  it('allows Preview alongside all four main days', () => {
+    expect(previewRequiresAllDays({
+      req_preview: true, req_thu: true, req_fri: true, req_sat: true, req_sun: true,
+    })).toBe(true);
+  });
+
+  it('rejects Preview when any main day is missing', () => {
+    expect(previewRequiresAllDays({ req_preview: true })).toBe(false);
+    expect(previewRequiresAllDays({
+      req_preview: true, req_thu: true, req_fri: true, req_sat: true,
+    })).toBe(false);
   });
 });

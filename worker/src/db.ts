@@ -177,6 +177,14 @@ export const CLAIM_TIMEOUT_MINUTES = 10;
 /** Comic-Con lets you buy badges for at most 3 people per purchase session. */
 export const MAX_ACTIVE_CLAIMS = 3;
 
+/**
+ * Comic-Con bills this once per member who buys anything, on top of the badge prices.
+ * A constant rather than an events column because it is set by Comic-Con, not by us —
+ * if they change it, every event changes with it, which is the opposite of how the
+ * per-day prices behave.
+ */
+export const HANDLING_FEE_CENTS = 1500;
+
 export function computePurchaseTotal(p: Participant, event: Event): number {
   const tier = p.badge_type === 'ADULT' ? 'adult' : 'junior';
   let total = 0;
@@ -185,6 +193,10 @@ export function computePurchaseTotal(p: Participant, event: Event): number {
   if (p.pur_fri) total += event[`price_fri_${tier}` as keyof Event] as number;
   if (p.pur_sat) total += event[`price_sat_${tier}` as keyof Event] as number;
   if (p.pur_sun) total += event[`price_sun_${tier}` as keyof Event] as number;
+  // Keyed off a bought day rather than a non-zero total: an event with prices still
+  // unset would otherwise skip the fee and under-report what everyone owes.
+  const anyPurchased = p.pur_preview || p.pur_thu || p.pur_fri || p.pur_sat || p.pur_sun;
+  if (anyPurchased) total += HANDLING_FEE_CENTS;
   return total;
 }
 
