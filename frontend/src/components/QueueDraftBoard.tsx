@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Participant, PurchaseQueueEntry, PurchaseQueueStatus, SaleDay } from '../lib/api';
 import { SALE_DAYS, SALE_DAY_FULL, SALE_DAY_LABEL } from '../lib/purchaseBoard';
 import {
@@ -55,8 +55,8 @@ type QueueActions = {
 };
 
 /**
- * The Queue-It line drawn as a draft board: your own places pinned at the top with their
- * live pick number, then the full order with on-the-clock and on-deck marked once. Order
+ * The Queue-It line drawn as a draft board: one list, your places highlighted in it, and
+ * each place expanding in place for its ETA and status controls. Order
  * comes from when each place is due through, so picks move as people report — the ▲/▼
  * markers make that visible instead of places seeming to vanish.
  */
@@ -79,12 +79,23 @@ export function BuyerQueuePanel({
 } & QueueActions) {
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
+  /** Your place ids just before joining; the one that shows up afterwards opens itself. */
+  const [joinedFrom, setJoinedFrom] = useState<number[] | null>(null);
   const [showFinished, setShowFinished] = useState(false);
+  const scrolledToRef = useRef<number | null>(null);
 
   const active = activeQueue(queue);
   const finished = queue.filter((q) => !isQueueActive(q));
   const mine = active.filter((q) => q.clerk_user_id === myClerkId);
   const onDeckId = active.find((q) => q.status !== 'buying')?.id ?? null;
+  const newId = joinedFrom ? mine.find((q) => !joinedFrom.includes(q.id))?.id ?? null : null;
+  const openId = newId ?? expanded;
+
+  const scrollNewIntoView = (el: HTMLLIElement | null) => {
+    if (!el || newId == null || scrolledToRef.current === newId) return;
+    scrolledToRef.current = newId;
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  };
 
   const rankOf = (id: number) => active.findIndex((q) => q.id === id) + 1;
   const moveOf = (id: number) => {
@@ -105,6 +116,8 @@ export function BuyerQueuePanel({
       suggested,
     );
     if (name === null) return;
+    setExpanded(null);
+    setJoinedFrom(mine.map((q) => q.id));
     void run(() => onJoin(name.trim() || undefined));
   };
 
@@ -150,8 +163,8 @@ export function BuyerQueuePanel({
           <button type="button" onClick={onDismiss} className="text-sky-500 hover:text-sky-800 text-sm px-1.5" aria-label="Close">✕</button>
         </div>
         <p className="text-sky-900/60 dark:text-sky-200/60 text-[11px] mt-1 leading-snug">
-          Each browser waiting in Queue-It is a pick. Order follows when each one is due through,
-          so picks move as ETAs get reported.
+          Each browser waiting in Queue-It is a pick. New places join at the back, then move
+          up or down as ETAs get reported. Tap a place to set its ETA.
         </p>
         {stale && (
           <p className="mt-1.5 text-[11px] font-bold text-amber-700 dark:text-amber-300">
@@ -171,73 +184,6 @@ export function BuyerQueuePanel({
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
-        {mine.length > 0 && (
-          <section>
-            <SectionLabel>Your places · {mine.length}</SectionLabel>
-            <div className="space-y-2">
-              {mine.map((q) => {
-                const onClock = q.status === 'buying';
-                return (
-                  <div
-                    key={q.id}
-                    className={`rounded-lg border-2 px-2.5 py-2 bg-white dark:bg-sky-900/40 ${
-                      onClock ? 'border-orange-500' : q.id === onDeckId ? 'border-amber-400' : 'border-yellow-400'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => rename(q)}
-                          className="font-bold text-sm text-gray-900 dark:text-white truncate hover:underline"
-                          title="Rename"
-                        >
-                          {q.label} <span className="text-gray-400 text-xs">✎</span>
-                        </button>
-                        <div className="text-[11px] text-gray-500">{q.first_name} {q.last_name}</div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="font-mono text-2xl font-black leading-none text-gray-900 dark:text-white">
-                          #{rankOf(q.id)}
-                        </div>
-                        <div className="text-[10px] text-gray-500">of {active.length}</div>
-                        <MoveBadge delta={moveOf(q.id)} />
-                      </div>
-                    </div>
-
-                    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-                      <RoleBadge onClock={onClock} onDeck={q.id === onDeckId} />
-                      <StatusChip status={q.status} />
-                      <EtaText entry={q} now={now} />
-                    </div>
-
-                    {onClock && (
-                      <div className="mt-2 rounded bg-orange-50 dark:bg-orange-950/40 border border-orange-300 dark:border-orange-800 px-2 py-1.5">
-                        <div className="text-[10px] font-black uppercase tracking-widest text-orange-700 dark:text-orange-300">
-                          Buy for
-                        </div>
-                        {buyFor.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={onOpenWhosNext}
-                            className="text-left text-xs font-semibold text-gray-900 dark:text-white hover:underline"
-                          >
-                            {buyFor.map((p) => `${p.first_name} ${p.last_name}`).join(', ')} →
-                          </button>
-                        ) : (
-                          <div className="text-xs text-gray-500">Nobody left to claim.</div>
-                        )}
-                      </div>
-                    )}
-
-                    {controls(q, 'md')}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
         {active.length === 0 ? (
           <p className="text-sky-800/60 dark:text-sky-300/50 text-xs py-2">
             {identityLinked
@@ -252,11 +198,12 @@ export function BuyerQueuePanel({
                 const isMe = q.clerk_user_id === myClerkId;
                 const onClock = q.status === 'buying';
                 const onDeck = q.id === onDeckId;
-                const open = expanded === q.id;
+                const open = openId === q.id;
                 return (
                   <li
                     key={q.id}
-                    className={`rounded-md border px-2 py-1.5 ${
+                    ref={q.id === newId ? scrollNewIntoView : undefined}
+                    className={`rounded-md px-2 py-1.5 ${open ? 'border-2 shadow-md' : 'border'} ${
                       onClock
                         ? 'border-orange-400 bg-orange-50 dark:bg-orange-950/30'
                         : onDeck
@@ -268,7 +215,8 @@ export function BuyerQueuePanel({
                   >
                     <button
                       type="button"
-                      onClick={() => setExpanded(open ? null : q.id)}
+                      onClick={() => { setJoinedFrom(null); setExpanded(open ? null : q.id); }}
+                      aria-expanded={open}
                       className="w-full flex items-center gap-2 text-left"
                     >
                       <span className="font-mono text-sm font-black w-6 text-sky-700 dark:text-sky-300 shrink-0">{i + 1}</span>
@@ -291,9 +239,50 @@ export function BuyerQueuePanel({
                         </span>
                       </span>
                     </button>
-                    {open && (isMe
-                      ? <p className="mt-1 text-[10px] text-gray-500">Your controls are under Your places above.</p>
-                      : controls(q, 'sm'))}
+                    {isMe && onClock && (
+                      <div className="mt-1.5 rounded bg-orange-50 dark:bg-orange-950/40 border border-orange-300 dark:border-orange-800 px-2 py-1.5">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-orange-700 dark:text-orange-300">
+                          Buy for
+                        </div>
+                        {buyFor.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={onOpenWhosNext}
+                            className="text-left text-xs font-semibold text-gray-900 dark:text-white hover:underline"
+                          >
+                            {buyFor.map((p) => `${p.first_name} ${p.last_name}`).join(', ')} →
+                          </button>
+                        ) : (
+                          <div className="text-xs text-gray-500">Nobody left to claim.</div>
+                        )}
+                      </div>
+                    )}
+                    {open && (
+                      <div className="mt-2 pt-2 border-t border-sky-200/70 dark:border-sky-800/70">
+                        <div className="flex items-center justify-between gap-2">
+                          {canManage(q) ? (
+                            <button
+                              type="button"
+                              onClick={() => rename(q)}
+                              className="text-xs font-bold text-gray-900 dark:text-white truncate hover:underline"
+                              title="Rename"
+                            >
+                              {q.label} <span className="text-gray-400">✎</span>
+                            </button>
+                          ) : (
+                            <span className="text-xs font-bold text-gray-900 dark:text-white truncate">{q.label}</span>
+                          )}
+                          <span className="text-[10px] text-gray-500 shrink-0">
+                            Pick #{i + 1} of {active.length}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                          <StatusChip status={q.status} />
+                          <EtaText entry={q} now={now} />
+                        </div>
+                        {controls(q, isMe ? 'md' : 'sm')}
+                      </div>
+                    )}
                   </li>
                 );
               })}
