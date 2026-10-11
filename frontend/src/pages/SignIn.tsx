@@ -1,6 +1,7 @@
 import { SignIn as ClerkSignIn, useAuth } from '@clerk/clerk-react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { AppPage } from '../components/AppPage';
+import { ClerkLoading } from '../components/ClerkLoading';
 import { useTheme } from '../lib/useTheme';
 
 const LIGHT_APPEARANCE = {
@@ -70,7 +71,7 @@ export default function SignIn() {
             appearance={isDark ? DARK_APPEARANCE : LIGHT_APPEARANCE}
           />
         ) : (
-          <p className="text-gray-400 text-sm">Loading…</p>
+          <ClerkLoading />
         )}
       </div>
     </AppPage>

@@ -5,6 +5,7 @@ import { api, type Year } from '../lib/api';
 import { AppPage } from '../components/AppPage';
 import { normalizeMemberIdInput } from '../components/MemberId';
 import { ToggleSwitch } from '../components/ToggleSwitch';
+import { ClerkLoading } from '../components/ClerkLoading';
 import { forgetPendingInvite, rememberPendingInvite } from '../lib/pendingInvite';
 
 type InviteInfo = {
@@ -205,11 +206,15 @@ export default function JoinPage() {
           </p>
         </div>
         <div className="flex justify-center">
-          <SignIn
-            routing="hash"
-            forceRedirectUrl={joinUrl}
-            signUpForceRedirectUrl={joinUrl}
-          />
+          {isLoaded ? (
+            <SignIn
+              routing="hash"
+              forceRedirectUrl={joinUrl}
+              signUpForceRedirectUrl={joinUrl}
+            />
+          ) : (
+            <ClerkLoading />
+          )}
         </div>
       </Screen>
     );
