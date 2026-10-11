@@ -979,8 +979,15 @@ export default function LiveBoard() {
           >
             {isDark ? '☀ Day' : '◑ Night'}
           </button>
-          {me && <IdentityAvatar me={me} myDisplayName={myDisplayName} onChangeIdentity={() => setShowLinkModal(true)} />}
-          <HeaderUserMenu />
+          <HeaderUserMenu
+            boardIdentity={me ? {
+              displayName: myDisplayName,
+              memberId: me.member_id,
+              groupName: me.group_name,
+              groupColor: me.group_color,
+              onChange: () => setShowLinkModal(true),
+            } : undefined}
+          />
         </div>
       </div>
 
@@ -1743,57 +1750,6 @@ function CellContent({
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-function IdentityAvatar({
-  me, myDisplayName, onChangeIdentity,
-}: {
-  me: Participant;
-  myDisplayName: string;
-  onChangeIdentity: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const initials = `${me.first_name[0] ?? ''}${me.last_name[0] ?? ''}`.toUpperCase();
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-7 h-7 rounded-full bg-yellow-400 dark:bg-yellow-500 text-black font-bold text-[11px] flex items-center justify-center border-2 border-black dark:border-yellow-300 hover:bg-yellow-300 dark:hover:bg-yellow-400 transition-colors"
-        title={myDisplayName}
-      >
-        {initials}
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-9 z-50 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg shadow-xl p-4 min-w-[180px]">
-            <div className="text-gray-900 dark:text-white font-semibold text-sm">{myDisplayName}</div>
-            {me.member_id && (
-              <div className="mt-0.5">
-                <MemberId value={me.member_id} className="font-mono text-xs tracking-wide" letterClassName="text-gray-400" digitClassName="text-amber-400" />
-              </div>
-            )}
-            {me.group_name && (
-              <div className="mt-1.5">
-                <span
-                  className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white"
-                  style={{ backgroundColor: me.group_color ?? '#6366f1' }}
-                >
-                  {me.group_name}
-                </span>
-              </div>
-            )}
-            <button
-              onClick={() => { setOpen(false); onChangeIdentity(); }}
-              className="mt-3 text-xs text-gray-400 hover:text-gray-900 dark:hover:text-white underline block"
-            >
-              Change identity
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 function LinkIdentityModal({
   participants, currentIdentityId, userName, onLink, onDismiss, registerUrl,
