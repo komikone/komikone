@@ -558,6 +558,8 @@ export default function Admin() {
               <SettingsTab
                 year={activeYear}
                 eventCount={yearEvents.length}
+                events={yearEvents}
+                onEventDeleted={() => reloadAll()}
                 memberCount={yearMembers.length}
                 inviteCount={yearInvites.length}
                 auth={auth}
@@ -2427,9 +2429,13 @@ function SettingsTab({
   auth,
   onDeleted,
   onDummiesChanged,
+  events,
+  onEventDeleted,
 }: {
   year: Year;
   eventCount: number;
+  events: EventDetail[];
+  onEventDeleted: () => void;
   memberCount: number;
   inviteCount: number;
   auth: () => Promise<string>;
@@ -2498,6 +2504,27 @@ function SettingsTab({
       alert(e instanceof Error ? e.message : 'Failed to clear dummies');
     } finally {
       setClearing(false);
+    }
+  };
+
+  const [deletingEventId, setDeletingEventId] = useState<number | null>(null);
+
+  const handleDeleteEvent = async (evt: EventDetail) => {
+    const typed = window.prompt(
+      `Delete "${evt.name}"?\n\nThis permanently removes the event and everything on it: `
+      + 'its roster rows, groups, and Queue-It places. Other events and people\'s accounts are not affected.\n\n'
+      + 'Type DELETE to confirm.',
+    );
+    if (typed?.trim() !== 'DELETE') return;
+    setDeletingEventId(evt.id);
+    try {
+      const tok = await requireAuth();
+      await api.admin.events.delete(tok, evt.id);
+      onEventDeleted();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to delete event');
+    } finally {
+      setDeletingEventId(null);
     }
   };
 
@@ -2576,6 +2603,35 @@ function SettingsTab({
         )}
         {dummyMsg && <p className="text-green-600 dark:text-green-400 text-sm mt-2">{dummyMsg}</p>}
       </div>
+
+      {events.length > 0 && (
+        <div className="border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 rounded-xl p-5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Events</p>
+          <p className="text-gray-500 text-sm mb-3">
+            Delete a single event, like a dry run, without touching the rest of {year.name}.
+          </p>
+          <ul className="divide-y divide-gray-200 dark:divide-gray-800">
+            {events.map((evt) => (
+              <li key={evt.id} className="flex items-center justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{evt.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {evt.reg_type === 'return' ? 'Return' : 'Open'} reg · {evt.status}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteEvent(evt)}
+                  disabled={deletingEventId !== null}
+                  className="shrink-0 text-sm text-red-600 dark:text-red-400 hover:text-red-500 border border-red-300 dark:border-red-800 hover:border-red-500 px-3 py-1 rounded-lg disabled:opacity-40 transition-colors"
+                >
+                  {deletingEventId === evt.id ? 'Deleting…' : 'Delete'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="border-2 border-red-200/80 bg-red-950/30 rounded-xl p-5">
         <p className="text-red-700 text-xs font-semibold uppercase tracking-wider mb-2">Danger zone</p>

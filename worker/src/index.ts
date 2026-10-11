@@ -2291,8 +2291,15 @@ admin.patch('/events/:id', async (c) => {
 
 admin.delete('/events/:id', async (c) => {
   const id = Number(c.req.param('id'));
-  await c.env.DB.prepare('DELETE FROM events WHERE id = ?').bind(id).run();
-  return json({ ok: true });
+  const res = await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM purchase_queue WHERE event_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM participants WHERE event_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM groups WHERE event_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM coordinators WHERE event_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM events WHERE id = ?').bind(id),
+  ]);
+  if ((res[4].meta.changes ?? 0) === 0) return err('Event not found', 404);
+  return json({ ok: true, participants_deleted: res[1].meta.changes ?? 0 });
 });
 
 admin.post('/events/:id/participants', async (c) => {

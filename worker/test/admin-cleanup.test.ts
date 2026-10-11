@@ -99,6 +99,32 @@ describe('deleting a member', () => {
   });
 });
 
+describe('deleting an event', () => {
+  it('removes the event and everything on it, and leaves other events alone', async () => {
+    const real = insertEvent(h.db, { year_id: yearId, name: 'Real' });
+    insertParticipant(h.db, real, { first_name: 'Tony', clerk_user_id: TONY });
+    insertParticipant(h.db, eventId, { first_name: 'Tony', clerk_user_id: TONY });
+    insertParticipant(h.db, eventId, { first_name: 'Dummy' });
+    insertGroup(h.db, eventId, TONY);
+    h.db.prepare("UPDATE events SET status = 'purchasing' WHERE id = ?").run(eventId);
+    await joinQueue(TONY);
+
+    const res = await h.request(`/api/admin/events/${eventId}`, { method: 'DELETE', adminSecret: true });
+    expect(await res.json()).toEqual({ ok: true, participants_deleted: 2 });
+
+    for (const table of ['participants', 'groups', 'purchase_queue']) {
+      expect(count(`SELECT COUNT(*) n FROM ${table} WHERE event_id = ?`, eventId)).toBe(0);
+    }
+    expect(count('SELECT COUNT(*) n FROM events WHERE id = ?', eventId)).toBe(0);
+    expect(count('SELECT COUNT(*) n FROM participants WHERE event_id = ?', real)).toBe(1);
+  });
+
+  it('404s for an unknown event and is admin-only', async () => {
+    expect((await h.request('/api/admin/events/9999', { method: 'DELETE', adminSecret: true })).status).toBe(404);
+    expect((await h.request(`/api/admin/events/${eventId}`, { method: 'DELETE', as: TONY })).status).toBe(401);
+  });
+});
+
 describe('clearing the Queue-It line', () => {
   beforeEach(() => {
     insertParticipant(h.db, eventId, { first_name: 'Tony', clerk_user_id: TONY });
