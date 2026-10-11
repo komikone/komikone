@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth, useUser } from '@clerk/clerk-react';
-import { api, type EventDetail, type Participant, type PurchaseQueueEntry, type PurchaseQueueStatus, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
+import { api, type EventDetail, type Participant, type PurchaseQueueEntry, type PurchaseQueueStatus, type SaleDay, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
+import {
+  QUEUE_MOVE_SHOW_MS,
+  activeQueue,
+  isQueueActive,
+  rankById,
+  rankMovement,
+} from '../lib/queueBoard';
+import { BuyerQueuePanel, SoldOutBar } from '../components/QueueDraftBoard';
 import { HeaderUserMenu } from '../components/HeaderUserMenu';
 import { useTheme } from '../lib/useTheme';
 import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
@@ -22,8 +30,11 @@ import {
   isClaimedBy,
   parseClaimTimestamp,
   purchaseBlockers,
+  nothingLeftToBuy,
   purchasedByMe,
+  SALE_DAY_FULL,
   setSimPatch,
+  soldOutDays,
 } from '../lib/purchaseBoard';
 
 const POLL_MS = 8000;
@@ -82,7 +93,7 @@ const BLOCKER_SHORT: Record<PurchaseBlocker, string> = {
 
 function rowStatus(p: Participant, now = Date.now()): RowStatus {
   if (!hasRequestedDays(p)) return 'setup';
-  if (p.all_purchased) return 'complete';
+  if (nothingLeftToBuy(p)) return 'complete';
   if (isClaimLive(p, now)) return 'claiming';
   if (p.any_purchased) return 'partial';
   return 'none';
@@ -198,7 +209,29 @@ export default function LiveBoard() {
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [serverParticipants, setServerParticipants] = useState<Participant[]>([]);
   const [buyerQueue, setBuyerQueue] = useState<PurchaseQueueEntry[]>([]);
-  const [showBuyerQueue, setShowBuyerQueue] = useState(true);
+  /** Last poll of the line failed, so what's on screen may be out of date. */
+  const [queueStale, setQueueStale] = useState(false);
+  /** Recent pick-number changes, keyed by queue entry, for the ▲/▼ markers. */
+  const [queueMoves, setQueueMoves] = useState<Record<number, { delta: number; at: number }>>({});
+  const queueRanksRef = useRef<Map<number, number>>(new Map());
+  // On a phone the panel is a bottom sheet over the board, so it starts closed there.
+  const [showBuyerQueue, setShowBuyerQueue] = useState(
+    () => typeof window === 'undefined' || window.matchMedia('(min-width: 640px)').matches,
+  );
+
+  const applyQueue = useCallback((next: PurchaseQueueEntry[]) => {
+    const ranks = rankById(next);
+    const moved = rankMovement(queueRanksRef.current, ranks);
+    queueRanksRef.current = ranks;
+    setBuyerQueue(next);
+    if (moved.size === 0) return;
+    const at = Date.now();
+    setQueueMoves((prev) => {
+      const out = { ...prev };
+      for (const [id, delta] of moved) out[id] = { delta, at };
+      return out;
+    });
+  }, []);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [identityId, setIdentityId] = useState<number | null>(null);
@@ -238,13 +271,16 @@ export default function LiveBoard() {
 
   const hasSimEdits = Object.keys(simPatches).length > 0;
 
-  // Tick once per second while any claim is live so countdowns and slot counts stay fresh.
+  // Tick once per second while any claim or queue ETA is counting down.
   const hasLiveClaims = participants.some((p) => isClaimLive(p, now));
+  const hasQueueEtas = buyerQueue.some((q) => q.eta_at && isQueueActive(q));
+  const hasRecentMoves = Object.values(queueMoves).some((m) => now - m.at < QUEUE_MOVE_SHOW_MS);
+  const needsTick = hasLiveClaims || hasQueueEtas || hasRecentMoves;
   useEffect(() => {
-    if (!hasLiveClaims) return;
+    if (!needsTick) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [hasLiveClaims]);
+  }, [needsTick]);
 
   // Column order (sanitize localStorage — drop unknown keys like a stray empty-header col)
   const [movableCols, setMovableCols] = useState<ColKey[]>(() => {
@@ -324,10 +360,13 @@ export default function LiveBoard() {
         api.events.get(Number(eventId), clerkToken),
         // Include return-ineligible rows so group members are never silently missing.
         api.participants.list(Number(eventId), clerkToken, { includeIneligible: true }),
-        api.purchaseQueue.list(Number(eventId), clerkToken).catch(() => [] as PurchaseQueueEntry[]),
+        // null rather than [] on failure: an empty list here wiped everyone's places off
+        // the screen for a whole poll whenever one request blipped.
+        api.purchaseQueue.list(Number(eventId), clerkToken).catch(() => null),
       ]);
       setEvent(ev);
-      setBuyerQueue(queue);
+      if (queue) applyQueue(queue);
+      setQueueStale(queue == null);
       const newFlash: Record<number, boolean> = {};
       for (const p of ps) {
         if (prevIds.current.has(p.id)) {
@@ -354,7 +393,7 @@ export default function LiveBoard() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     }
-  }, [eventId, getToken, serverParticipants]);
+  }, [eventId, getToken, serverParticipants, applyQueue]);
 
   useEffect(() => {
     fetchAll();
@@ -739,14 +778,15 @@ export default function LiveBoard() {
   };
 
   const refreshBuyerQueue = async (next: PurchaseQueueEntry[]) => {
-    setBuyerQueue(next);
+    applyQueue(next);
+    setQueueStale(false);
   };
 
-  const handleQueueJoin = async () => {
+  const handleQueueJoin = async (label?: string) => {
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     try {
-      await refreshBuyerQueue(await api.purchaseQueue.join(Number(eventId), clerkToken));
+      await refreshBuyerQueue(await api.purchaseQueue.join(Number(eventId), clerkToken, label));
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to join queue');
     }
@@ -789,6 +829,30 @@ export default function LiveBoard() {
       await refreshBuyerQueue(await api.purchaseQueue.move(Number(eventId), qid, clerkToken, direction));
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to reorder');
+    }
+  };
+
+  const handleQueueRename = async (qid: number, label: string) => {
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    try {
+      await refreshBuyerQueue(await api.purchaseQueue.rename(Number(eventId), qid, clerkToken, label));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to rename');
+    }
+  };
+
+  const handleSoldOut = async (day: SaleDay, soldOut: boolean) => {
+    const verb = soldOut ? 'Mark' : 'Un-mark';
+    const what = soldOut ? 'SOLD OUT for everyone' : 'available again';
+    if (!window.confirm(`${verb} ${SALE_DAY_FULL[day]} as ${what}?`)) return;
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    try {
+      setEvent(await api.events.setSoldOut(Number(eventId), clerkToken, day, soldOut));
+      void fetchAll();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to update sold-out days');
     }
   };
 
@@ -977,7 +1041,7 @@ export default function LiveBoard() {
                   : 'text-sky-300 border-sky-700 hover:border-sky-400 hover:text-sky-200'
               }`}
             >
-              Queue-It line{buyerQueue.length > 0 ? ` · ${buyerQueue.filter((q) => q.status !== 'done' && q.status !== 'skipped').length}` : ''}
+              Queue-It line{buyerQueue.length > 0 ? ` · ${activeQueue(buyerQueue).length}` : ''}
             </button>
           )}
           {showPurchaseChrome && priorityQueue.length > 0 && (
@@ -994,6 +1058,15 @@ export default function LiveBoard() {
           )}
         </div>
       </div>
+
+      {showPurchaseChrome && (
+        <SoldOutBar
+          soldOut={soldOutDays(event)}
+          // Practice mode promises nothing is saved, and this writes to the real event.
+          canEdit={!simulation && (identityId != null || isPlatformAdmin)}
+          onToggle={handleSoldOut}
+        />
+      )}
 
       {/* ── Who's Next panel (purchasing phase or simulation) ── */}
       {showPurchaseChrome && showNextUp && priorityQueue.length > 0 && (
@@ -1324,13 +1397,20 @@ export default function LiveBoard() {
         {showPurchaseChrome && showBuyerQueue && (
           <BuyerQueuePanel
             queue={buyerQueue}
+            moves={queueMoves}
+            now={now}
+            stale={queueStale}
             myClerkId={user?.id ?? null}
+            isAdmin={isPlatformAdmin}
             identityLinked={identityId != null}
+            buyFor={priorityQueue.slice(0, MAX_ACTIVE_CLAIMS)}
+            onOpenWhosNext={() => setShowNextUp(true)}
             onJoin={handleQueueJoin}
             onLeave={handleQueueLeave}
             onStatus={handleQueueStatus}
             onEta={handleQueueEta}
             onMove={handleQueueMove}
+            onRename={handleQueueRename}
             onDismiss={() => setShowBuyerQueue(false)}
           />
         )}
@@ -1544,13 +1624,21 @@ function CellContent({
         <div style={{ display: 'flex', gap: DAY_GAP }}>
           {DAY_KEYS.map((day) => {
             const isGap = p.gaps.some((g) => g.toLowerCase() === day);
+            const isSoldOutGap = (p.sold_out_gaps ?? []).some((g) => g.toLowerCase() === day);
             return (
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                <div className={`w-4 h-4 rounded-sm border-2 ${
-                  isGap
-                    ? 'bg-red-500 border-red-600 dark:bg-red-500 dark:border-red-400'
-                    : 'border-gray-200 dark:border-gray-300'
-                }`} />
+                <div
+                  className={`w-4 h-4 rounded-sm border-2 flex items-center justify-center text-[9px] font-black leading-none ${
+                    isGap
+                      ? 'bg-red-500 border-red-600 dark:bg-red-500 dark:border-red-400'
+                      : isSoldOutGap
+                        ? 'bg-zinc-300 border-zinc-400 text-zinc-600 dark:bg-zinc-700 dark:border-zinc-500 dark:text-zinc-300'
+                        : 'border-gray-200 dark:border-gray-300'
+                  }`}
+                  title={isSoldOutGap ? 'Wanted, but sold out' : undefined}
+                >
+                  {isSoldOutGap ? '✕' : null}
+                </div>
                 <span className="text-[7px] text-gray-400 dark:text-gray-600 leading-none">{DAY_SHORT[day]}</span>
               </div>
             );
@@ -1563,6 +1651,9 @@ function CellContent({
         return (
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 border border-green-300 dark:border-green-800 px-2 py-0.5 rounded-full">
             ✓ Done
+            {(p.sold_out_gaps?.length ?? 0) > 0 && (
+              <span className="font-normal text-zinc-500">· {p.sold_out_gaps!.join(', ')} sold out</span>
+            )}
           </span>
         );
       }
@@ -1876,375 +1967,6 @@ function EditParticipantModal({
         </form>
       </div>
     </div>
-  );
-}
-
-// ─── BuyerQueuePanel (Queue-It ETA prep order) ────────────────────────────────
-
-const QUEUE_STATUS_LABEL: Record<PurchaseQueueStatus, string> = {
-  waiting: 'Waiting',
-  on_deck: 'On deck',
-  in_queueit: 'In Queue-It',
-  buying: 'Buying',
-  done: 'Done',
-  skipped: 'Skipped',
-};
-
-const QUEUE_STATUS_NEXT: Partial<Record<PurchaseQueueStatus, PurchaseQueueStatus>> = {
-  waiting: 'in_queueit',
-  on_deck: 'in_queueit',
-  in_queueit: 'buying',
-  buying: 'done',
-};
-
-const QUEUE_STATUS_STYLE: Record<PurchaseQueueStatus, string> = {
-  waiting: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200',
-  on_deck: 'bg-amber-400 text-black',
-  in_queueit: 'bg-sky-500 text-white',
-  buying: 'bg-orange-500 text-white',
-  done: 'bg-green-600 text-white',
-  skipped: 'bg-zinc-400 text-zinc-800',
-};
-
-/** Common Queue-It screen estimates people shout on the call. */
-const ETA_PRESETS: { minutes: number; label: string; span?: number }[] = [
-  { minutes: 5, label: '5m' },
-  { minutes: 10, label: '10m' },
-  { minutes: 15, label: '15m' },
-  { minutes: 25, label: '25m' },
-  { minutes: 30, label: '30m' },
-  { minutes: 45, label: '45m' },
-  { minutes: 60, label: 'More than an hour', span: 3 },
-];
-
-function formatEta(minutes: number | null | undefined): string {
-  if (minutes == null) return '—';
-  if (minutes < 60) return `${minutes} min`;
-  return 'More than an hour';
-}
-
-function cookieSlotLabel(
-  entry: PurchaseQueueEntry,
-  queue: PurchaseQueueEntry[],
-): string | null {
-  const mine = queue
-    .filter((q) => q.clerk_user_id === entry.clerk_user_id)
-    .sort((a, b) => a.id - b.id);
-  if (mine.length < 2) return null;
-  const n = mine.findIndex((q) => q.id === entry.id) + 1;
-  return `Cookie ${n}`;
-}
-
-function BuyerQueuePanel({
-  queue, myClerkId, identityLinked, onJoin, onLeave, onStatus, onEta, onMove, onDismiss,
-}: {
-  queue: PurchaseQueueEntry[];
-  myClerkId: string | null;
-  identityLinked: boolean;
-  onJoin: () => Promise<void>;
-  onLeave: (qid: number) => Promise<void>;
-  onStatus: (qid: number, status: PurchaseQueueStatus) => Promise<void>;
-  onEta: (qid: number, eta_minutes: number | null) => Promise<void>;
-  onMove: (qid: number, direction: 'up' | 'down') => Promise<void>;
-  onDismiss: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const myActiveCount = myClerkId
-    ? queue.filter((q) => q.clerk_user_id === myClerkId && q.status !== 'done' && q.status !== 'skipped').length
-    : 0;
-  const active = queue.filter((q) => q.status !== 'done' && q.status !== 'skipped');
-  const finished = queue.filter((q) => q.status === 'done' || q.status === 'skipped');
-
-  // Prep order: buying first, then soonest ETA (server already sorts this way).
-  const buying = active.find((q) => q.status === 'buying') ?? null;
-  const byEta = active.filter((q) => q.status !== 'buying');
-  const soonest = buying ?? byEta[0] ?? null;
-  const onDeck = soonest
-    ? byEta.find((q) => q.id !== soonest.id) ?? null
-    : null;
-
-  const run = async (fn: () => Promise<void>) => {
-    setBusy(true);
-    try { await fn(); } finally { setBusy(false); }
-  };
-
-  return (
-    <aside className="w-[17.5rem] shrink-0 border-l-4 border-sky-400 bg-sky-50 dark:bg-sky-950/50 flex flex-col min-h-0">
-      <div className="px-3 py-2.5 border-b border-sky-200 dark:border-sky-800 shrink-0">
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-sky-700 dark:text-sky-300 text-[10px] font-bold uppercase tracking-widest">
-            Queue-It line
-          </div>
-          <button type="button" onClick={onDismiss} className="text-sky-500 hover:text-sky-800 text-xs px-1">✕</button>
-        </div>
-        <p className="text-sky-900/60 dark:text-sky-200/60 text-[11px] mt-1 leading-snug">
-          One slot per cookie / browser. Report ETA; sorts soonest-first.
-        </p>
-        {identityLinked && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => run(onJoin)}
-            className="mt-2 w-full text-xs font-bold px-3 py-1.5 rounded bg-sky-500 hover:bg-sky-400 text-white disabled:opacity-50"
-          >
-            {myActiveCount > 0 ? 'Add another place in line' : 'Join line'}
-          </button>
-        )}
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
-        {(soonest || onDeck || active.length > 0) && (
-          <div className="space-y-2">
-            <BuyerSpotlight
-              label="Coming through next"
-              entry={soonest}
-              cookieLabel={soonest ? cookieSlotLabel(soonest, queue) : null}
-              empty="Report ETAs from Queue-It screens"
-              accent="sky"
-            />
-            <BuyerSpotlight
-              label="On deck — prep them"
-              entry={onDeck}
-              cookieLabel={onDeck ? cookieSlotLabel(onDeck, queue) : null}
-              empty="Next after soonest ETA"
-              accent="amber"
-            />
-          </div>
-        )}
-
-        {active.length === 0 && finished.length === 0 && (
-          <p className="text-sky-800/60 dark:text-sky-300/50 text-xs py-2">
-            {identityLinked
-              ? 'Nobody in line yet — join when you\'re on the call, then tap your ETA.'
-              : 'Link your identity, then join the line.'}
-          </p>
-        )}
-
-        {active.length > 0 && (
-          <ol className="space-y-1.5">
-            {active.map((entry, i) => (
-              <BuyerQueueRow
-                key={entry.id}
-                entry={entry}
-                index={i + 1}
-                cookieLabel={cookieSlotLabel(entry, queue)}
-                isMe={entry.clerk_user_id === myClerkId}
-                busy={busy}
-                canMoveUp={i > 0 && entry.eta_minutes == null}
-                canMoveDown={i < active.length - 1 && entry.eta_minutes == null}
-                onStatus={(status) => run(() => onStatus(entry.id, status))}
-                onEta={(mins) => run(() => onEta(entry.id, mins))}
-                onMove={(dir) => run(() => onMove(entry.id, dir))}
-                onLeave={() => run(() => onLeave(entry.id))}
-              />
-            ))}
-          </ol>
-        )}
-
-        {finished.length > 0 && (
-          <div className="pt-2 border-t border-sky-200 dark:border-sky-800">
-            <div className="text-[10px] uppercase tracking-widest text-sky-600/70 mb-1.5">Finished</div>
-            <div className="flex flex-col gap-1">
-              {finished.map((e) => (
-                <span
-                  key={e.id}
-                  className={`text-[10px] font-medium px-2 py-0.5 rounded ${QUEUE_STATUS_STYLE[e.status]}`}
-                >
-                  {e.first_name} {e.last_name}
-                  {cookieSlotLabel(e, queue) ? ` · ${cookieSlotLabel(e, queue)}` : ''}
-                  {' · '}{QUEUE_STATUS_LABEL[e.status]}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function BuyerSpotlight({
-  label, entry, cookieLabel, empty, accent,
-}: {
-  label: string;
-  entry: PurchaseQueueEntry | null;
-  cookieLabel: string | null;
-  empty: string;
-  accent: 'sky' | 'amber';
-}) {
-  const ring = accent === 'sky'
-    ? 'border-sky-400 bg-white dark:bg-sky-950/60'
-    : 'border-amber-400 bg-white dark:bg-amber-950/40';
-  return (
-    <div className={`rounded-lg border-2 px-2.5 py-2 ${ring}`}>
-      <div className={`text-[9px] font-bold uppercase tracking-widest ${
-        accent === 'sky' ? 'text-sky-600' : 'text-amber-600'
-      }`}>
-        {label}
-      </div>
-      {entry ? (
-        <div className="mt-0.5">
-          <div className="font-bangers text-lg text-gray-900 dark:text-white tracking-wide leading-tight">
-            {entry.first_name} {entry.last_name}
-          </div>
-          {cookieLabel && (
-            <div className="text-[10px] font-bold text-sky-700 dark:text-sky-300 mt-0.5">{cookieLabel}</div>
-          )}
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            {entry.eta_minutes != null && (
-              <span className="text-sm font-bold text-gray-900 dark:text-white font-mono">
-                ~{formatEta(entry.eta_minutes)}
-              </span>
-            )}
-            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${QUEUE_STATUS_STYLE[entry.status]}`}>
-              {QUEUE_STATUS_LABEL[entry.status]}
-            </span>
-          </div>
-          {entry.member_id && (
-            <div className="font-mono text-[10px] text-gray-500 tracking-wide mt-0.5">
-              {entry.member_id.toUpperCase()}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="text-[11px] text-gray-400 mt-0.5">{empty}</div>
-      )}
-    </div>
-  );
-}
-
-function BuyerQueueRow({
-  entry, index, cookieLabel, isMe, busy, canMoveUp, canMoveDown, onStatus, onEta, onMove, onLeave,
-}: {
-  entry: PurchaseQueueEntry;
-  index: number;
-  cookieLabel: string | null;
-  isMe: boolean;
-  busy: boolean;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-  onStatus: (status: PurchaseQueueStatus) => Promise<void>;
-  onEta: (eta_minutes: number | null) => Promise<void>;
-  onMove: (direction: 'up' | 'down') => Promise<void>;
-  onLeave: () => Promise<void>;
-}) {
-  const next = QUEUE_STATUS_NEXT[entry.status];
-  return (
-    <li className={`rounded-md border px-2 py-1.5 ${
-      isMe
-        ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-950/30'
-        : 'border-sky-200 dark:border-sky-800 bg-white/80 dark:bg-sky-950/30'
-    }`}>
-      <div className="flex items-start gap-1.5">
-        <span className="text-[10px] font-mono text-sky-600 w-4 shrink-0 pt-0.5">{index}</span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-1 flex-wrap">
-            <span className="font-semibold text-xs text-gray-900 dark:text-white leading-tight">
-              {entry.first_name} {entry.last_name}
-            </span>
-            {isMe && <span className="text-[9px] font-bold bg-yellow-400 text-black px-1 py-0.5 rounded">YOU</span>}
-          </div>
-          {cookieLabel && (
-            <div className="text-[10px] font-bold text-sky-700 dark:text-sky-300">{cookieLabel}</div>
-          )}
-          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-            <span className="text-xs font-bold font-mono text-gray-900 dark:text-white">
-              {entry.eta_minutes != null ? `~${formatEta(entry.eta_minutes)}` : '—'}
-            </span>
-            <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${QUEUE_STATUS_STYLE[entry.status]}`}>
-              {QUEUE_STATUS_LABEL[entry.status]}
-            </span>
-          </div>
-        </div>
-        <div className="flex flex-col gap-0.5 shrink-0">
-          {entry.eta_minutes == null && (
-            <>
-              <button
-                type="button"
-                disabled={busy || !canMoveUp}
-                onClick={() => onMove('up')}
-                className="text-[10px] px-1 rounded text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-30"
-                title="Move up"
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                disabled={busy || !canMoveDown}
-                onClick={() => onMove('down')}
-                className="text-[10px] px-1 rounded text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900 disabled:opacity-30"
-                title="Move down"
-              >
-                ↓
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-      <div className="mt-1.5 flex flex-wrap gap-1">
-        {next && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onStatus(next)}
-            className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-500 hover:bg-sky-400 text-white disabled:opacity-50"
-          >
-            → {QUEUE_STATUS_LABEL[next]}
-          </button>
-        )}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onLeave()}
-          className="text-[9px] px-1.5 py-0.5 text-gray-400 hover:text-red-500 disabled:opacity-50"
-          title="Remove this cookie slot"
-        >
-          remove
-        </button>
-        {entry.status !== 'skipped' && entry.status !== 'done' && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onStatus('skipped')}
-            className="text-[9px] px-1.5 py-0.5 text-gray-400 hover:text-red-500 disabled:opacity-50"
-            title="Skip"
-          >
-            skip
-          </button>
-        )}
-      </div>
-      {entry.status !== 'done' && entry.status !== 'skipped' && (
-        <div className="mt-1.5 grid grid-cols-3 gap-1">
-          {ETA_PRESETS.map((p) => (
-            <button
-              key={p.minutes}
-              type="button"
-              disabled={busy}
-              onClick={() => onEta(p.minutes)}
-              className={`text-[9px] font-bold px-1 py-0.5 rounded border transition-colors disabled:opacity-50 ${
-                p.span === 3 ? 'col-span-3' : ''
-              } ${
-                entry.eta_minutes === p.minutes
-                  ? 'bg-sky-500 text-white border-sky-400'
-                  : 'bg-white dark:bg-sky-950/50 text-sky-800 dark:text-sky-200 border-sky-200 dark:border-sky-700 hover:border-sky-400'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-          {entry.eta_minutes != null && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onEta(null)}
-              className="text-[9px] px-1 py-0.5 text-gray-400 hover:text-red-500 disabled:opacity-50 col-span-3 text-left"
-            >
-              clear ETA
-            </button>
-          )}
-        </div>
-      )}
-    </li>
   );
 }
 

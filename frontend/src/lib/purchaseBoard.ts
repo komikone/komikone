@@ -1,4 +1,4 @@
-import type { EventDetail, Participant } from './api';
+import type { EventDetail, Participant, SaleDay } from './api';
 
 /** Comic-Con lets you buy badges for at most 3 people per purchase session. */
 export const MAX_ACTIVE_CLAIMS = 3;
@@ -49,7 +49,15 @@ export function isClaimedBy(p: Participant, displayName: string, now = Date.now(
  * something left to buy. Finishing someone frees the slot without releasing.
  */
 export function holdsClaimSlot(p: Participant, displayName: string, now = Date.now()): boolean {
-  return isClaimedBy(p, displayName, now) && !p.all_purchased;
+  return isClaimedBy(p, displayName, now) && !nothingLeftToBuy(p);
+}
+
+/**
+ * Every requested day is bought or sold out, read from the server-derived fields. Mirrors
+ * worker nothingLeftToBuy, which is what frees a claim slot there.
+ */
+export function nothingLeftToBuy(p: Participant): boolean {
+  return p.all_purchased || (p.gaps.length === 0 && (p.sold_out_gaps?.length ?? 0) > 0);
 }
 
 /** You bought for this person, so you can still correct days after the claim ends. */
@@ -64,14 +72,35 @@ export function hasRequestedDays(p: Participant): boolean {
 
 // ─── Derived fields (mirrors worker enrichParticipant) ────────────────────────
 
-export function computeGaps(p: Participant): string[] {
-  const gaps: string[] = [];
-  if (p.req_preview && !p.pur_preview) gaps.push('Preview');
-  if (p.req_thu && !p.pur_thu) gaps.push('Thu');
-  if (p.req_fri && !p.pur_fri) gaps.push('Fri');
-  if (p.req_sat && !p.pur_sat) gaps.push('Sat');
-  if (p.req_sun && !p.pur_sun) gaps.push('Sun');
-  return gaps;
+export const SALE_DAYS: SaleDay[] = ['preview', 'thu', 'fri', 'sat', 'sun'];
+
+export const SALE_DAY_LABEL: Record<SaleDay, string> = {
+  preview: 'Preview', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun',
+};
+
+export const SALE_DAY_FULL: Record<SaleDay, string> = {
+  preview: 'Preview Night', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday',
+};
+
+export function isSoldOut(event: EventDetail | null | undefined, day: SaleDay): boolean {
+  return !!event?.[`sold_out_${day}`];
+}
+
+export function soldOutDays(event: EventDetail | null | undefined): SaleDay[] {
+  return SALE_DAYS.filter((d) => isSoldOut(event, d));
+}
+
+function unboughtDays(p: Participant): SaleDay[] {
+  return SALE_DAYS.filter((d) => p[`req_${d}`] && !p[`pur_${d}`]);
+}
+
+/** Mirrors worker computeGaps: a sold-out day is not a gap, because nobody can close it. */
+export function computeGaps(p: Participant, event?: EventDetail | null): string[] {
+  return unboughtDays(p).filter((d) => !isSoldOut(event, d)).map((d) => SALE_DAY_LABEL[d]);
+}
+
+export function computeSoldOutGaps(p: Participant, event?: EventDetail | null): string[] {
+  return unboughtDays(p).filter((d) => isSoldOut(event, d)).map((d) => SALE_DAY_LABEL[d]);
 }
 
 export function computeAllPurchased(p: Participant): boolean {
@@ -137,7 +166,7 @@ export function purchaseBlockers(p: Participant, event: EventDetail | null): Pur
 }
 
 export function isClaimable(p: Participant, event: EventDetail | null): boolean {
-  return purchaseBlockers(p, event).length === 0 && !p.all_purchased;
+  return purchaseBlockers(p, event).length === 0 && computeGaps(p, event).length > 0;
 }
 
 // ─── Simulation sandbox ──────────────────────────────────────────────────────
@@ -163,7 +192,8 @@ export type SimPatches = Record<number, SimPatch>;
 export function reDerive(p: Participant, event: EventDetail | null, now = Date.now()): Participant {
   const withDerived: Participant = {
     ...p,
-    gaps: computeGaps(p),
+    gaps: computeGaps(p, event),
+    sold_out_gaps: computeSoldOutGaps(p, event),
     all_purchased: computeAllPurchased(p),
     any_purchased: computeAnyPurchased(p),
     purchase_total: computePurchaseTotal(p, event),

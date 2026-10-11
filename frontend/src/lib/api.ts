@@ -39,9 +39,16 @@ export type EventDetail = EventSummary & {
   price_fri_junior: number;
   price_sat_junior: number;
   price_sun_junior: number;
+  sold_out_preview?: number;
+  sold_out_thu?: number;
+  sold_out_fri?: number;
+  sold_out_sat?: number;
+  sold_out_sun?: number;
   created_at: string;
   updated_at: string;
 };
+
+export type SaleDay = 'preview' | 'thu' | 'fri' | 'sat' | 'sun';
 
 export type Year = {
   id: number;
@@ -145,6 +152,8 @@ export type Participant = {
   claim_active: boolean;
   purchase_total: number; // cents
   gaps: string[];
+  /** Requested days left unbought because Comic-Con sold out of them. */
+  sold_out_gaps?: string[];
   all_purchased: boolean;
   any_purchased: boolean;
   created_at: string;
@@ -214,8 +223,12 @@ export type PurchaseQueueEntry = {
   clerk_user_id: string;
   position: number;
   status: PurchaseQueueStatus;
-  /** Minutes left per Queue-It screen; null if not reported. */
+  /** Minutes left as last reported from the Queue-It screen; null if not reported. */
   eta_minutes: number | null;
+  /** UTC time this place is expected through, in D1 `datetime()` format. */
+  eta_at: string | null;
+  /** Owner-chosen name for the browser this place lives in. */
+  label: string;
   joined_at: string;
   updated_at: string;
   first_name: string;
@@ -240,6 +253,10 @@ export const api = {
     list: () => req<EventSummary[]>('/api/events'),
     get: (id: number, clerkToken: string) =>
       req<EventDetail>(`/api/events/${id}`, { headers: authHeaders(clerkToken) }),
+    setSoldOut: (id: number, clerkToken: string, day: SaleDay, soldOut: boolean) =>
+      req<EventDetail>(`/api/events/${id}/sold-out`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify({ day, sold_out: soldOut }),
+      }),
   },
 
   participants: {
@@ -324,9 +341,13 @@ export const api = {
       req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue`, {
         headers: authHeaders(clerkToken),
       }),
-    join: (eventId: number, clerkToken: string) =>
+    join: (eventId: number, clerkToken: string, label?: string) =>
       req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/join`, {
-        method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify({}),
+        method: 'POST', headers: authHeaders(clerkToken), body: JSON.stringify(label ? { label } : {}),
+      }),
+    rename: (eventId: number, qid: number, clerkToken: string, label: string) =>
+      req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/${qid}`, {
+        method: 'PATCH', headers: authHeaders(clerkToken), body: JSON.stringify({ label }),
       }),
     leave: (eventId: number, qid: number, clerkToken: string) =>
       req<PurchaseQueueEntry[]>(`/api/events/${eventId}/purchase-queue/${qid}`, {

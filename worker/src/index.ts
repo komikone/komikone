@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, computeAllPurchased, enrichParticipant, isClaimExpired, MAX_ACTIVE_CLAIMS } from './db';
+import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, enrichParticipant, isClaimExpired, MAX_ACTIVE_CLAIMS, nothingLeftToBuy, SALE_DAYS, type SaleDay } from './db';
 import {
   assertPreviewNightAllowed,
   assertRegistrationOpen,
@@ -628,7 +628,7 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
   `).bind(eventId, claimer).all<Participant>();
   // A finished person keeps the "who bought" record but no longer ties up a slot.
   const activeClaims = mine.results.filter(
-    (r) => !isClaimExpired(r.purchasing_claimed_at) && !computeAllPurchased(r),
+    (r) => !isClaimExpired(r.purchasing_claimed_at) && !nothingLeftToBuy(r, event),
   ).length;
   if (activeClaims >= MAX_ACTIVE_CLAIMS) {
     return err(
@@ -707,7 +707,7 @@ app.patch('/api/events/:id/participants/:pid/purchased', async (c) => {
     FROM participants WHERE id = ? AND event_id = ?
   `).bind(pid, eventId).first<Participant>();
 
-  const claimReleased = !!updated && computeAllPurchased(updated);
+  const claimReleased = !!updated && nothingLeftToBuy(updated, event);
   if (claimReleased) {
     await c.env.DB.prepare(`
       UPDATE participants
@@ -819,6 +819,32 @@ type PurchaseQueueRow = PurchaseQueueEntry & {
   group_name: string | null;
 };
 
+const QUEUE_LABEL_MAX = 24;
+
+function cleanQueueLabel(raw: unknown): string {
+  return typeof raw === 'string' ? raw.trim().slice(0, QUEUE_LABEL_MAX) : '';
+}
+
+/** First free "Place N" for this person, so a removed place never makes two share a name. */
+async function nextDefaultQueueLabel(db: D1Database, eventId: number, clerkUserId: string): Promise<string> {
+  const rows = await db.prepare(
+    'SELECT label FROM purchase_queue WHERE event_id = ? AND clerk_user_id = ?'
+  ).bind(eventId, clerkUserId).all<{ label: string }>();
+  const taken = new Set((rows.results ?? []).map((r) => r.label));
+  let n = 1;
+  while (taken.has(`Place ${n}`)) n++;
+  return `Place ${n}`;
+}
+
+/**
+ * Removing or skipping a place takes someone out of line, so only its owner or an admin
+ * may do it. Status and ETA stay open to everyone so a heads-down buyer can be reported
+ * by whoever is watching their screen.
+ */
+function canManageQueueEntry(access: { isAdmin: boolean; userId: string }, owner: string): boolean {
+  return access.isAdmin || access.userId === owner;
+}
+
 async function listPurchaseQueue(db: D1Database, eventId: number): Promise<PurchaseQueueRow[]> {
   const rows = await db.prepare(`
     SELECT q.*, p.first_name, p.last_name, p.member_id, g.name AS group_name
@@ -836,8 +862,8 @@ async function listPurchaseQueue(db: D1Database, eventId: number): Promise<Purch
         WHEN 'skipped' THEN 5
         ELSE 6
       END,
-      CASE WHEN q.eta_minutes IS NULL THEN 1 ELSE 0 END,
-      q.eta_minutes ASC,
+      CASE WHEN q.eta_at IS NULL THEN 1 ELSE 0 END,
+      q.eta_at ASC,
       q.position ASC,
       q.id ASC
   `).bind(eventId).all<PurchaseQueueRow>();
@@ -869,16 +895,20 @@ app.post('/api/events/:id/purchase-queue/join', async (c) => {
   ).bind(eventId, access.userId).first<{ id: number }>();
   if (!me) return err('Link your account to a participant first', 400);
 
+  const body = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
+
   // Multiple joins allowed — one entry per Queue-It cookie / browser session.
   const maxPos = await c.env.DB.prepare(
     'SELECT COALESCE(MAX(position), 0) AS m FROM purchase_queue WHERE event_id = ?'
   ).bind(eventId).first<{ m: number }>();
   const position = (maxPos?.m ?? 0) + 1;
 
+  const label = cleanQueueLabel(body.label) || await nextDefaultQueueLabel(c.env.DB, eventId, access.userId);
+
   await c.env.DB.prepare(`
-    INSERT INTO purchase_queue (event_id, participant_id, clerk_user_id, position, status)
-    VALUES (?, ?, ?, ?, 'waiting')
-  `).bind(eventId, me.id, access.userId, position).run();
+    INSERT INTO purchase_queue (event_id, participant_id, clerk_user_id, position, status, label)
+    VALUES (?, ?, ?, ?, 'waiting', ?)
+  `).bind(eventId, me.id, access.userId, position, label).run();
 
   return json(await listPurchaseQueue(c.env.DB, eventId));
 });
@@ -904,11 +934,13 @@ app.delete('/api/events/:id/purchase-queue/:qid', async (c) => {
   if (!access) return err('Authentication required', 401);
 
   const row = await c.env.DB.prepare(
-    'SELECT id FROM purchase_queue WHERE id = ? AND event_id = ?'
-  ).bind(qid, eventId).first<{ id: number }>();
+    'SELECT id, clerk_user_id FROM purchase_queue WHERE id = ? AND event_id = ?'
+  ).bind(qid, eventId).first<{ id: number; clerk_user_id: string }>();
   if (!row) return err('Queue entry not found', 404);
+  if (!canManageQueueEntry(access, row.clerk_user_id)) {
+    return err('Only the owner of this place in line or an admin can remove it', 403);
+  }
 
-  // Anyone on the call can remove a cookie slot (prep coordination).
   await c.env.DB.prepare(
     'DELETE FROM purchase_queue WHERE id = ? AND event_id = ?'
   ).bind(qid, eventId).run();
@@ -922,9 +954,9 @@ app.patch('/api/events/:id/purchase-queue/:qid', async (c) => {
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
   if (!access) return err('Authentication required', 401);
 
-  const body = await c.req.json<{ status?: PurchaseQueueStatus; eta_minutes?: number | null }>();
-  if (body.status === undefined && body.eta_minutes === undefined) {
-    return err('Provide status and/or eta_minutes');
+  const body = await c.req.json<{ status?: PurchaseQueueStatus; eta_minutes?: number | null; label?: string }>();
+  if (body.status === undefined && body.eta_minutes === undefined && body.label === undefined) {
+    return err('Provide status, eta_minutes and/or label');
   }
   if (body.status !== undefined && !QUEUE_STATUSES.includes(body.status)) {
     return err(`status must be one of: ${QUEUE_STATUSES.join(', ')}`);
@@ -936,13 +968,29 @@ app.patch('/api/events/:id/purchase-queue/:qid', async (c) => {
   }
 
   const row = await c.env.DB.prepare(
-    'SELECT id, status FROM purchase_queue WHERE id = ? AND event_id = ?'
-  ).bind(qid, eventId).first<{ id: number; status: PurchaseQueueStatus }>();
+    'SELECT id, status, clerk_user_id FROM purchase_queue WHERE id = ? AND event_id = ?'
+  ).bind(qid, eventId).first<{ id: number; status: PurchaseQueueStatus; clerk_user_id: string }>();
   if (!row) return err('Queue entry not found', 404);
 
-  // Anyone on the call can update so heads-down buyers can be reported by others.
+  const touchesSkip = body.status !== undefined
+    && body.status !== row.status
+    && (body.status === 'skipped' || row.status === 'skipped');
+  if (touchesSkip && !canManageQueueEntry(access, row.clerk_user_id)) {
+    return err('Only the owner of this place in line or an admin can skip or restore it', 403);
+  }
+  if (body.label !== undefined && !canManageQueueEntry(access, row.clerk_user_id)) {
+    return err('Only the owner of this place in line can rename it', 403);
+  }
+
   const fields: string[] = ["updated_at = datetime('now')"];
   const values: (string | number | null)[] = [];
+
+  if (body.label !== undefined) {
+    const label = cleanQueueLabel(body.label);
+    if (!label) return err('Name cannot be empty');
+    fields.push('label = ?');
+    values.push(label);
+  }
 
   let nextStatus = body.status;
   if (
@@ -957,12 +1005,17 @@ app.patch('/api/events/:id/purchase-queue/:qid', async (c) => {
     fields.push('status = ?');
     values.push(nextStatus);
     if (nextStatus === 'done' || nextStatus === 'skipped') {
-      fields.push('eta_minutes = NULL');
+      fields.push('eta_minutes = NULL', 'eta_at = NULL');
     }
   }
   if (body.eta_minutes !== undefined && nextStatus !== 'done' && nextStatus !== 'skipped') {
-    fields.push('eta_minutes = ?');
-    values.push(body.eta_minutes == null ? null : Math.round(body.eta_minutes));
+    if (body.eta_minutes == null) {
+      fields.push('eta_minutes = NULL', 'eta_at = NULL');
+    } else {
+      const minutes = Math.round(body.eta_minutes);
+      fields.push('eta_minutes = ?', "eta_at = datetime('now', ?)");
+      values.push(minutes, `+${minutes} minutes`);
+    }
   }
 
   values.push(qid, eventId);
@@ -978,6 +1031,8 @@ app.put('/api/events/:id/purchase-queue/reorder', async (c) => {
   const eventId = Number(c.req.param('id'));
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
   if (!access) return err('Authentication required', 401);
+  // Rewrites every place in line at once, so it is an admin repair tool, not a call action.
+  if (!access.isAdmin) return err('Only admins can reorder the whole line', 403);
 
   const body = await c.req.json<{ order: number[] }>();
   if (!Array.isArray(body.order) || body.order.length === 0) {
@@ -1040,6 +1095,41 @@ app.post('/api/events/:id/purchase-queue/:qid/move', async (c) => {
   ]);
 
   return json(await listPurchaseQueue(c.env.DB, eventId));
+});
+
+/**
+ * Called out mid-sale by whoever sees Comic-Con's "sold out" screen first, so anyone with a
+ * row on this event may flip it, not just admins. Reversible, because a day that looked
+ * gone sometimes comes back when carts expire.
+ */
+app.patch('/api/events/:id/sold-out', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+
+  const event = await getEvent(c.env.DB, eventId);
+  if (!event) return err('Event not found', 404);
+
+  if (!access.isAdmin) {
+    const member = await c.env.DB.prepare(
+      'SELECT id FROM participants WHERE event_id = ? AND clerk_user_id = ? LIMIT 1'
+    ).bind(eventId, access.userId).first();
+    if (!member) return err('Only people in this event can mark a day sold out', 403);
+  }
+
+  const body = await c.req.json<{ day?: string; sold_out?: boolean }>();
+  if (!SALE_DAYS.includes(body.day as SaleDay)) {
+    return err(`day must be one of: ${SALE_DAYS.join(', ')}`);
+  }
+  if (typeof body.sold_out !== 'boolean') return err('sold_out must be true or false');
+
+  // Column name comes from the SALE_DAYS allowlist above, never from raw input.
+  const column = `sold_out_${body.day as SaleDay}`;
+  await c.env.DB.prepare(
+    `UPDATE events SET ${column} = ?, updated_at = datetime('now') WHERE id = ?`
+  ).bind(body.sold_out ? 1 : 0, eventId).run();
+
+  return json(await getEvent(c.env.DB, eventId));
 });
 
 app.patch('/api/events/:id/participants/:pid/profile', async (c) => {

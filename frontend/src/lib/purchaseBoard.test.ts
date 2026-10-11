@@ -15,6 +15,7 @@ import {
   previewRequiresAllDays,
   purchaseBlockers,
   purchasedByMe,
+  reDerive,
   setSimPatch,
 } from './purchaseBoard';
 
@@ -255,5 +256,28 @@ describe('Preview Night rule', () => {
     expect(previewRequiresAllDays({
       req_preview: true, req_thu: true, req_fri: true, req_sat: true,
     })).toBe(false);
+  });
+});
+
+describe('sold-out days', () => {
+  const satGone = { ...event, sold_out_sat: 1 } as EventDetail;
+  const claimedByTony = { purchasing_claimed_by: 'Tony Nguyen', purchasing_claimed_at: '2026-10-17 16:00:00' };
+  const now = Date.parse('2026-10-17T16:01:00Z');
+
+  it('stops treating a sold-out day as a gap and reports it separately', () => {
+    const p = reDerive(participant({ req_sat: true, req_sun: true }), satGone);
+    expect(p.gaps).toEqual(['Sun']);
+    expect(p.sold_out_gaps).toEqual(['Sat']);
+  });
+
+  it('drops someone out of Who\'s next once their only missing day is sold out', () => {
+    const p = participant({ req_sat: true });
+    expect(isClaimable(p, event)).toBe(true);
+    expect(isClaimable(p, satGone)).toBe(false);
+  });
+
+  it('frees the buyer\'s claim slot once the only missing day is sold out', () => {
+    const p = reDerive(participant({ ...claimedByTony, req_sat: true }), satGone, now);
+    expect(holdsClaimSlot(p, 'Tony Nguyen', now)).toBe(false);
   });
 });

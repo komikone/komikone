@@ -25,9 +25,17 @@ export type Event = {
   price_fri_junior: number;
   price_sat_junior: number;
   price_sun_junior: number;
+  sold_out_preview?: number;
+  sold_out_thu?: number;
+  sold_out_fri?: number;
+  sold_out_sat?: number;
+  sold_out_sun?: number;
   created_at: string;
   updated_at: string;
 };
+
+export const SALE_DAYS = ['preview', 'thu', 'fri', 'sat', 'sun'] as const;
+export type SaleDay = (typeof SALE_DAYS)[number];
 
 export type Participant = {
   id: number;
@@ -149,8 +157,12 @@ export type PurchaseQueueEntry = {
   clerk_user_id: string;
   position: number;
   status: PurchaseQueueStatus;
-  /** Minutes left per Queue-It screen; null if not reported. */
+  /** Minutes left as last reported from the Queue-It screen; null if not reported. */
   eta_minutes: number | null;
+  /** UTC time this place is expected through Queue-It. The sort key, because it counts down. */
+  eta_at: string | null;
+  /** Owner-chosen name for the browser this place lives in. */
+  label: string;
   joined_at: string;
   updated_at: string;
 };
@@ -200,14 +212,44 @@ export function computePurchaseTotal(p: Participant, event: Event): number {
   return total;
 }
 
-export function computeGaps(p: Participant): string[] {
-  const gaps: string[] = [];
-  if (p.req_preview && !p.pur_preview) gaps.push('Preview');
-  if (p.req_thu && !p.pur_thu) gaps.push('Thu');
-  if (p.req_fri && !p.pur_fri) gaps.push('Fri');
-  if (p.req_sat && !p.pur_sat) gaps.push('Sat');
-  if (p.req_sun && !p.pur_sun) gaps.push('Sun');
-  return gaps;
+const GAP_LABEL: Record<SaleDay, string> = {
+  preview: 'Preview', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun',
+};
+
+type GapFlags = Pick<Participant,
+  'req_preview' | 'req_thu' | 'req_fri' | 'req_sat' | 'req_sun' |
+  'pur_preview' | 'pur_thu' | 'pur_fri' | 'pur_sat' | 'pur_sun'
+>;
+type SoldOutFlags = Partial<Pick<Event,
+  'sold_out_preview' | 'sold_out_thu' | 'sold_out_fri' | 'sold_out_sat' | 'sold_out_sun'
+>>;
+
+export function isSoldOut(event: SoldOutFlags | null | undefined, day: SaleDay): boolean {
+  return !!event?.[`sold_out_${day}`];
+}
+
+function unboughtDays(p: GapFlags): SaleDay[] {
+  return SALE_DAYS.filter((d) => p[`req_${d}`] && !p[`pur_${d}`]);
+}
+
+/** Requested days still worth trying for. A sold-out day is not a gap — nobody can close it. */
+export function computeGaps(p: GapFlags, event?: SoldOutFlags | null): string[] {
+  return unboughtDays(p).filter((d) => !isSoldOut(event, d)).map((d) => GAP_LABEL[d]);
+}
+
+/** Requested days that went unbought because Comic-Con ran out. */
+export function computeSoldOutGaps(p: GapFlags, event?: SoldOutFlags | null): string[] {
+  return unboughtDays(p).filter((d) => isSoldOut(event, d)).map((d) => GAP_LABEL[d]);
+}
+
+/**
+ * Nothing left a buyer could do for this person: every requested day is either bought or
+ * sold out. This, not computeAllPurchased, is what frees a claim slot — otherwise someone
+ * waiting on a sold-out Friday ties up one of the buyer's three slots for good.
+ */
+export function nothingLeftToBuy(p: GapFlags, event?: SoldOutFlags | null): boolean {
+  const anyRequested = SALE_DAYS.some((d) => p[`req_${d}`]);
+  return anyRequested && computeGaps(p, event).length === 0;
 }
 
 /** D1 `datetime('now')` is UTC without a timezone suffix — parse as UTC. */
@@ -248,7 +290,8 @@ export function computeAllPurchased(p: PurchaseDayFlags): boolean {
 
 export function enrichParticipant(p: Participant, event: Event) {
   const claimActive = p.purchasing_claimed_by && !isClaimExpired(p.purchasing_claimed_at);
-  const gaps = computeGaps(p);
+  const gaps = computeGaps(p, event);
+  const soldOutGaps = computeSoldOutGaps(p, event);
   const allPurchased = computeAllPurchased(p);
   const anyPurchased = p.pur_preview || p.pur_thu || p.pur_fri || p.pur_sat || p.pur_sun;
 
@@ -273,6 +316,7 @@ export function enrichParticipant(p: Participant, event: Event) {
     claim_active: Boolean(claimActive),
     purchase_total: computePurchaseTotal(p, event),
     gaps,
+    sold_out_gaps: soldOutGaps,
     all_purchased: Boolean(allPurchased),
     any_purchased: Boolean(anyPurchased),
   };
