@@ -12,6 +12,9 @@ export type BoardIdentity = {
   onChange: () => void;
 };
 
+const sameName = (a: string, b: string | null | undefined) =>
+  a.trim().toLowerCase() === (b ?? '').trim().toLowerCase();
+
 /** Clerk user avatar + dropdown for dark header bars. */
 export function HeaderUserMenu({ boardIdentity }: { boardIdentity?: BoardIdentity } = {}) {
   const { user, isSignedIn } = useUser();
@@ -62,33 +65,39 @@ export function HeaderUserMenu({ boardIdentity }: { boardIdentity?: BoardIdentit
           </div>
           {boardIdentity && (
             <div className="px-3 py-2 border-b border-zinc-700">
-              <p className="text-[10px] uppercase tracking-wider text-yellow-400/80">On the board as</p>
-              <p className="text-white text-sm font-semibold truncate mt-0.5">{boardIdentity.displayName}</p>
-              {boardIdentity.memberId && (
-                <MemberId
-                  value={boardIdentity.memberId}
-                  className="font-mono text-xs tracking-wide"
-                  letterClassName="text-zinc-400"
-                  digitClassName="text-amber-400"
-                />
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] uppercase tracking-wider text-yellow-400/80">
+                  {sameName(boardIdentity.displayName, user.fullName) ? 'On the board' : 'On the board as'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setOpen(false); boardIdentity.onChange(); }}
+                  className="text-[11px] text-zinc-400 hover:text-white underline shrink-0"
+                >
+                  Change
+                </button>
+              </div>
+              {!sameName(boardIdentity.displayName, user.fullName) && (
+                <p className="text-white text-sm font-semibold truncate">{boardIdentity.displayName}</p>
               )}
-              {boardIdentity.groupName && (
-                <div className="mt-1.5">
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
+                {boardIdentity.memberId && (
+                  <MemberId
+                    value={boardIdentity.memberId}
+                    className="font-mono text-xs tracking-wide"
+                    letterClassName="text-zinc-400"
+                    digitClassName="text-amber-400"
+                  />
+                )}
+                {boardIdentity.groupName && (
                   <span
-                    className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white"
+                    className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white truncate"
                     style={{ backgroundColor: boardIdentity.groupColor ?? '#6366f1' }}
                   >
                     {boardIdentity.groupName}
                   </span>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => { setOpen(false); boardIdentity.onChange(); }}
-                className="mt-2 text-xs text-zinc-400 hover:text-white underline block"
-              >
-                Change identity
-              </button>
+                )}
+              </div>
             </div>
           )}
           {user.publicMetadata?.role === 'admin' && (
