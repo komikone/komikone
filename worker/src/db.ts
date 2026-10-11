@@ -116,8 +116,20 @@ export type Invite = {
   used_at: string | null;
   invited_email: string | null;
   clerk_invitation_id: string | null;
+  /** 1 for a personal invite; more for a shared link. */
+  max_uses: number;
+  use_count: number;
   created_at: string;
 };
+
+export const MAX_SHARED_INVITE_USES = 500;
+
+/** Shown when an invite can't be used any more; a full shared link reads differently. */
+export function inviteUnavailableMessage(invite: Pick<Invite, 'max_uses'>): string {
+  return invite.max_uses > 1
+    ? 'This invite link is full. Ask whoever sent it for a new one.'
+    : 'This invite has already been used';
+}
 
 export type InviteRequest = {
   id: number;

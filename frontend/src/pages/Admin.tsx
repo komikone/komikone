@@ -2182,6 +2182,9 @@ function InvitesTab({
   const [bulkCount, setBulkCount] = useState(50);
   const [bulkPrefix, setBulkPrefix] = useState('');
   const [bulkCreating, setBulkCreating] = useState(false);
+  const [sharedUses, setSharedUses] = useState(50);
+  const [sharedLabel, setSharedLabel] = useState('');
+  const [sharedCreating, setSharedCreating] = useState(false);
 
   const origin = window.location.origin;
   const inviteUrl = (code: string) => `${origin}/join/${code}`;
@@ -2221,6 +2224,25 @@ function InvitesTab({
     }
   };
 
+  const handleCreateShared = async () => {
+    setSharedCreating(true);
+    try {
+      const { invite } = await api.admin.invites.create(await auth(), year.id, {
+        label: sharedLabel.trim() || `Shared link (${sharedUses} people)`,
+        max_uses: sharedUses,
+      });
+      setSharedLabel('');
+      onUpdate();
+      navigator.clipboard.writeText(inviteUrl(invite.code));
+      setCopiedId(invite.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to create shared link');
+    } finally {
+      setSharedCreating(false);
+    }
+  };
+
   const handleCreate = async () => {
     setCreating(true);
     setStatus(null);
@@ -2254,7 +2276,12 @@ function InvitesTab({
   const sendByEmail = email.trim().length > 0;
 
   const handleDelete = async (inv: Invite) => {
-    if (inv.used_by_clerk_user_id && !confirm(`This invite has been used. Delete "${inv.label || inv.code}" anyway?`)) return;
+    if (inv.max_uses > 1) {
+      if (!confirm(
+        `Delete the shared link "${inv.label || inv.code}"? Nobody new can join with it. `
+        + `The ${inv.use_count} who already joined stay members.`,
+      )) return;
+    } else if (inv.used_by_clerk_user_id && !confirm(`This invite has been used. Delete "${inv.label || inv.code}" anyway?`)) return;
     try {
       await api.admin.invites.delete(await auth(), year.id, inv.id);
       onUpdate();
@@ -2269,8 +2296,8 @@ function InvitesTab({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const unused = invites.filter((i) => !i.used_by_clerk_user_id);
-  const used = invites.filter((i) => i.used_by_clerk_user_id);
+  const unused = invites.filter((i) => !i.used_at);
+  const used = invites.filter((i) => i.used_at);
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -2287,6 +2314,45 @@ function InvitesTab({
             </button>
           )}
         </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-4 space-y-3">
+        <h4 className="text-xs text-gray-400 uppercase tracking-wide">Shared link</h4>
+        <p className="text-xs text-gray-500">
+          One link a whole group can use, e.g. posted in a group chat. It stops working once that many people
+          have joined, or when you delete it. Anyone the link is forwarded to can join, so keep it to people you trust.
+        </p>
+        <div className="flex flex-wrap gap-2 items-end">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Up to</label>
+            <input
+              type="number"
+              min={2}
+              max={500}
+              value={sharedUses}
+              onChange={(e) => setSharedUses(Math.min(500, Math.max(2, Number(e.target.value) || 2)))}
+              className="w-20 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div className="flex-1 min-w-[12rem]">
+            <label className="block text-xs text-gray-500 mb-1">Label (optional)</label>
+            <input
+              type="text"
+              value={sharedLabel}
+              onChange={(e) => setSharedLabel(e.target.value)}
+              placeholder="e.g. Group chat link"
+              className={inputCls}
+            />
+          </div>
+          <button
+            onClick={handleCreateShared}
+            disabled={sharedCreating}
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm px-4 py-2 rounded whitespace-nowrap transition-colors"
+          >
+            {sharedCreating ? 'Creating…' : `Create 1 link for ${sharedUses} people`}
+          </button>
+        </div>
+        <p className="text-xs text-gray-600">The new link is copied to your clipboard.</p>
       </div>
 
       <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-4 space-y-3">
@@ -2373,10 +2439,10 @@ function InvitesTab({
             <div
               key={inv.id}
               className={`bg-white dark:bg-gray-900 border rounded-xl p-4 flex items-center gap-4 ${
-                inv.used_by_clerk_user_id ? 'border-gray-200 dark:border-gray-700 opacity-70' : 'border-gray-300 dark:border-gray-600'
+                inv.used_at ? 'border-gray-200 dark:border-gray-700 opacity-70' : 'border-gray-300 dark:border-gray-600'
               }`}
             >
-              <div className={`w-2 h-2 rounded-full shrink-0 ${inv.used_by_clerk_user_id ? 'bg-green-500' : 'bg-yellow-400'}`} />
+              <div className={`w-2 h-2 rounded-full shrink-0 ${inv.used_at ? 'bg-green-500' : 'bg-yellow-400'}`} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono text-sm text-gray-900 dark:text-white font-medium">{inv.code}</span>
@@ -2384,13 +2450,21 @@ function InvitesTab({
                   {inv.invited_email && (
                     <span className="text-gray-500 text-xs">{inv.invited_email}</span>
                   )}
-                  {inv.used_by_clerk_user_id ? (
+                  {inv.max_uses > 1 ? (
+                    <span className={`text-xs border px-1.5 py-0.5 rounded ${
+                      inv.used_at
+                        ? 'bg-green-900/50 text-green-300 border-green-800'
+                        : 'bg-blue-900/50 text-blue-300 border-blue-800'
+                    }`}>
+                      shared · {inv.use_count}/{inv.max_uses} joined{inv.used_at ? ' · full' : ''}
+                    </span>
+                  ) : inv.used_at ? (
                     <span className="text-xs bg-green-900/50 text-green-300 border border-green-800 px-1.5 py-0.5 rounded">used</span>
                   ) : (
                     <span className="text-xs bg-yellow-900/50 text-yellow-300 border border-yellow-800 px-1.5 py-0.5 rounded">unused</span>
                   )}
                 </div>
-                {inv.used_at && (
+                {inv.used_at && inv.max_uses === 1 && (
                   <div className="text-xs text-gray-500 mt-0.5">
                     Used {new Date(inv.used_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </div>

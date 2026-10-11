@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, enrichParticipant, isClaimExpired, MAX_ACTIVE_CLAIMS, nothingLeftToBuy, SALE_DAYS, type SaleDay } from './db';
+import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, enrichParticipant, inviteUnavailableMessage, MAX_SHARED_INVITE_USES, isClaimExpired, MAX_ACTIVE_CLAIMS, nothingLeftToBuy, SALE_DAYS, type SaleDay } from './db';
 import {
   assertPreviewNightAllowed,
   assertRegistrationOpen,
@@ -380,7 +380,7 @@ function generateInviteCode(): string {
 }
 
 async function createUniqueInvite(
-  db: D1Database, yearId: number, label: string, invitedBy: string,
+  db: D1Database, yearId: number, label: string, invitedBy: string, maxUses = 1,
 ): Promise<Invite> {
   let code = '';
   for (let i = 0; i < 8; i++) {
@@ -390,8 +390,8 @@ async function createUniqueInvite(
     if (i === 7) throw new Error('Failed to generate unique invite code');
   }
   await db.prepare(
-    'INSERT INTO invites (year_id, code, label, invited_by_clerk_user_id) VALUES (?, ?, ?, ?)'
-  ).bind(yearId, code, label, invitedBy).run();
+    'INSERT INTO invites (year_id, code, label, invited_by_clerk_user_id, max_uses) VALUES (?, ?, ?, ?, ?)'
+  ).bind(yearId, code, label, invitedBy, maxUses).run();
   const invite = await db.prepare('SELECT * FROM invites WHERE code = ?').bind(code).first<Invite>();
   if (!invite) throw new Error('Failed to create invite');
   return invite;
@@ -1293,7 +1293,7 @@ app.get('/api/invites/:code', async (c) => {
     'SELECT * FROM invites WHERE code = ?'
   ).bind(code).first<Invite>();
   if (!invite) return err('Invite not found', 404);
-  if (invite.used_at) return err('This invite has already been used', 409);
+  if (invite.used_at) return err(inviteUnavailableMessage(invite), 409);
 
   const year = await c.env.DB.prepare(
     'SELECT id, name, con_year FROM years WHERE id = ?'
@@ -1378,7 +1378,7 @@ app.post('/api/invites/:code/accept', async (c) => {
     'SELECT * FROM invites WHERE code = ?'
   ).bind(code).first<Invite>();
   if (!invite) return err('Invite not found', 404);
-  if (invite.used_at) return err('This invite has already been used', 409);
+  if (invite.used_at) return err(inviteUnavailableMessage(invite), 409);
 
   // Reject a Member ID that already belongs to someone else before anything is written,
   // so the invite stays usable. Letting it through either hands over their row or trips
@@ -1399,9 +1399,10 @@ app.post('/api/invites/:code/accept', async (c) => {
     'SELECT * FROM year_members WHERE year_id = ? AND clerk_user_id = ?'
   ).bind(invite.year_id, access.userId).first<YearMember>();
   if (existing) {
+    // A shared link isn't spent on someone who already belongs to the year.
     await c.env.DB.prepare(`
-      UPDATE invites SET used_by_clerk_user_id = ?, used_at = datetime('now')
-      WHERE code = ? AND used_at IS NULL
+      UPDATE invites SET used_by_clerk_user_id = ?, used_at = datetime('now'), use_count = 1
+      WHERE code = ? AND used_at IS NULL AND max_uses = 1
     `).bind(access.userId, code).run();
     if (!existing.sponsor_clerk_user_id) {
       await c.env.DB.prepare(`
@@ -1445,9 +1446,14 @@ app.post('/api/invites/:code/accept', async (c) => {
   `).bind(yearId, access.userId, invite.invited_by_clerk_user_id,
     firstName, lastName, memberId, badgeType, returnEligible));
 
-  // 2. Mark invite used
+  // 2. Count the use; a personal invite records who used it, and either kind is marked
+  // used (full) once it reaches max_uses.
   stmts.push(db.prepare(`
-    UPDATE invites SET used_by_clerk_user_id = ?, used_at = datetime('now') WHERE code = ?
+    UPDATE invites SET
+      use_count = use_count + 1,
+      used_by_clerk_user_id = CASE WHEN max_uses = 1 THEN ? ELSE used_by_clerk_user_id END,
+      used_at = CASE WHEN use_count + 1 >= max_uses THEN datetime('now') ELSE used_at END
+    WHERE code = ?
   `).bind(access.userId, code));
 
   // 3. Create group in each event + participant record
@@ -2061,7 +2067,7 @@ app.delete('/api/years/:yearId/events/:eventId/my-group/participants/:pid', asyn
 async function reconcileUnusedInvites(db: D1Database, yearId: number, invitedBy: string): Promise<void> {
   const pending = await db.prepare(
     `SELECT * FROM invites
-     WHERE year_id = ? AND invited_by_clerk_user_id = ? AND used_at IS NULL
+     WHERE year_id = ? AND invited_by_clerk_user_id = ? AND used_at IS NULL AND max_uses = 1
        AND TRIM(COALESCE(label, '')) != ''`
   ).bind(yearId, invitedBy).all<Invite>();
 
@@ -2808,11 +2814,13 @@ admin.get('/years/:yearId/invites', async (c) => {
 admin.post('/years/:yearId/invites', async (c) => {
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
   const yearId = Number(c.req.param('yearId'));
-  const body = await c.req.json<{ label?: string; email?: string }>();
+  const body = await c.req.json<{ label?: string; email?: string; max_uses?: number }>();
   const invitedBy = access?.userId === 'admin' ? 'admin' : (access?.userId ?? 'admin');
+  const maxUses = Math.min(Math.max(Math.floor(Number(body.max_uses) || 1), 1), MAX_SHARED_INVITE_USES);
+  if (maxUses > 1 && body.email?.trim()) return err('A shared link can\'t be emailed to one person', 400);
 
   const invite = await createUniqueInvite(
-    c.env.DB, yearId, body.label?.trim() ?? '', invitedBy,
+    c.env.DB, yearId, body.label?.trim() ?? '', invitedBy, maxUses,
   );
 
   const joinUrl = inviteJoinUrl(c.env.FRONTEND_URL, invite.code);

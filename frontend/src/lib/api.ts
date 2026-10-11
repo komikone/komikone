@@ -92,6 +92,9 @@ export type Invite = {
   used_at: string | null;
   invited_email: string | null;
   clerk_invitation_id: string | null;
+  /** 1 for a personal invite; more for a shared link. */
+  max_uses: number;
+  use_count: number;
   created_at: string;
 };
 
@@ -623,7 +626,7 @@ export const api = {
     invites: {
       list: (authToken: string, yearId: number) =>
         req<Invite[]>(`/api/admin/years/${yearId}/invites`, { headers: authHeaders(undefined, authToken) }),
-      create: (authToken: string, yearId: number, data?: { label?: string; email?: string }) =>
+      create: (authToken: string, yearId: number, data?: { label?: string; email?: string; max_uses?: number }) =>
         req<{ invite: Invite; join_url: string; email_sent: boolean; email_error?: string }>(
           `/api/admin/years/${yearId}/invites`,
           { method: 'POST', headers: authHeaders(undefined, authToken), body: JSON.stringify(data ?? {}) },
