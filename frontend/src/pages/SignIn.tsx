@@ -1,5 +1,5 @@
-import { SignIn as ClerkSignIn } from '@clerk/clerk-react';
-import { useSearchParams } from 'react-router-dom';
+import { SignIn as ClerkSignIn, useAuth } from '@clerk/clerk-react';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { AppPage } from '../components/AppPage';
 import { useTheme } from '../lib/useTheme';
 
@@ -41,10 +41,20 @@ const DARK_APPEARANCE = {
   },
 } as const;
 
+/** Only same-site paths, so ?redirect= can't bounce someone to another site. */
+function safeRedirect(raw: string | null): string {
+  return raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/dashboard';
+}
+
 export default function SignIn() {
   const [params] = useSearchParams();
-  const redirect = params.get('redirect') ?? '/dashboard';
+  const redirect = safeRedirect(params.get('redirect'));
   const { isDark } = useTheme();
+  const { isLoaded, isSignedIn } = useAuth();
+
+  // Clerk's <SignIn> renders nothing for someone already signed in, which left a page
+  // that just said "Sign in" with an empty space under it.
+  if (isLoaded && isSignedIn) return <Navigate to={redirect} replace />;
 
   return (
     <AppPage title="Sign in" backTo={{ to: '/', label: '← Home' }}>
@@ -52,11 +62,15 @@ export default function SignIn() {
         <div className="text-center mb-2">
           <p className="text-gray-500 dark:text-gray-400 text-sm">Sign in to access your dashboard</p>
         </div>
-        <ClerkSignIn
-          routing="hash"
-          forceRedirectUrl={redirect}
-          appearance={isDark ? DARK_APPEARANCE : LIGHT_APPEARANCE}
-        />
+        {isLoaded ? (
+          <ClerkSignIn
+            routing="hash"
+            forceRedirectUrl={redirect}
+            appearance={isDark ? DARK_APPEARANCE : LIGHT_APPEARANCE}
+          />
+        ) : (
+          <p className="text-gray-400 text-sm">Loading…</p>
+        )}
       </div>
     </AppPage>
   );
