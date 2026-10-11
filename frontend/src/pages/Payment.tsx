@@ -193,10 +193,10 @@ export default function Payment() {
 
         {/* Summary */}
         {unpaidTotal > 0 && (
-          <div className="bg-red-950/40 border border-red-700 rounded-lg px-4 py-3 mb-6 text-sm">
+          <div className="bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-700 rounded-lg px-4 py-3 mb-6 text-sm">
             <span className="text-red-700 dark:text-red-300 font-medium">Outstanding: </span>
             <span className="text-gray-900 dark:text-white font-mono">{formatDollars(unpaidTotal)}</span>
-            <span className="text-gray-400 ml-2">total unpaid across all participants</span>
+            <span className="text-gray-500 dark:text-gray-400 ml-2">total unpaid across all participants</span>
           </div>
         )}
 
@@ -212,20 +212,20 @@ export default function Payment() {
               <div key={name} className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-5 mb-4">
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <h3 className="font-bold text-gray-900 text-lg">{name}</h3>
+                    <h3 className="font-bold text-gray-900 dark:text-white text-lg">{name}</h3>
                     {info && (
                       <div className="flex flex-wrap gap-3 mt-1 text-sm text-gray-400">
                         {info.venmo && (
-                          <span>Venmo: <span className="text-gray-900">{info.venmo}</span></span>
+                          <span>Venmo: <span className="text-gray-900 dark:text-gray-100">{info.venmo}</span></span>
                         )}
                         {info.zelle && (
-                          <span>Zelle: <span className="text-gray-900">{info.zelle}</span></span>
+                          <span>Zelle: <span className="text-gray-900 dark:text-gray-100">{info.zelle}</span></span>
                         )}
                         {info.paypal && (
-                          <span>PayPal: <span className="text-gray-900">{info.paypal}</span></span>
+                          <span>PayPal: <span className="text-gray-900 dark:text-gray-100">{info.paypal}</span></span>
                         )}
                         {info.phone_last4 && (
-                          <span>Phone: <span className="text-gray-900">...{info.phone_last4}</span></span>
+                          <span>Phone: <span className="text-gray-900 dark:text-gray-100">...{info.phone_last4}</span></span>
                         )}
                       </div>
                     )}
@@ -236,7 +236,7 @@ export default function Payment() {
                     )}
                   </div>
                   <div className="text-right">
-                    <div className="text-gray-900 font-mono font-semibold">{formatDollars(total)}</div>
+                    <div className="text-gray-900 dark:text-white font-mono font-semibold">{formatDollars(total)}</div>
                     <div className="text-xs text-gray-400">total paid out</div>
                     {unpaid > 0 && (
                       <div className="text-red-400 text-xs font-mono">{formatDollars(unpaid)} owed</div>
@@ -253,10 +253,10 @@ export default function Payment() {
                       <th className="text-center py-1">Paid?</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-800">
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                     {ps.filter((p) => p.purchase_total > 0).map((p) => (
                       <tr key={p.id} className={p.paid ? 'opacity-50' : ''}>
-                        <td className="py-2 text-gray-900">
+                        <td className="py-2 text-gray-900 dark:text-white">
                           {p.first_name} {p.last_name}
                         </td>
                         <td className="py-2 text-gray-400 text-xs">
@@ -268,7 +268,7 @@ export default function Payment() {
                             p.pur_sun && 'Sun',
                           ].filter(Boolean).join(', ')}
                         </td>
-                        <td className="py-2 text-right font-mono text-gray-900">
+                        <td className="py-2 text-right font-mono text-gray-900 dark:text-white">
                           {formatDollars(p.purchase_total)}
                         </td>
                         <td className="py-2 text-center">

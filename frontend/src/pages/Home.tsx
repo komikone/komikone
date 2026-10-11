@@ -122,7 +122,7 @@ function HeroSection({ isSignedIn, onRequestAccess }: { isSignedIn: boolean; onR
           komikone
         </h1>
 
-        <p className="text-red-700 text-sm md:text-base uppercase tracking-[0.3em] mb-10 font-medium">
+        <p className="text-red-700 text-xs sm:text-sm md:text-base uppercase tracking-[0.2em] sm:tracking-[0.3em] mb-10 font-medium">
           Badge Coordination · Est. 2017
         </p>
 
@@ -190,12 +190,12 @@ function InviteEntry({
   };
 
   const inputCls = variant === 'dark'
-    ? 'input-on-light flex-1 bg-white/95 border-2 border-white/40 focus:border-yellow-400 text-gray-900 placeholder:text-gray-500 font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider'
-    : 'input-on-light flex-1 bg-gray-50 dark:bg-gray-100 border-2 border-black dark:border-gray-300 focus:border-red-500 dark:focus:border-yellow-400 text-gray-900 dark:text-gray-900 placeholder:text-gray-500 font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider';
+    ? 'input-on-light flex-1 min-w-0 bg-white/95 border-2 border-white/40 focus:border-yellow-400 text-gray-900 placeholder:text-gray-500 font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider'
+    : 'input-on-light flex-1 min-w-0 bg-gray-50 dark:bg-gray-100 border-2 border-black dark:border-gray-300 focus:border-red-500 dark:focus:border-yellow-400 text-gray-900 dark:text-gray-900 placeholder:text-gray-500 font-mono text-sm px-4 py-3 outline-none uppercase tracking-wider';
 
   const btnCls = variant === 'dark'
-    ? 'font-bangers tracking-wide text-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-3 border-2 border-white comic-shadow-sm transition-all'
-    : 'font-bangers tracking-wide text-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-3 border-2 border-black dark:border-yellow-400 comic-shadow-sm transition-all';
+    ? 'font-bangers tracking-wide text-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white whitespace-nowrap px-4 sm:px-6 py-3 border-2 border-white comic-shadow-sm transition-all'
+    : 'font-bangers tracking-wide text-lg bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white whitespace-nowrap px-4 sm:px-6 py-3 border-2 border-black dark:border-yellow-400 comic-shadow-sm transition-all';
 
   const signInCls = variant === 'dark'
     ? 'text-yellow-400/90 hover:text-yellow-300'

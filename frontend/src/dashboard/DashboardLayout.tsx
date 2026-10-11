@@ -1,4 +1,5 @@
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { DashboardProvider, useDashboard } from './DashboardContext';
 
@@ -16,6 +17,18 @@ function DashboardShell() {
   } = useDashboard();
 
   const canUseLiveBoard = !!(member?.member_id?.trim());
+
+  const { pathname } = useLocation();
+  const mobileNavRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const nav = mobileNavRef.current;
+    const tab = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!nav || !tab) return;
+    const tabRight = tab.offsetLeft + tab.offsetWidth;
+    if (tab.offsetLeft < nav.scrollLeft || tabRight > nav.scrollLeft + nav.clientWidth) {
+      nav.scrollTo({ left: tab.offsetLeft - 12, behavior: 'smooth' });
+    }
+  }, [pathname, loading]);
 
   /**
    * Rendered twice: as a sidebar on desktop and a horizontal scroller on phones. The
@@ -96,7 +109,7 @@ function DashboardShell() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white flex flex-col">
       <AppHeader title="Dashboard" />
 
-      <nav className="lg:hidden shrink-0 flex items-center gap-1.5 overflow-x-auto px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-gray-900/80">
+      <nav ref={mobileNavRef} className="lg:hidden relative shrink-0 flex items-center gap-1.5 overflow-x-auto px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-gray-900/80">
         {navLinks(true)}
         {yearPicker(true)}
       </nav>

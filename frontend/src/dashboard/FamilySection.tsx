@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, DAY_KEYS, dayLabel } from '../lib/api';
+import { api, DAY_KEYS, dayLabel, dayShortLabel } from '../lib/api';
 import { useDashboard } from './DashboardContext';
 import { inputCls, labelCls } from './styles';
 import type { GroupView } from './DashboardContext';
@@ -178,7 +178,8 @@ export function FamilySection({
                     <td className="px-2 sm:px-4 py-2.5 text-xs">
                       {selectedDays(p, 'req').length > 0 ? (
                         <span className="text-gray-500 dark:text-gray-400">
-                          {selectedDays(p, 'req').map(dayLabel).join(', ')}
+                          <span className="sm:hidden">{selectedDays(p, 'req').map(dayShortLabel).join(', ')}</span>
+                          <span className="hidden sm:inline">{selectedDays(p, 'req').map(dayLabel).join(', ')}</span>
                         </span>
                       ) : (
                         <span className="text-amber-500" title="Needed before purchase day">

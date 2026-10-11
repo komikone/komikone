@@ -960,21 +960,21 @@ export default function LiveBoard() {
     <div className={`h-screen bg-amber-50 dark:bg-gray-950 text-gray-950 dark:text-white flex flex-col overflow-hidden ${simulation ? 'ring-4 ring-inset ring-fuchsia-500' : ''}`}>
 
       {/* ── Top bar ── */}
-      <div className={`bg-zinc-950 dark:bg-zinc-900 border-b-[5px] px-4 py-2.5 flex items-center gap-3 shrink-0 ${
+      <div className={`bg-zinc-950 dark:bg-zinc-900 border-b-[5px] px-3 sm:px-4 py-2.5 flex items-center gap-2 sm:gap-3 shrink-0 ${
         simulation ? 'border-fuchsia-500' : 'border-yellow-400 dark:border-yellow-500'
       }`}>
         <Link to="/" className="font-bangers text-yellow-400 text-xl tracking-wide shrink-0 hover:text-yellow-300 transition-colors">komikone</Link>
-        <span className="text-zinc-600 dark:text-zinc-500 shrink-0 text-base">·</span>
+        <span className="text-zinc-600 dark:text-zinc-500 shrink-0 text-base hidden sm:inline">·</span>
         <div className="flex-1 min-w-0">
-          <div className="font-bangers text-white text-lg tracking-wide leading-tight">{event?.name}</div>
-          <div className={`text-[10px] uppercase tracking-widest leading-tight ${
+          <div className="font-bangers text-white text-lg tracking-wide leading-tight truncate" title={event?.name}>{event?.name}</div>
+          <div className={`text-[10px] uppercase tracking-widest leading-tight truncate ${
             simulation ? 'text-fuchsia-400' : 'text-yellow-600 dark:text-yellow-500'
           }`}>
             {event?.reg_type === 'return' ? 'Return Reg' : 'Open Reg'} · Live Board
             {simulation && ' · Simulation'}
           </div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <span className="text-zinc-500 dark:text-zinc-400 text-xs hidden sm:block">
             {lastUpdated ? lastUpdated.toLocaleTimeString() : '…'}
           </span>
@@ -994,8 +994,9 @@ export default function LiveBoard() {
             type="button"
             onClick={toggle}
             className="text-zinc-400 dark:text-zinc-300 hover:text-yellow-400 text-xs border border-zinc-700 dark:border-zinc-600 px-2 py-0.5 rounded transition-colors"
+            aria-label={isDark ? 'Switch to day mode' : 'Switch to night mode'}
           >
-            {isDark ? '☀ Day' : '◑ Night'}
+            {isDark ? '☀' : '◑'}<span className="hidden sm:inline">{isDark ? ' Day' : ' Night'}</span>
           </button>
           <HeaderUserMenu
             boardIdentity={me ? {
@@ -1009,6 +1010,8 @@ export default function LiveBoard() {
         </div>
       </div>
 
+      {/* On phones this stack can outgrow the screen; cap it so the board always keeps room. */}
+      <div className="shrink-0 max-h-[50vh] overflow-y-auto sm:max-h-none sm:overflow-visible">
       {simulation && (
         <div className="bg-fuchsia-600 text-white px-4 py-2 shrink-0 flex items-center gap-3 border-b-2 border-fuchsia-300">
           <span className="text-xs font-black uppercase tracking-[0.2em]">Practice mode</span>
@@ -1037,7 +1040,7 @@ export default function LiveBoard() {
       )}
 
       {/* ── Stats bar ── */}
-      <div className="bg-black dark:bg-zinc-950 border-b-2 border-zinc-800 dark:border-yellow-950 px-4 py-1 flex items-center gap-5 shrink-0">
+      <div className="bg-black dark:bg-zinc-950 border-b-2 border-zinc-800 dark:border-yellow-950 px-3 sm:px-4 py-1 flex flex-wrap items-center gap-x-4 sm:gap-x-5 gap-y-1 shrink-0">
         <span className="text-green-400 dark:text-green-300 text-xs font-mono">{purchased} <span className="text-zinc-600 dark:text-zinc-500">done</span></span>
         <span className="text-yellow-400 dark:text-yellow-300 text-xs font-mono">{inProgress} <span className="text-zinc-600 dark:text-zinc-500">claiming</span></span>
         {myDisplayName && (
@@ -1154,20 +1157,21 @@ export default function LiveBoard() {
           </span>
         </div>
       )}
+      </div>
 
       {/* Board + optional Queue-It side rail */}
       <div className="flex-1 min-h-0 flex">
         <div className="flex-1 min-w-0 flex flex-col">
           {/* ── Filter bar ── */}
-          <div className="border-b-2 border-yellow-200 dark:border-gray-300 bg-amber-50 dark:bg-gray-900 px-4 py-2 flex items-center gap-3 flex-wrap shrink-0">
+          <div className="border-b-2 border-yellow-200 dark:border-gray-300 bg-amber-50 dark:bg-gray-900 px-3 sm:px-4 py-2 flex items-center gap-x-3 gap-y-2 flex-wrap shrink-0">
             <input
               type="search"
               placeholder="Search… (* wildcard)"
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
-            className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-gray-50 w-52 focus:outline-none focus:border-yellow-400 dark:focus:border-yellow-400 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-gray-50 flex-1 min-w-0 sm:flex-none sm:w-52 focus:outline-none focus:border-yellow-400 dark:focus:border-yellow-400 placeholder:text-gray-400 dark:placeholder:text-gray-500"
             />
-            <div className="flex gap-1.5 flex-wrap">
+            <div className="order-last sm:order-none basis-full sm:basis-auto flex gap-1.5 overflow-x-auto sm:flex-wrap sm:overflow-visible -mx-3 px-3 sm:mx-0 sm:px-0">
               {([
                 ['all',      'All'],
                 ['setup',    'Setup'],
@@ -1179,7 +1183,7 @@ export default function LiveBoard() {
                 <button
                   key={s}
                   onClick={() => setFilterStatus(s)}
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors shrink-0 whitespace-nowrap ${
                     filterStatus === s
                       ? 'bg-yellow-400 text-black border-transparent'
                       : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
@@ -1798,7 +1802,7 @@ function LinkIdentityModal({
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl w-full max-w-sm shadow-2xl">
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl w-full max-w-sm max-h-[90vh] overflow-y-auto shadow-2xl">
         <div className="px-5 pt-5 pb-3 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-gray-900 dark:text-white font-bold text-lg">
             {isReLinking ? 'Change your identity' : 'Link your account'}
@@ -1893,7 +1897,7 @@ function EditParticipantModal({
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl w-full max-w-sm shadow-2xl">
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl w-full max-w-sm max-h-[90vh] overflow-y-auto shadow-2xl">
         <div className="px-5 pt-5 pb-3 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-gray-900 dark:text-white font-bold text-lg">Edit Participant</h2>
           <p className="text-gray-500 text-xs mt-0.5">{participant.first_name} {participant.last_name}</p>

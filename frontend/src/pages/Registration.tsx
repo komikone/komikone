@@ -207,7 +207,7 @@ export default function Registration() {
                     onChange={() => setForm((f) => ({ ...f, badge_type: type }))}
                     className="accent-blue-500"
                   />
-                  <span className="text-gray-700 text-sm">
+                  <span className="text-gray-700 dark:text-gray-200 text-sm">
                     {type === 'JUNIOR' ? 'Junior / Military / Senior' : 'Adult'}
                   </span>
                 </label>
@@ -226,7 +226,7 @@ export default function Registration() {
                     onChange={(e) => setDay(day, e.target.checked)}
                     className="w-4 h-4 rounded accent-blue-500 cursor-pointer"
                   />
-                  <span className="text-gray-700 group-hover:text-gray-900 text-sm">{dayLabel(day)}</span>
+                  <span className="text-gray-700 dark:text-gray-200 group-hover:text-gray-900 dark:group-hover:text-white text-sm">{dayLabel(day)}</span>
                 </label>
               ))}
             </div>

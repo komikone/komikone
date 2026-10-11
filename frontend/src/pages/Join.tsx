@@ -139,8 +139,8 @@ export default function JoinPage() {
   if (inviteError) {
     return (
       <Screen>
-        <div className="bg-red-950/40 border border-red-700 rounded-xl p-6 text-center">
-          <p className="text-red-700 font-medium mb-1">
+        <div className="bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-700 rounded-xl p-6 text-center">
+          <p className="text-red-700 dark:text-red-300 font-medium mb-1">
             {inviteUsed ? 'Invite already used' : 'Invalid invite'}
           </p>
           <p className="text-gray-400 text-sm">{inviteError}</p>

@@ -318,16 +318,16 @@ export default function Admin() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white flex flex-col">
       <AppHeader title="Admin" />
 
-      <div className="flex flex-1 min-h-0">
-      {/* Sidebar — years only */}
-      <aside className="w-44 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0">
-        <div className="px-4 py-4 border-b border-gray-200 dark:border-gray-700 dark:border-gray-800">
+      <div className="flex flex-col md:flex-row flex-1 min-h-0">
+      {/* Sidebar on desktop; a horizontal strip above the content on phones */}
+      <aside className="w-full md:w-44 bg-white dark:bg-gray-900 border-b md:border-b-0 md:border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0">
+        <div className="hidden md:block px-4 py-4 border-b border-gray-200 dark:border-gray-700 dark:border-gray-800">
           <p className="text-gray-500 text-xs uppercase tracking-wider">Years &amp; tools</p>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-4">
-          <div>
-            <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Years</div>
+        <div className="flex-1 overflow-x-auto md:overflow-x-visible md:overflow-y-auto px-3 py-2 md:py-3 flex md:flex-col items-center md:items-stretch gap-2 md:gap-4">
+          <div className="flex md:block items-center gap-1 shrink-0">
+            <div className="hidden md:block text-xs text-gray-500 mb-2 uppercase tracking-wide">Years</div>
             {loading && years.length === 0 && (
               <div className="text-gray-500 text-xs px-2">Loading…</div>
             )}
@@ -339,12 +339,12 @@ export default function Admin() {
                 <button
                   key={year}
                   onClick={() => handleYearSelect(year)}
-                  className={`w-full text-left px-2 py-2 rounded mb-0.5 transition-colors ${
-                    selectedYear === year ? 'bg-blue-700 text-white' : 'text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  className={`shrink-0 md:w-full text-left px-2 py-1 md:py-2 rounded md:mb-0.5 transition-colors ${
+                    selectedYear === year ? 'bg-blue-700 text-white' : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
                   }`}
                 >
                   <div className="font-bold text-sm">{year}</div>
-                  <div className="text-xs text-gray-400">
+                  <div className="text-xs text-gray-400 whitespace-nowrap">
                     {[hasReturn && 'Return', hasOpen && 'Open'].filter(Boolean).join(' · ')}
                   </div>
                 </button>
@@ -354,10 +354,10 @@ export default function Admin() {
           </div>
 
           {/* Invites */}
-          <div className="border-t border-gray-200 dark:border-gray-800 pt-3 space-y-0.5">
+          <div className="flex md:block items-center gap-1 shrink-0 border-l md:border-l-0 md:border-t border-gray-200 dark:border-gray-800 pl-2 md:pl-0 md:pt-3 md:space-y-0.5">
             <button
               onClick={() => setAdminView('backgrounds')}
-              className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
+              className={`shrink-0 whitespace-nowrap md:w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
                 adminView === 'backgrounds' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-800 dark:hover:text-gray-200'
               }`}
             >
@@ -365,7 +365,7 @@ export default function Admin() {
             </button>
             <button
               onClick={() => setAdminView('requests')}
-              className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium flex items-center justify-between ${
+              className={`shrink-0 whitespace-nowrap md:w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium flex items-center justify-between gap-2 ${
                 adminView === 'requests' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-800 dark:hover:text-gray-200'
               }`}
             >
@@ -381,7 +381,7 @@ export default function Admin() {
                 setAdminView('invites');
                 if (invitePanelYearId === null && yearsData[0]) setInvitePanelYearId(yearsData[0].id);
               }}
-              className={`w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
+              className={`shrink-0 whitespace-nowrap md:w-full text-left px-2 py-1.5 rounded transition-colors text-xs uppercase tracking-wide font-medium ${
                 adminView === 'invites' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-800 dark:hover:text-gray-200'
               }`}
             >
@@ -392,9 +392,9 @@ export default function Admin() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto flex flex-col">
+      <main className="flex-1 min-w-0 overflow-auto flex flex-col">
         {adminView === 'requests' ? (
-          <div className="flex-1 overflow-auto p-6">
+          <div className="flex-1 overflow-auto p-4 md:p-6">
             <AccessRequestsPanel
               auth={auth}
               requests={accessRequests}
@@ -403,11 +403,11 @@ export default function Admin() {
             />
           </div>
         ) : adminView === 'backgrounds' ? (
-          <div className="flex-1 overflow-auto p-6">
+          <div className="flex-1 overflow-auto p-4 md:p-6">
             <BackgroundsPanel auth={auth} />
           </div>
         ) : adminView === 'invites' ? (
-          <div className="flex-1 overflow-auto p-6">
+          <div className="flex-1 overflow-auto p-4 md:p-6">
             <div className="max-w-2xl space-y-4 mb-6">
               <div>
                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Invite Codes</h2>
@@ -447,8 +447,8 @@ export default function Admin() {
         ) : (
           <>
             {/* Detail header + tab bar */}
-            <div className="border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 px-6 pt-5 pb-0">
-              <div className="flex items-center justify-between mb-4">
+            <div className="border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 px-4 md:px-6 pt-4 md:pt-5 pb-0">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 dark:text-white">SDCC {selectedYear}</h2>
                   <p className="text-sm text-gray-500">
@@ -475,7 +475,7 @@ export default function Admin() {
                 )}
               </div>
               {/* Tabs */}
-              <div className="flex gap-1">
+              <div className="flex gap-1 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
                 {([
                   ['overview', 'Overview'],
                   ['people', 'People'],
@@ -489,7 +489,7 @@ export default function Admin() {
                       setTab(t);
                       if (t === 'people' && activeYear) loadYearExtras(activeYear);
                     }}
-                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    className={`shrink-0 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                       tab === t
                         ? 'border-blue-500 text-gray-900 dark:text-white'
                         : 'border-transparent text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
@@ -502,7 +502,7 @@ export default function Admin() {
             </div>
 
             {/* Tab content */}
-            <div className="flex-1 overflow-auto p-6">
+            <div className="flex-1 overflow-auto p-4 md:p-6">
             {tab === 'overview' && (
               <OverviewTab
                 returnEvent={returnEvent}
@@ -616,7 +616,7 @@ function CreateYearButton({ auth, onCreated }: { auth: () => Promise<string>; on
     return (
       <button
         onClick={() => setOpen(true)}
-        className="w-full text-left px-2 py-1.5 rounded text-sm text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-800 mt-1"
+        className="shrink-0 whitespace-nowrap md:w-full text-left px-2 py-1.5 rounded text-sm text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-800 md:mt-1"
       >
         + New Year
       </button>
@@ -1820,12 +1820,12 @@ function DatesTab({
 
   const DateInput = ({ label, field }: { label: string; field: keyof DateFields }) => (
     <div className="flex items-center gap-3">
-      <label className="text-sm text-gray-700 dark:text-gray-300 w-52 shrink-0">{label}</label>
+      <label className="text-sm text-gray-700 dark:text-gray-300 flex-1 min-w-0 sm:flex-none sm:w-52 sm:shrink-0">{label}</label>
       <input
         type="date"
         value={form[field]}
         onChange={(e) => set(field, e.target.value)}
-        className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
+        className="w-36 shrink-0 sm:w-auto bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 sm:px-3 py-1.5 text-gray-900 dark:text-white text-sm focus:outline-none focus:border-blue-500"
       />
     </div>
   );
@@ -1927,7 +1927,7 @@ function CopyParticipantsModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-6 w-full max-w-md">
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-5">
           <h3 className="font-bold text-gray-900">Copy / Transfer Participants</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-900">✕</button>
@@ -2122,8 +2122,8 @@ function AccessRequestsPanel({
           {filtered.map((r) => (
             <div key={r.id} className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-4">
               <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-gray-900 dark:text-white font-medium">{r.email}</p>
+                <div className="min-w-0">
+                  <p className="text-gray-900 dark:text-white font-medium break-all">{r.email}</p>
                   <p className="text-gray-500 text-xs mt-0.5">
                     Referred by {r.referred_by || '—'} · {new Date(r.created_at + 'Z').toLocaleDateString()}
                   </p>
@@ -2707,17 +2707,17 @@ function SettingsTab({
         </div>
       )}
 
-      <div className="border-2 border-red-200/80 bg-red-950/30 rounded-xl p-5">
-        <p className="text-red-700 text-xs font-semibold uppercase tracking-wider mb-2">Danger zone</p>
-        <h4 className="text-white font-semibold mb-1">Delete this year</h4>
-        <p className="text-red-200/80 text-sm mb-4">
-          Permanently removes <strong className="text-red-100">{year.name}</strong> and all associated data:
+      <div className="border-2 border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/30 rounded-xl p-5">
+        <p className="text-red-700 dark:text-red-400 text-xs font-semibold uppercase tracking-wider mb-2">Danger zone</p>
+        <h4 className="text-gray-900 dark:text-white font-semibold mb-1">Delete this year</h4>
+        <p className="text-red-800 dark:text-red-200/80 text-sm mb-4">
+          Permanently removes <strong className="text-red-900 dark:text-red-100">{year.name}</strong> and all associated data:
           {' '}{eventCount} event{eventCount !== 1 ? 's' : ''}, {memberCount} member{memberCount !== 1 ? 's' : ''},
           {' '}{inviteCount} invite{inviteCount !== 1 ? 's' : ''}, participants, groups, and registration dates.
           This cannot be undone.
         </p>
-        <label className="block text-sm text-red-200/90 mb-2">
-          Type <span className="font-mono text-red-100">{year.con_year}</span> to confirm
+        <label className="block text-sm text-red-800 dark:text-red-200/90 mb-2">
+          Type <span className="font-mono text-red-900 dark:text-red-100">{year.con_year}</span> to confirm
         </label>
         <input
           type="text"
@@ -2725,7 +2725,7 @@ function SettingsTab({
           value={confirmText}
           onChange={(e) => setConfirmText(e.target.value)}
           placeholder={String(year.con_year)}
-          className="w-full bg-red-50 border border-red-800 text-white rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-red-500"
+          className="w-full bg-white dark:bg-red-950/40 border border-red-300 dark:border-red-800 text-gray-900 dark:text-white rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-red-500"
         />
         <button
           onClick={handleDelete}

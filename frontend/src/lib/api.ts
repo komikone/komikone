@@ -720,6 +720,10 @@ export function dayLabel(key: string) {
   return { preview: 'Preview Night', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' }[key] ?? key;
 }
 
+export function dayShortLabel(key: string) {
+  return { preview: 'Preview', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' }[key] ?? key;
+}
+
 const DAY_KEYS = ['preview', 'thu', 'fri', 'sat', 'sun'] as const;
 export type DayKey = typeof DAY_KEYS[number];
 export { DAY_KEYS };

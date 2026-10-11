@@ -132,8 +132,8 @@ export default function Stats() {
         {/* Year-by-year table */}
         <section className="mb-10">
           <h2 className="text-lg font-bold text-gray-900 mb-4">Year by Year</h2>
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+            <table className="w-full text-sm whitespace-nowrap">
               <thead className="text-xs text-gray-500 border-b border-gray-200">
                 <tr>
                   <th className="px-4 py-3 text-left">Year</th>
@@ -181,8 +181,8 @@ export default function Stats() {
         {/* Day popularity heatmap */}
         <section className="mb-10">
           <h2 className="text-lg font-bold text-gray-900 mb-4">Day Popularity</h2>
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+            <table className="w-full text-sm whitespace-nowrap">
               <thead className="text-xs text-gray-500 border-b border-gray-200">
                 <tr>
                   <th className="px-4 py-3 text-left">Year / Type</th>
