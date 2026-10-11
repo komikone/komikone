@@ -1294,27 +1294,21 @@ export default function LiveBoard() {
               const isSelf = identityId != null && p.id === identityId;
               const isMyGroup = !isSelf && me?.group_id != null && p.group_id === me.group_id;
 
+              // Frozen cells must be opaque or scrolled columns show through them, so the
+              // translucent tints are pre-blended over gray-900 (dark) and white (light).
               const frozenBg = isFlashing
-                ? 'bg-blue-100 dark:bg-blue-900/30'
+                ? 'bg-blue-100 dark:bg-[#152245]'
                 : isSelf
-                  ? 'bg-yellow-50 dark:bg-yellow-950/40'
+                  ? 'bg-yellow-50 dark:bg-[#251b1a]'
                   : isMyGroup
-                    ? 'bg-amber-50/80 dark:bg-amber-950/25'
+                    ? 'bg-[#fffcef] dark:bg-[#1e181e]'
                     : evenRow
                       ? 'bg-white dark:bg-gray-900'
-                      : 'bg-gray-50 dark:bg-gray-800/60';
+                      : 'bg-gray-50 dark:bg-[#192231]';
 
-              const rowBg = isFlashing
-                ? 'bg-blue-100 dark:bg-blue-900/30'
-                : isRowDragTarget
-                  ? 'bg-blue-100 dark:bg-blue-900/20'
-                  : isSelf
-                    ? 'bg-yellow-50 dark:bg-yellow-950/40'
-                    : isMyGroup
-                      ? 'bg-amber-50/80 dark:bg-amber-950/25'
-                      : evenRow
-                        ? 'bg-white dark:bg-gray-900'
-                        : 'bg-gray-50 dark:bg-gray-800/60';
+              const rowBg = isRowDragTarget && !isFlashing
+                ? 'bg-blue-100 dark:bg-[#141f3b]'
+                : frozenBg;
 
               return (
                 <tr
