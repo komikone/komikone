@@ -5,6 +5,7 @@ import { api, type Year } from '../lib/api';
 import { AppPage } from '../components/AppPage';
 import { normalizeMemberIdInput } from '../components/MemberId';
 import { ToggleSwitch } from '../components/ToggleSwitch';
+import { forgetPendingInvite, rememberPendingInvite } from '../lib/pendingInvite';
 
 type InviteInfo = {
   invite: { code: string; label: string; year_id: number };
@@ -36,10 +37,14 @@ export default function JoinPage() {
   const [regEvents, setRegEvents] = useState<{ id: number; name: string }[]>([]);
   const [prefilled, setPrefilled] = useState(false);
 
+  // Without the hash, so Clerk's own #/factor-one style steps aren't carried back here.
+  const joinUrl = `${window.location.origin}/join/${code ?? ''}`;
+
   // Step 1: validate the invite code
   useEffect(() => {
     if (!code) return;
     api.invites.get(code).then((info) => {
+      rememberPendingInvite(code);
       setInviteInfo(info);
       setStep(isLoaded && isSignedIn ? 'form' : 'sign-in');
     }).catch((e) => {
@@ -111,10 +116,12 @@ export default function JoinPage() {
         .filter((e) => e.year === conYear && e.status === 'registration')
         .sort((a, b) => Number(b.reg_type === preferred) - Number(a.reg_type === preferred));
       setRegEvents(openRegs.map((e) => ({ id: e.id, name: e.name })));
+      forgetPendingInvite();
       setStep('done');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Registration failed';
       if (msg.toLowerCase().includes('already registered')) {
+        forgetPendingInvite();
         navigate('/dashboard');
         return;
       }
@@ -198,7 +205,11 @@ export default function JoinPage() {
           </p>
         </div>
         <div className="flex justify-center">
-          <SignIn routing="hash" afterSignInUrl={window.location.href} afterSignUpUrl={window.location.href} />
+          <SignIn
+            routing="hash"
+            forceRedirectUrl={joinUrl}
+            signUpForceRedirectUrl={joinUrl}
+          />
         </div>
       </Screen>
     );

@@ -66,6 +66,7 @@ export default function SignIn() {
           <ClerkSignIn
             routing="hash"
             forceRedirectUrl={redirect}
+            signUpForceRedirectUrl={redirect}
             appearance={isDark ? DARK_APPEARANCE : LIGHT_APPEARANCE}
           />
         ) : (

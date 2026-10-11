@@ -4,6 +4,7 @@ import { badgeTypeLabel } from './styles';
 import BackgroundLayer from '../components/BackgroundLayer';
 import { MemberId } from '../components/MemberId';
 import type { EventSummary } from '../lib/api';
+import { pendingInvite } from '../lib/pendingInvite';
 
 const LIVE_BOARD_STATUS: Record<EventSummary['status'], string> = {
   setup: 'Getting ready for purchase day',
@@ -68,9 +69,18 @@ export default function DashboardHome() {
   const { member, primaryView, activeEvent } = useDashboard();
 
   if (!member) {
+    const invite = pendingInvite();
     return (
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-8 text-center max-w-md">
+          {invite && (
+            <Link
+              to={`/join/${invite}`}
+              className="block mb-5 bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2.5 rounded-lg transition-colors"
+            >
+              Finish joining with your invite →
+            </Link>
+          )}
           <p className="text-gray-400">You are not registered for this year yet.</p>
           <p className="text-gray-500 text-sm mt-2">
             Use your invite link to join, or request access from the homepage.
