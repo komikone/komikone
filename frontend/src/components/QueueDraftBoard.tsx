@@ -52,6 +52,8 @@ type QueueActions = {
   onEta: (qid: number, eta_minutes: number | null) => Promise<void>;
   onMove: (qid: number, direction: 'up' | 'down') => Promise<void>;
   onRename: (qid: number, label: string) => Promise<void>;
+  /** Admin-only: wipe the whole line, e.g. places left over from practice. */
+  onClearAll: () => Promise<void>;
 };
 
 /**
@@ -160,7 +162,20 @@ export function BuyerQueuePanel({
           <div className="text-sky-700 dark:text-sky-300 text-[11px] font-black uppercase tracking-widest">
             Queue-It draft board · {active.length}
           </div>
-          <button type="button" onClick={onDismiss} className="text-sky-500 hover:text-sky-800 text-sm px-1.5" aria-label="Close">✕</button>
+          <span className="flex items-center gap-1">
+            {isAdmin && queue.length > 0 && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void run(actions.onClearAll)}
+                className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 hover:underline disabled:opacity-50 px-1"
+                title="Admin: remove every place, e.g. leftovers from practice"
+              >
+                Clear line
+              </button>
+            )}
+            <button type="button" onClick={onDismiss} className="text-sky-500 hover:text-sky-800 text-sm px-1.5" aria-label="Close">✕</button>
+          </span>
         </div>
         <p className="text-sky-900/60 dark:text-sky-200/60 text-[11px] mt-1 leading-snug">
           Each browser waiting in Queue-It is a pick. New places join at the back, then move

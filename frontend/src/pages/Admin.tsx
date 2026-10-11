@@ -526,6 +526,10 @@ export default function Admin() {
                 participants={participants}
                 allEvents={events}
                 onUpdate={() => { if (selectedYear) reloadEventData(activeRegType, events, selectedYear); }}
+                onMembersChanged={() => {
+                  if (activeYear) loadYearExtras(activeYear);
+                  if (selectedYear) reloadEventData(activeRegType, events, selectedYear);
+                }}
               />
             )}
             {tab === 'prices' && (
@@ -895,7 +899,43 @@ function EventCard({
 
 // ─── People Tab (members + event participants) ────────────────────────────────
 
-function AccountMembersTable({ members }: { members: YearMember[] }) {
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+function AccountMembersTable({
+  members, auth, onDeleted,
+}: {
+  members: YearMember[];
+  auth: () => Promise<string>;
+  onDeleted: () => void;
+}) {
+  const [deleting, setDeleting] = useState<number | null>(null);
+
+  const handleDelete = async (m: YearMember) => {
+    const name = `${m.first_name} ${m.last_name}`.trim() || 'this member';
+    setDeleting(m.id);
+    try {
+      const tok = await auth();
+      const preview = await api.admin.members.delete(tok, m.year_id, m.id, true);
+      const removes = [
+        plural(preview.own_rows, 'Live Board row'),
+        plural(preview.queue_places, 'Queue-It place'),
+      ].join(' and ');
+      const keeps = preview.added_rows > 0
+        ? `\n\nThe ${plural(preview.added_rows, 'person', 'people')} they added stay on the board.`
+        : '';
+      if (!window.confirm(
+        `Delete ${name} from this year?\n\nThis removes their membership, ${removes}.${keeps}\n\n`
+        + 'Their login is kept, so a new invite can bring them back.',
+      )) return;
+      await api.admin.members.delete(tok, m.year_id, m.id);
+      onDeleted();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setDeleting(null);
+    }
+  };
+
   if (members.length === 0) {
     return <p className="text-gray-500 text-sm">No account members for this year yet.</p>;
   }
@@ -911,6 +951,7 @@ function AccountMembersTable({ members }: { members: YearMember[] }) {
             <th className="px-3 py-2 text-center">Return</th>
             <th className="px-3 py-2 text-left">Role</th>
             <th className="px-3 py-2 text-left">Joined</th>
+            <th className="px-3 py-2 w-16"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800">
@@ -942,6 +983,18 @@ function AccountMembersTable({ members }: { members: YearMember[] }) {
               <td className="px-3 py-2 text-xs text-gray-400">
                 {new Date(m.joined_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </td>
+              <td className="px-3 py-2 text-right">
+                {m.role !== 'owner' && (
+                  <button
+                    type="button"
+                    disabled={deleting !== null}
+                    onClick={() => handleDelete(m)}
+                    className="text-xs text-red-500 hover:text-red-400 disabled:opacity-50"
+                  >
+                    {deleting === m.id ? '…' : 'Delete'}
+                  </button>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -953,9 +1006,10 @@ function AccountMembersTable({ members }: { members: YearMember[] }) {
 function PeopleTab({
   members,
   event, activeRegType, returnEvent, openEvent, onRegTypeChange,
-  auth, participants, allEvents, onUpdate,
+  auth, participants, allEvents, onUpdate, onMembersChanged,
 }: {
   members: YearMember[];
+  onMembersChanged: () => void;
   event: EventDetail | null;
   activeRegType: 'return' | 'open';
   returnEvent: EventDetail | null;
@@ -1062,7 +1116,7 @@ function PeopleTab({
             Signed-in Komikone users for this year ({members.length})
           </p>
         </div>
-        <AccountMembersTable members={members} />
+        <AccountMembersTable members={members} auth={auth} onDeleted={onMembersChanged} />
       </section>
 
       <section>

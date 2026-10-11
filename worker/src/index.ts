@@ -2545,6 +2545,13 @@ admin.post('/events/:id/participants/copy', async (c) => {
   return json({ ok: true, copied: participants.length });
 });
 
+/** Wipes an event's Queue-It line, e.g. the places people joined while practicing. */
+admin.delete('/events/:id/purchase-queue', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const res = await c.env.DB.prepare('DELETE FROM purchase_queue WHERE event_id = ?').bind(eventId).run();
+  return json({ ok: true, cleared: res.meta.changes ?? 0 });
+});
+
 admin.delete('/events/:id/participants/:pid', async (c) => {
   const eventId = Number(c.req.param('id'));
   const pid = Number(c.req.param('pid'));
@@ -2855,6 +2862,61 @@ admin.get('/years/:yearId/members', async (c) => {
     'SELECT * FROM year_members WHERE year_id = ? ORDER BY joined_at'
   ).bind(yearId).all<YearMember>();
   return json(rows.results);
+});
+
+/**
+ * Removes someone from a year: their membership, their own board rows, and their queue
+ * places. People they added stay on the board, unlinked from them, and groups they owned
+ * are kept without an owner. Their login is untouched so a new invite can bring them back.
+ * `?dry_run=1` reports what would change without changing it.
+ */
+admin.delete('/years/:yearId/members/:memberId', async (c) => {
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  const yearId = Number(c.req.param('yearId'));
+  const memberId = Number(c.req.param('memberId'));
+  const dryRun = c.req.query('dry_run') === '1';
+
+  const member = await c.env.DB.prepare(
+    'SELECT * FROM year_members WHERE id = ? AND year_id = ?'
+  ).bind(memberId, yearId).first<YearMember>();
+  if (!member) return err('Member not found', 404);
+  if (member.role === 'owner') return err("The year's owner can't be deleted", 400);
+  if (access?.userId && access.userId === member.clerk_user_id) return err("You can't delete yourself", 400);
+
+  const uid = member.clerk_user_id;
+  const inYear = 'event_id IN (SELECT id FROM events WHERE year_id = ?)';
+  const counts = await c.env.DB.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM participants WHERE clerk_user_id = ? AND ${inYear}) AS own_rows,
+      (SELECT COUNT(*) FROM purchase_queue WHERE (clerk_user_id = ? OR participant_id IN (
+         SELECT id FROM participants WHERE clerk_user_id = ? AND ${inYear})) AND ${inYear}) AS queue_places,
+      (SELECT COUNT(*) FROM participants WHERE registered_by_clerk_user_id = ?
+         AND (clerk_user_id IS NULL OR clerk_user_id != ?) AND ${inYear}) AS added_rows,
+      (SELECT COUNT(*) FROM groups WHERE owner_clerk_user_id = ? AND ${inYear}) AS owned_groups
+  `).bind(uid, yearId, uid, uid, yearId, yearId, uid, uid, yearId, uid, yearId).first<{
+    own_rows: number; queue_places: number; added_rows: number; owned_groups: number;
+  }>();
+  const summary = {
+    own_rows: counts?.own_rows ?? 0,
+    queue_places: counts?.queue_places ?? 0,
+    added_rows: counts?.added_rows ?? 0,
+    owned_groups: counts?.owned_groups ?? 0,
+  };
+  if (dryRun) return json({ ok: true, dry_run: true, ...summary });
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(`
+      DELETE FROM purchase_queue WHERE (clerk_user_id = ? OR participant_id IN (
+        SELECT id FROM participants WHERE clerk_user_id = ? AND ${inYear})) AND ${inYear}
+    `).bind(uid, uid, yearId, yearId),
+    c.env.DB.prepare(`DELETE FROM participants WHERE clerk_user_id = ? AND ${inYear}`).bind(uid, yearId),
+    c.env.DB.prepare(
+      `UPDATE participants SET registered_by_clerk_user_id = NULL WHERE registered_by_clerk_user_id = ? AND ${inYear}`
+    ).bind(uid, yearId),
+    c.env.DB.prepare(`UPDATE groups SET owner_clerk_user_id = '' WHERE owner_clerk_user_id = ? AND ${inYear}`).bind(uid, yearId),
+    c.env.DB.prepare('DELETE FROM year_members WHERE id = ? AND year_id = ?').bind(memberId, yearId),
+  ]);
+  return json({ ok: true, ...summary });
 });
 
 // ── Admin: Dummy test participants ────────────────────────────────────────────

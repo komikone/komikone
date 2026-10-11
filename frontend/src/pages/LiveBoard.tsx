@@ -792,6 +792,24 @@ export default function LiveBoard() {
     }
   };
 
+  const handleQueueClearAll = async () => {
+    const count = buyerQueue.length;
+    const live = event?.status === 'purchasing' && !simulation;
+    if (!window.confirm(
+      `Clear all ${count} place${count === 1 ? '' : 's'} from the Queue-It line for everyone?`
+      + (live ? '\n\nPurchase day is LIVE. Only do this if these are leftover practice places.' : '')
+      + '\n\nThis can\'t be undone.',
+    )) return;
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    try {
+      await api.admin.purchaseQueue.clear(clerkToken, Number(eventId));
+      await refreshBuyerQueue(await api.purchaseQueue.list(Number(eventId), clerkToken));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to clear the line');
+    }
+  };
+
   const handleQueueLeave = async (qid: number) => {
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
@@ -1412,6 +1430,7 @@ export default function LiveBoard() {
             onEta={handleQueueEta}
             onMove={handleQueueMove}
             onRename={handleQueueRename}
+            onClearAll={handleQueueClearAll}
             onDismiss={() => setShowBuyerQueue(false)}
           />
         )}

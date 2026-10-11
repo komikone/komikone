@@ -73,6 +73,15 @@ export type YearMember = {
   joined_at: string;
 };
 
+export type MemberDeleteSummary = {
+  ok: boolean;
+  dry_run?: boolean;
+  own_rows: number;
+  queue_places: number;
+  added_rows: number;
+  owned_groups: number;
+};
+
 export type Invite = {
   id: number;
   year_id: number;
@@ -631,6 +640,17 @@ export const api = {
     members: {
       list: (authToken: string, yearId: number) =>
         req<YearMember[]>(`/api/admin/years/${yearId}/members`, { headers: authHeaders(undefined, authToken) }),
+      /** With dryRun, reports what would be removed without removing it. */
+      delete: (authToken: string, yearId: number, memberId: number, dryRun = false) =>
+        req<MemberDeleteSummary>(`/api/admin/years/${yearId}/members/${memberId}${dryRun ? '?dry_run=1' : ''}`, {
+          method: 'DELETE', headers: authHeaders(undefined, authToken),
+        }),
+    },
+    purchaseQueue: {
+      clear: (authToken: string, eventId: number) =>
+        req<{ ok: boolean; cleared: number }>(`/api/admin/events/${eventId}/purchase-queue`, {
+          method: 'DELETE', headers: authHeaders(undefined, authToken),
+        }),
     },
     inviteRequests: {
       list: (authToken: string, status?: 'pending' | 'approved' | 'rejected') =>
