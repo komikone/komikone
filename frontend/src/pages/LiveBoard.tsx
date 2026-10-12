@@ -1645,19 +1645,21 @@ function CellContent({
               +
             </button>
           ) : (
-            <span className="w-5" />
+            <span className="w-5" aria-hidden />
           )}
-          {canEditProfile && (
+          {canEditProfile ? (
             <button
               onClick={() => onEditParticipant(p)}
               // Always visible on touch, where there is no hover to reveal it with.
-              className="sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-400"
+              className="w-3.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-400"
               title="Edit participant"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
             </button>
+          ) : (
+            <span className="w-3.5" aria-hidden />
           )}
         </div>
       );
