@@ -504,35 +504,6 @@ export default function LiveBoard() {
     }
   };
 
-  const handleClaim = async (p: Participant) => {
-    const me = participants.find((x) => x.id === identityId);
-    if (!me) { setShowLinkModal(true); return; }
-    const myName = `${me.first_name} ${me.last_name}`;
-    const active = participants.filter((x) => holdsClaimSlot(x, myName, now)).length;
-    if (active >= MAX_ACTIVE_CLAIMS) {
-      alert(`You can only claim ${MAX_ACTIVE_CLAIMS} people at a time (Comic-Con purchase limit). Release someone first.`);
-      return;
-    }
-    const blockers = purchaseBlockers(p, event);
-    if (blockers.length > 0) {
-      alert(`Can't buy for ${p.first_name} yet — ${blockers.map((b) => BLOCKER_LABEL[b].toLowerCase()).join(', ')}.`);
-      return;
-    }
-    if (simulation) {
-      setSimPatches((prev) => setSimPatch(prev, p.id, {
-        purchasing_claimed_by: myName,
-        purchasing_claimed_at: new Date().toISOString(),
-      }));
-      return;
-    }
-    try {
-      const clerkToken = await getToken({ template: 'komikone' });
-      if (!clerkToken) return;
-      await api.participants.claim(Number(eventId), p.id, clerkToken, myName);
-      await fetchAll();
-    } catch (e) { alert(e instanceof Error ? e.message : 'Failed'); }
-  };
-
   /** One tap claims the top of your buy list; whoever someone else grabbed first is reported, not retried. */
   const handleClaimMany = async (picks: Participant[]) => {
     const me = participants.find((x) => x.id === identityId);
@@ -1463,10 +1434,8 @@ export default function LiveBoard() {
                             canEditRequested={!showPurchaseChrome && canEditIdentityRow(p, me, identityId, myClerkId)}
                             canEditProfile={canEditIdentityRow(p, me, identityId, myClerkId)}
                             canTogglePurchase={canEditPurchases(p, myDisplayName, now)}
-                            atClaimLimit={atClaimLimit}
                             blockers={purchaseBlockers(p, event)}
                             now={now}
-                            onClaim={handleClaim}
                             onUnclaim={handleUnclaim}
                             onRequestedToggle={handleRequestedToggle}
                             onPurchaseToggle={handlePurchaseToggle}
@@ -1586,7 +1555,7 @@ function CopyCell({ value, children }: { value: string; children?: React.ReactNo
 
 function CellContent({
   col, p, status, eventStatus, editingRow, setEditingRow, canEditRequested, canEditProfile, canTogglePurchase,
-  atClaimLimit, blockers, now, onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
+  blockers, now, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
   buyListRank, onAddToBuyList, onOpenBuyList,
 }: {
   col: ColKey;
@@ -1599,10 +1568,8 @@ function CellContent({
   canEditRequested: boolean;
   canEditProfile: boolean;
   canTogglePurchase: boolean;
-  atClaimLimit: boolean;
   blockers: PurchaseBlocker[];
   now: number;
-  onClaim: (p: Participant) => void;
   onUnclaim: (p: Participant) => void;
   onRequestedToggle: (p: Participant, day: DayKey, checked: boolean) => void;
   onPurchaseToggle: (p: Participant, day: DayKey, checked: boolean) => void;
@@ -1859,19 +1826,16 @@ function CellContent({
           </div>
         );
       }
-      return (
+      return buyListRank != null ? (
         <button
-          onClick={() => onClaim(p)}
-          disabled={atClaimLimit}
-          title={atClaimLimit ? `Limit ${MAX_ACTIVE_CLAIMS} claims — release someone first` : undefined}
-          className={`text-xs font-bold px-3 py-1 rounded transition-colors border-2 ${
-            atClaimLimit
-              ? 'bg-gray-300 text-gray-500 border-gray-400 cursor-not-allowed dark:bg-zinc-700 dark:text-zinc-400 dark:border-zinc-600'
-              : 'bg-red-600 hover:bg-red-700 text-white border-black dark:bg-yellow-500 dark:hover:bg-yellow-400 dark:text-yellow-950 dark:border-transparent'
-          }`}
+          type="button"
+          onClick={onOpenBuyList}
+          className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 hover:underline"
         >
-          Claim
+          On your list
         </button>
+      ) : (
+        <span className="text-xs text-gray-400 dark:text-gray-500">Available</span>
       );
 
     case 'total':
