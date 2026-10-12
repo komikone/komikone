@@ -86,9 +86,17 @@ export function BuyListPanel({
         .filter((p) => fullName(p).toLowerCase().includes(q) || p.member_id.toLowerCase().includes(q))
         .slice(0, 8)
     : [];
-  const quickAddLeft = quickAdd.filter((p) => !onList.has(p.id) && canAddToBuyList(p, event));
-  const quickAddIds = new Set(quickAddLeft.map((p) => p.id));
-  const suggestions = suggested.filter((p) => !onList.has(p.id) && !quickAddIds.has(p.id));
+  const quickAddable = quickAdd.filter((p) => !onList.has(p.id) && canAddToBuyList(p, event));
+  const quickAddIds = new Set(quickAddable.map((p) => p.id));
+  const buyableNow = new Set(suggested.map((p) => p.id));
+  // Empty spots fill from your group, then people you manage, then everyone by hardest days.
+  const spotIdeas = [
+    ...quickAddable.filter((p) => buyableNow.has(p.id)),
+    ...suggested.filter((p) => !onList.has(p.id) && !quickAddIds.has(p.id)),
+  ];
+  const inSpots = new Set(spotIdeas.slice(0, emptySpots).map((p) => p.id));
+  const quickAddLeft = quickAddable.filter((p) => !inSpots.has(p.id));
+  const suggestions = spotIdeas.slice(emptySpots).filter((p) => !quickAddIds.has(p.id));
 
   const add = (p: Participant) => { onChange([...savedIds, p.id]); setSearch(''); };
   const remove = (id: number) => onChange(savedIds.filter((x) => x !== id));
@@ -198,13 +206,13 @@ export function BuyListPanel({
 
         <section>
           <SectionLabel>Your list{savedIds.length > 0 ? ` · ${savedIds.length}` : ''}</SectionLabel>
-          {ranked.length === 0 && quickAddLeft.length > 0 && (
+          {ranked.length === 0 && quickAddable.length > 0 && (
             <button
               type="button"
-              onClick={() => onChange(quickAddLeft.map((p) => p.id))}
+              onClick={() => onChange(quickAddable.map((p) => p.id))}
               className="mb-1.5 w-full text-xs font-bold px-3 py-2 rounded bg-yellow-400 hover:bg-yellow-300 text-black"
             >
-              Start with {quickAddLeft.length === 1 ? fullName(quickAddLeft[0]) : `me + ${quickAddLeft.length - 1} from my group`}
+              Start with {quickAddable.length === 1 ? fullName(quickAddable[0]) : `me + ${quickAddable.length - 1} from my group`}
             </button>
           )}
           <ol className="space-y-1">
@@ -255,7 +263,7 @@ export function BuyListPanel({
               );
             })}
             {Array.from({ length: emptySpots }, (_, i) => {
-              const idea = suggestions[i];
+              const idea = spotIdeas[i];
               return (
                 <li key={`empty-${i}`} className="rounded-md border-2 border-dashed border-yellow-300 dark:border-gray-600 px-2 py-1.5 flex items-center gap-2 min-h-[2.75rem]">
                   {idea ? (
@@ -311,11 +319,11 @@ export function BuyListPanel({
           </ul>
         </section>
 
-        {!q && suggestions.length > emptySpots && (
+        {!q && suggestions.length > 0 && (
           <section className="pt-2 border-t border-yellow-200 dark:border-gray-700">
             <SectionLabel>More suggestions · hardest days first</SectionLabel>
             <ul className="space-y-1">
-              {suggestions.slice(emptySpots, emptySpots + 5).map((p) => (
+              {suggestions.slice(0, 5).map((p) => (
                 <li key={p.id} className="flex items-center gap-2 rounded-md border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-800/40 px-2 py-1.5">
                   <span className="flex-1 min-w-0">
                     <span className="block font-semibold text-xs text-gray-900 dark:text-white truncate">{fullName(p)}</span>

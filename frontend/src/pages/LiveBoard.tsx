@@ -807,7 +807,10 @@ export default function LiveBoard() {
         .filter((p) => p.id !== me.id && (
           (me.group_id != null && p.group_id === me.group_id) || canEditIdentityRow(p, me, identityId, myClerkId)
         ))
-        .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)]
+        .sort((a, b) => {
+          const inGroup = (x: Participant) => (me.group_id != null && x.group_id === me.group_id ? 0 : 1);
+          return inGroup(a) - inGroup(b) || byDefaultPriority(a, b);
+        })]
     : [];
 
   const openWhosNext = () => { setShowBuyerQueue(false); setShowNextUp(true); };
@@ -1524,7 +1527,12 @@ export default function LiveBoard() {
             myDisplayName={myDisplayName}
             quickAdd={buyListQuickAdd}
             suggested={suggestedOffList}
-            reasonFor={(p) => priorityReason(p, me, identityId)}
+            reasonFor={(p) => {
+              const reason = priorityReason(p, me, identityId);
+              const managed = p.id !== identityId && !reason.startsWith('Same group')
+                && buyListQuickAdd.some((x) => x.id === p.id);
+              return managed ? `You manage them · ${reason}` : reason;
+            }}
             purchasing={showPurchaseChrome}
             now={now}
             onChange={(ids) => void saveBuyList(ids)}
