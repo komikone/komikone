@@ -10,6 +10,7 @@ import {
   rankMovement,
 } from '../lib/queueBoard';
 import { BuyerQueuePanel, SoldOutBar } from '../components/QueueDraftBoard';
+import { BuyListPanel } from '../components/BuyListPanel';
 import { HeaderUserMenu } from '../components/HeaderUserMenu';
 import { useTheme } from '../lib/useTheme';
 import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
@@ -138,14 +139,6 @@ const DAY_DIFFICULTY: Record<string, number> = {
   Sat: 8, Fri: 4, Thu: 2, Sun: 2, Preview: 2,
 };
 
-const DAY_CHIP_COLOR: Record<string, string> = {
-  Sat:     'bg-red-600 text-white',
-  Fri:     'bg-orange-500 text-white',
-  Thu:     'bg-blue-500 text-white',
-  Sun:     'bg-blue-500 text-white',
-  Preview: 'bg-purple-600 text-white',
-};
-
 function priorityScore(p: Participant, me: Participant | null, identityId: number | null): number {
   const isSelf    = p.id === identityId;
   const isGroup   = !isSelf && me?.group_id != null && p.group_id === me.group_id;
@@ -235,6 +228,8 @@ export default function LiveBoard() {
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [identityId, setIdentityId] = useState<number | null>(null);
+  /** Your own ranked participant ids for Who's next. */
+  const [buyList, setBuyList] = useState<number[]>([]);
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editParticipant, setEditParticipant] = useState<Participant | null>(null);
@@ -480,7 +475,32 @@ export default function LiveBoard() {
     return () => { cancelled = true; };
   }, [eventId, isSignedIn, isPlatformAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!eventId || !isSignedIn) return;
+    let cancelled = false;
+    getToken({ template: 'komikone' }).then(async (clerkToken) => {
+      if (!clerkToken) return;
+      const res = await api.buyList.get(Number(eventId), clerkToken).catch(() => null);
+      if (res && !cancelled) setBuyList(res.participant_ids);
+    });
+    return () => { cancelled = true; };
+  }, [eventId, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Actions ────────────────────────────────────────────────────────────────
+
+  const saveBuyList = async (ids: number[]) => {
+    const previous = buyList;
+    setBuyList(ids);
+    try {
+      const clerkToken = await getToken({ template: 'komikone' });
+      if (!clerkToken) throw new Error('Signed out — sign in again to save your list');
+      const res = await api.buyList.save(Number(eventId), clerkToken, ids);
+      setBuyList(res.participant_ids);
+    } catch (e) {
+      setBuyList(previous);
+      alert(e instanceof Error ? e.message : 'Could not save your buy list');
+    }
+  };
 
   const handleClaim = async (p: Participant) => {
     const me = participants.find((x) => x.id === identityId);
@@ -738,14 +758,29 @@ export default function LiveBoard() {
 
   const [showNextUp, setShowNextUp] = useState(false);
 
-  // Only offer people who can actually be bought for right now.
-  const priorityQueue = participants
-    .filter((p) => isClaimable(p, event) && !isClaimLive(p, now))
-    .sort((a, b) => {
-      const diff = priorityScore(b, me, identityId) - priorityScore(a, me, identityId);
-      return diff !== 0 ? diff : a.sort_order - b.sort_order;
-    })
-    .slice(0, 10);
+  const byDefaultPriority = (a: Participant, b: Participant) => {
+    const diff = priorityScore(b, me, identityId) - priorityScore(a, me, identityId);
+    return diff !== 0 ? diff : a.sort_order - b.sort_order;
+  };
+  const listRank = new Map(buyList.map((id, i) => [id, i]));
+  const buyable = participants.filter((p) => isClaimable(p, event) && !isClaimLive(p, now));
+  // Your own buy list comes first, in your order; everyone else follows by default priority.
+  const priorityQueue = [
+    ...buyable.filter((p) => listRank.has(p.id)).sort((a, b) => listRank.get(a.id)! - listRank.get(b.id)!),
+    ...buyable.filter((p) => !listRank.has(p.id)).sort(byDefaultPriority),
+  ];
+  const suggestedOffList = priorityQueue.filter((p) => !listRank.has(p.id));
+  const buyListQuickAdd = me
+    ? [me, ...participants
+        .filter((p) => p.id !== me.id && (
+          (me.group_id != null && p.group_id === me.group_id) || canEditIdentityRow(p, me, identityId, myClerkId)
+        ))
+        .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)]
+    : [];
+
+  const openWhosNext = () => { setShowBuyerQueue(false); setShowNextUp(true); };
+  const toggleWhosNext = () => { setShowBuyerQueue(false); setShowNextUp((v) => !v); };
+  const toggleBuyerQueue = () => { setShowNextUp(false); setShowBuyerQueue((v) => !v); };
 
   const allCols = [...FROZEN, ...movableCols];
 
@@ -1062,7 +1097,7 @@ export default function LiveBoard() {
           {showPurchaseChrome && (
             <button
               type="button"
-              onClick={() => setShowBuyerQueue((v) => !v)}
+              onClick={toggleBuyerQueue}
               className={`text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
                 showBuyerQueue
                   ? 'bg-sky-400 text-black border-sky-200'
@@ -1072,9 +1107,10 @@ export default function LiveBoard() {
               Queue-It line{buyerQueue.length > 0 ? ` · ${activeQueue(buyerQueue).length}` : ''}
             </button>
           )}
-          {showPurchaseChrome && priorityQueue.length > 0 && (
+          {me && (showPurchaseChrome ? (
             <button
-              onClick={() => setShowNextUp((v) => !v)}
+              type="button"
+              onClick={toggleWhosNext}
               className={`text-sm font-black uppercase tracking-wide px-4 py-1.5 rounded-md border-2 transition-colors ${
                 showNextUp
                   ? 'bg-yellow-300 text-black border-yellow-100 shadow-lg shadow-yellow-400/40'
@@ -1083,7 +1119,20 @@ export default function LiveBoard() {
             >
               ⚡ Who&apos;s next?
             </button>
-          )}
+          ) : (
+            <button
+              type="button"
+              onClick={toggleWhosNext}
+              className={`text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
+                showNextUp
+                  ? 'bg-yellow-400 text-black border-yellow-200'
+                  : 'text-yellow-300 border-yellow-700 hover:border-yellow-400 hover:text-yellow-200'
+              }`}
+              title="Rank who you want to buy for on purchase day"
+            >
+              ★ My buy list{buyList.length > 0 ? ` · ${buyList.length}` : ''}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -1093,21 +1142,6 @@ export default function LiveBoard() {
           // Practice mode promises nothing is saved, and this writes to the real event.
           canEdit={!simulation && (identityId != null || isPlatformAdmin)}
           onToggle={handleSoldOut}
-        />
-      )}
-
-      {/* ── Who's Next panel (purchasing phase or simulation) ── */}
-      {showPurchaseChrome && showNextUp && priorityQueue.length > 0 && (
-        <NextUpPanel
-          queue={priorityQueue}
-          participants={participants}
-          me={me}
-          identityId={identityId}
-          myDisplayName={myDisplayName}
-          claimSlotsLeft={Math.max(0, MAX_ACTIVE_CLAIMS - myClaimCount)}
-          now={now}
-          onClaim={handleClaim}
-          onDismiss={() => setShowNextUp(false)}
         />
       )}
 
@@ -1427,7 +1461,7 @@ export default function LiveBoard() {
             isAdmin={isPlatformAdmin}
             identityLinked={identityId != null}
             buyFor={priorityQueue.slice(0, MAX_ACTIVE_CLAIMS)}
-            onOpenWhosNext={() => setShowNextUp(true)}
+            onOpenWhosNext={openWhosNext}
             onJoin={handleQueueJoin}
             onLeave={handleQueueLeave}
             onStatus={handleQueueStatus}
@@ -1436,6 +1470,26 @@ export default function LiveBoard() {
             onRename={handleQueueRename}
             onClearAll={handleQueueClearAll}
             onDismiss={() => setShowBuyerQueue(false)}
+          />
+        )}
+
+        {showNextUp && me && (
+          <BuyListPanel
+            event={event}
+            participants={participants}
+            list={buyList}
+            identityId={identityId}
+            myDisplayName={myDisplayName}
+            quickAdd={buyListQuickAdd}
+            suggested={suggestedOffList}
+            reasonFor={(p) => priorityReason(p, me, identityId)}
+            purchasing={showPurchaseChrome}
+            claimSlotsLeft={Math.max(0, MAX_ACTIVE_CLAIMS - myClaimCount)}
+            now={now}
+            onChange={(ids) => void saveBuyList(ids)}
+            onClaim={handleClaim}
+            onRelease={handleUnclaim}
+            onDismiss={() => setShowNextUp(false)}
           />
         )}
       </div>
@@ -1943,7 +1997,7 @@ function EditParticipantModal({
   );
 }
 
-// ─── NextUpPanel ─────────────────────────────────────────────────────────────
+// ─── Who's next ───────────────────────────────────────────────────────────
 
 function priorityReason(p: Participant, me: Participant | null, identityId: number | null): string {
   if (p.id === identityId) return "It's you!";
@@ -1956,130 +2010,6 @@ function priorityReason(p: Participant, me: Participant | null, identityId: numb
   if (hardest === 'Fri') return 'Needs Friday — high demand';
   if (p.gaps.length >= 3) return `${p.gaps.length} days still needed`;
   return `${p.gaps.length} gap${p.gaps.length !== 1 ? 's' : ''} remaining`;
-}
-
-function NextUpPanel({
-  queue, participants, me, identityId, myDisplayName, claimSlotsLeft, now, onClaim, onDismiss,
-}: {
-  queue: Participant[];
-  participants: Participant[];
-  me: Participant | null;
-  identityId: number | null;
-  myDisplayName: string;
-  claimSlotsLeft: number;
-  now: number;
-  onClaim: (p: Participant) => Promise<void>;
-  onDismiss: () => void;
-}) {
-  const [justClaimed, setJustClaimed] = useState<number[]>([]);
-
-  // Cards you just claimed stay for confirmation until they're done or released;
-  // everything else comes from the live queue so finished people never linger.
-  const heldCards = justClaimed
-    .map((id) => participants.find((p) => p.id === id))
-    .filter((p): p is Participant => !!p && holdsClaimSlot(p, myDisplayName, now));
-  const heldIds = new Set(heldCards.map((p) => p.id));
-  const slots = [...heldCards, ...queue.filter((p) => !heldIds.has(p.id))]
-    .slice(0, MAX_ACTIVE_CLAIMS);
-
-  if (slots.length === 0) return null;
-
-  const handleClaim = async (p: Participant) => {
-    await onClaim(p);
-    setJustClaimed((prev) => (prev.includes(p.id) ? prev : [...prev, p.id]));
-  };
-
-  return (
-    <div className="bg-white dark:bg-gray-900 border-b-4 border-yellow-400 px-4 py-3 shrink-0">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-yellow-400 text-[10px] font-bold uppercase tracking-widest">
-          Buy for next — {claimSlotsLeft}/{MAX_ACTIVE_CLAIMS} claim slots left
-        </span>
-        <button onClick={onDismiss} className="text-zinc-500 hover:text-gray-700 text-xs px-1">✕</button>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-        {slots.map((p) => {
-          const claimed = heldIds.has(p.id);
-          return (
-            <NextUpCard
-              key={p.id}
-              p={p}
-              me={me}
-              identityId={identityId}
-              claimed={claimed}
-              canClaim={!claimed && claimSlotsLeft > 0}
-              onClaim={handleClaim}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function NextUpCard({
-  p, me, identityId, claimed, canClaim, onClaim,
-}: {
-  p: Participant;
-  me: Participant | null;
-  identityId: number | null;
-  claimed: boolean;
-  canClaim: boolean;
-  onClaim: (p: Participant) => Promise<void>;
-}) {
-  const [claiming, setClaiming] = useState(false);
-  const isSelf = p.id === identityId;
-  const isGroup = !isSelf && me?.group_id != null && p.group_id === me.group_id;
-  const reason = priorityReason(p, me, identityId);
-
-  return (
-    <div className={`border rounded-lg px-3 py-2.5 flex flex-col gap-2 transition-colors ${claimed ? 'bg-green-950/40 border-green-700' : 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600'}`}>
-      <div className="flex items-start gap-2">
-        <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center border ${claimed ? 'bg-green-600 border-green-400' : 'bg-yellow-400 border-yellow-300'}`}>
-          <span className="font-bangers text-black text-sm leading-none">
-            {p.first_name[0]}{p.last_name[0]}
-          </span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="font-bangers text-gray-900 dark:text-white text-base tracking-wide leading-tight">
-              {p.first_name} {p.last_name}
-            </span>
-            {(isSelf || isGroup) && (
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${isSelf ? 'bg-yellow-400 text-black' : 'bg-blue-600 text-white'}`}>
-                {isSelf ? 'YOU' : p.group_name ?? 'Group'}
-              </span>
-            )}
-          </div>
-          <div className="text-gray-600 text-[10px] mt-0.5 leading-tight">{reason}</div>
-        </div>
-      </div>
-      <div className="flex gap-1 flex-wrap">
-        {p.gaps.map((day) => (
-          <span
-            key={day}
-            className={`text-[10px] font-bold px-1.5 py-0.5 rounded border border-black/20 ${DAY_CHIP_COLOR[day] ?? 'bg-zinc-600 text-white'}`}
-          >
-            {day}
-          </span>
-        ))}
-      </div>
-      {claimed ? (
-        <div className="mt-auto text-xs font-bold py-1.5 rounded bg-green-700 text-green-200 text-center w-full">
-          ✓ Claimed
-        </div>
-      ) : (
-        <button
-          onClick={async () => { setClaiming(true); await onClaim(p); setClaiming(false); }}
-          disabled={claiming || !canClaim}
-          title={!canClaim ? `Limit ${MAX_ACTIVE_CLAIMS} claims — release someone first` : undefined}
-          className="mt-auto text-xs font-bold py-1.5 rounded bg-yellow-400 hover:bg-yellow-300 text-black border border-yellow-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full"
-        >
-          {claiming ? 'Claiming…' : !canClaim ? 'Limit reached' : 'Claim'}
-        </button>
-      )}
-    </div>
-  );
 }
 
 function WhoInput({ initial, onSave, onCancel }: { initial: string; onSave: (v: string) => void; onCancel: () => void }) {

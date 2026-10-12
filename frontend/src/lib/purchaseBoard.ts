@@ -2,6 +2,15 @@ import type { EventDetail, Participant, SaleDay } from './api';
 
 /** Comic-Con lets you buy badges for at most 3 people per purchase session. */
 export const MAX_ACTIVE_CLAIMS = 3;
+
+/** Keyed by the short labels in Participant.gaps. */
+export const DAY_CHIP_COLOR: Record<string, string> = {
+  Sat:     'bg-red-600 text-white',
+  Fri:     'bg-orange-500 text-white',
+  Thu:     'bg-blue-500 text-white',
+  Sun:     'bg-blue-500 text-white',
+  Preview: 'bg-purple-600 text-white',
+};
 /** Soft claim lock — matches worker CLAIM_TIMEOUT_MINUTES. */
 export const CLAIM_TIMEOUT_MINUTES = 10;
 export const CLAIM_TIMEOUT_MS = CLAIM_TIMEOUT_MINUTES * 60 * 1000;

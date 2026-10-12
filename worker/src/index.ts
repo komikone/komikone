@@ -913,6 +913,55 @@ app.post('/api/events/:id/purchase-queue/join', async (c) => {
   return json(await listPurchaseQueue(c.env.DB, eventId));
 });
 
+// ── Buy list: each member's own order of who to buy for ──────────────────────
+
+const MAX_BUY_LIST = 50;
+
+async function getBuyList(db: D1Database, eventId: number, userId: string): Promise<number[]> {
+  const rows = await db.prepare(
+    'SELECT participant_id FROM buy_list_entries WHERE event_id = ? AND clerk_user_id = ? ORDER BY rank ASC'
+  ).bind(eventId, userId).all<{ participant_id: number }>();
+  return (rows.results ?? []).map((r) => r.participant_id);
+}
+
+app.get('/api/events/:id/buy-list', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+  if (access.userId === 'admin') return json({ participant_ids: [] });
+  return json({ participant_ids: await getBuyList(c.env.DB, eventId, access.userId) });
+});
+
+app.put('/api/events/:id/buy-list', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+  if (access.userId === 'admin') return err('Save a buy list as a signed-in member', 400);
+
+  const event = await getEvent(c.env.DB, eventId);
+  if (!event) return err('Event not found', 404);
+
+  const body = await c.req.json<{ participant_ids?: unknown }>().catch(() => ({} as { participant_ids?: unknown }));
+  if (!Array.isArray(body.participant_ids)) return err('participant_ids must be an array', 400);
+  const ids = [...new Set(body.participant_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (ids.length > MAX_BUY_LIST) return err(`A buy list holds at most ${MAX_BUY_LIST} people`, 400);
+
+  if (ids.length > 0) {
+    const found = await c.env.DB.prepare(
+      `SELECT id FROM participants WHERE event_id = ? AND id IN (${ids.map(() => '?').join(',')})`
+    ).bind(eventId, ...ids).all<{ id: number }>();
+    if ((found.results ?? []).length !== ids.length) return err('Everyone on a buy list must be on this event', 400);
+  }
+
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM buy_list_entries WHERE event_id = ? AND clerk_user_id = ?').bind(eventId, access.userId),
+    ...ids.map((pid, i) => c.env.DB.prepare(
+      'INSERT INTO buy_list_entries (event_id, clerk_user_id, participant_id, rank) VALUES (?, ?, ?, ?)'
+    ).bind(eventId, access.userId, pid, i + 1)),
+  ]);
+  return json({ participant_ids: ids });
+});
+
 // Must be registered before /:qid so "me" is not captured as an id.
 app.delete('/api/events/:id/purchase-queue/me', async (c) => {
   const eventId = Number(c.req.param('id'));
@@ -2299,13 +2348,14 @@ admin.delete('/events/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const res = await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM purchase_queue WHERE event_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM buy_list_entries WHERE event_id = ?').bind(id),
     c.env.DB.prepare('DELETE FROM participants WHERE event_id = ?').bind(id),
     c.env.DB.prepare('DELETE FROM groups WHERE event_id = ?').bind(id),
     c.env.DB.prepare('DELETE FROM coordinators WHERE event_id = ?').bind(id),
     c.env.DB.prepare('DELETE FROM events WHERE id = ?').bind(id),
   ]);
-  if ((res[4].meta.changes ?? 0) === 0) return err('Event not found', 404);
-  return json({ ok: true, participants_deleted: res[1].meta.changes ?? 0 });
+  if ((res[5].meta.changes ?? 0) === 0) return err('Event not found', 404);
+  return json({ ok: true, participants_deleted: res[2].meta.changes ?? 0 });
 });
 
 admin.post('/events/:id/participants', async (c) => {
@@ -2922,6 +2972,10 @@ admin.delete('/years/:yearId/members/:memberId', async (c) => {
   await c.env.DB.batch([
     c.env.DB.prepare(`
       DELETE FROM purchase_queue WHERE (clerk_user_id = ? OR participant_id IN (
+        SELECT id FROM participants WHERE clerk_user_id = ? AND ${inYear})) AND ${inYear}
+    `).bind(uid, uid, yearId, yearId),
+    c.env.DB.prepare(`
+      DELETE FROM buy_list_entries WHERE (clerk_user_id = ? OR participant_id IN (
         SELECT id FROM participants WHERE clerk_user_id = ? AND ${inYear})) AND ${inYear}
     `).bind(uid, uid, yearId, yearId),
     c.env.DB.prepare(`DELETE FROM participants WHERE clerk_user_id = ? AND ${inYear}`).bind(uid, yearId),

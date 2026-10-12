@@ -396,6 +396,15 @@ export const api = {
       }),
   },
 
+  buyList: {
+    get: (eventId: number, clerkToken: string) =>
+      req<{ participant_ids: number[] }>(`/api/events/${eventId}/buy-list`, { headers: authHeaders(clerkToken) }),
+    save: (eventId: number, clerkToken: string, participantIds: number[]) =>
+      req<{ participant_ids: number[] }>(`/api/events/${eventId}/buy-list`, {
+        method: 'PUT', headers: authHeaders(clerkToken), body: JSON.stringify({ participant_ids: participantIds }),
+      }),
+  },
+
   profile: {
     get: (clerkToken: string) =>
       req<Profile>('/api/profile', { headers: authHeaders(clerkToken) }),
