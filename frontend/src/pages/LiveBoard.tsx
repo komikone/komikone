@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth, useUser } from '@clerk/clerk-react';
 import { api, type EventDetail, type Participant, type PurchaseQueueEntry, type PurchaseQueueStatus, type SaleDay, formatDollars, DAY_KEYS, type DayKey } from '../lib/api';
+import { DayPicker, type DayFlags } from '../components/DayPicker';
 import {
   QUEUE_MOVE_SHOW_MS,
   activeQueue,
@@ -827,7 +828,7 @@ export default function LiveBoard() {
     }
   };
 
-  const handleEditSave = async (data: Partial<Participant>) => {
+  const handleEditSave = async (data: Partial<Participant>, days: DayFlags | null) => {
     if (!editParticipant) return;
     const meRow = participants.find((x) => x.id === identityId) ?? null;
     if (!canEditIdentityRow(editParticipant, meRow, identityId, user?.id)) {
@@ -837,8 +838,12 @@ export default function LiveBoard() {
     }
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
-    await api.participants.updateProfile(Number(eventId), editParticipant.id, clerkToken, data)
-      .catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
+    try {
+      await api.participants.updateProfile(Number(eventId), editParticipant.id, clerkToken, data);
+      if (days) await api.participants.updateRequested(Number(eventId), editParticipant.id, clerkToken, days);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
     setEditParticipant(null);
     await fetchAll();
   };
@@ -1297,6 +1302,7 @@ export default function LiveBoard() {
           {editParticipant && (
             <EditParticipantModal
               participant={editParticipant}
+              daysLocked={simulation || event?.status === 'purchasing'}
               onSave={handleEditSave}
               onClose={() => setEditParticipant(null)}
             />
@@ -1974,12 +1980,19 @@ function LinkIdentityModal({
 }
 
 function EditParticipantModal({
-  participant, onSave, onClose,
+  participant, daysLocked, onSave, onClose,
 }: {
   participant: Participant;
-  onSave: (data: Partial<Participant>) => Promise<void>;
+  daysLocked: boolean;
+  onSave: (data: Partial<Participant>, days: DayFlags | null) => Promise<void>;
   onClose: () => void;
 }) {
+  const initialDays: DayFlags = {
+    req_preview: participant.req_preview, req_thu: participant.req_thu, req_fri: participant.req_fri,
+    req_sat: participant.req_sat, req_sun: participant.req_sun,
+  };
+  const [days, setDays] = useState<DayFlags>(initialDays);
+  const daysChanged = DAY_KEYS.some((d) => !!days[`req_${d}`] !== !!initialDays[`req_${d}`]);
   const [form, setForm] = useState({
     first_name: participant.first_name,
     last_name: participant.last_name,
@@ -1993,7 +2006,7 @@ function EditParticipantModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    await onSave(form);
+    await onSave(form, daysChanged && !daysLocked ? days : null);
     setSaving(false);
   };
 
@@ -2042,6 +2055,15 @@ function EditParticipantModal({
             onChange={(v) => setForm((f) => ({ ...f, return_eligible: v }))}
             label="Return eligible"
           />
+          <div>
+            <label className="text-gray-400 text-xs">Badge Days</label>
+            <div className="mt-1.5">
+              <DayPicker value={days} onChange={setDays} disabled={daysLocked} />
+            </div>
+            {daysLocked && (
+              <p className="text-gray-500 text-xs mt-1.5">Days are locked while purchasing is underway.</p>
+            )}
+          </div>
           {field('Notes', 'notes')}
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-1.5 text-sm text-gray-400 hover:text-gray-900 dark:hover:text-white">

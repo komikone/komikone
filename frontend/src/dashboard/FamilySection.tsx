@@ -6,8 +6,7 @@ import type { GroupView } from './DashboardContext';
 import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 import { selectedDays } from './participantDays';
-
-type DayFlags = Partial<Record<`req_${(typeof DAY_KEYS)[number]}`, boolean>>;
+import { DayPicker, type DayFlags } from '../components/DayPicker';
 
 type ParticipantFormData = {
   first_name: string;
@@ -25,61 +24,6 @@ const daysFrom = (p: { [k: string]: unknown }): DayFlags =>
   Object.fromEntries(DAY_KEYS.map((d) => [`req_${d}`, !!p[`req_${d}`]])) as DayFlags;
 
 const hasAnyDay = (f: DayFlags) => DAY_KEYS.some((d) => f[`req_${d}`]);
-
-const MAIN_DAYS = ['thu', 'fri', 'sat', 'sun'] as const;
-
-/** Shared day checkbox row — the family add/edit forms previously had no way to set days at all. */
-function DayPicker({
-  value, onChange, disabled,
-}: {
-  value: DayFlags;
-  onChange: (next: DayFlags) => void;
-  disabled?: boolean;
-}) {
-  const allMainDays = MAIN_DAYS.every((d) => value[`req_${d}`]);
-
-  /**
-   * Comic-Con will not sell Preview Night on its own, so the box stays locked until all
-   * four main days are picked, and dropping one of those takes Preview back off rather
-   * than leaving a combination the server would reject on save.
-   */
-  const toggle = (day: string, checked: boolean): DayFlags => {
-    const next = { ...value, [`req_${day}`]: checked };
-    if (day !== 'preview' && !checked) next.req_preview = false;
-    return next;
-  };
-
-  return (
-    <>
-      <div className="flex flex-wrap gap-x-4 gap-y-2">
-        {DAY_KEYS.map((day) => {
-          const locked = disabled || (day === 'preview' && !allMainDays);
-          return (
-            <label
-              key={day}
-              className={`flex items-center gap-2 select-none text-sm ${locked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-              title={day === 'preview' && !allMainDays ? 'Requires Thu, Fri, Sat and Sun' : undefined}
-            >
-              <input
-                type="checkbox"
-                disabled={locked}
-                checked={!!value[`req_${day}`]}
-                onChange={(e) => onChange(toggle(day, e.target.checked))}
-                className="w-4 h-4 rounded border-gray-300 bg-gray-100 accent-blue-500"
-              />
-              <span className="text-gray-700 dark:text-gray-300">{dayLabel(day)}</span>
-            </label>
-          );
-        })}
-      </div>
-      {!allMainDays && (
-        <p className="text-gray-500 text-xs mt-1.5">
-          Preview Night is only sold with all four main days.
-        </p>
-      )}
-    </>
-  );
-}
 
 export function FamilySection({
   view,
