@@ -22,6 +22,7 @@ import {
   type PurchaseBlocker,
   type SimPatches,
   applySimPatches,
+  canAddToBuyList,
   claimRemainingMs,
   formatClaimCountdown,
   hasRequestedDays,
@@ -52,7 +53,7 @@ type SortDir = 'asc' | 'desc';
 // ─── Column config ────────────────────────────────────────────────────────────
 
 const FROZEN: ColKey[] = ['actions', 'idx', 'first', 'last'];
-const FROZEN_PX: Record<string, number> = { actions: 28, idx: 36, first: 90, last: 96 };
+const FROZEN_PX: Record<string, number> = { actions: 52, idx: 36, first: 90, last: 96 };
 const FROZEN_LEFT: Record<string, number> = {
   actions: 0,
   idx: FROZEN_PX.actions,
@@ -529,6 +530,36 @@ export default function LiveBoard() {
       await api.participants.claim(Number(eventId), p.id, clerkToken, myName);
       await fetchAll();
     } catch (e) { alert(e instanceof Error ? e.message : 'Failed'); }
+  };
+
+  /** One tap claims the top of your buy list; whoever someone else grabbed first is reported, not retried. */
+  const handleClaimMany = async (picks: Participant[]) => {
+    const me = participants.find((x) => x.id === identityId);
+    if (!me) { setShowLinkModal(true); return; }
+    const myName = `${me.first_name} ${me.last_name}`;
+    const room = MAX_ACTIVE_CLAIMS - participants.filter((x) => holdsClaimSlot(x, myName, now)).length;
+    const batch = picks.filter((p) => purchaseBlockers(p, event).length === 0).slice(0, Math.max(0, room));
+    if (batch.length === 0) return;
+    if (simulation) {
+      const at = new Date().toISOString();
+      setSimPatches((prev) => batch.reduce(
+        (acc, p) => setSimPatch(acc, p.id, { purchasing_claimed_by: myName, purchasing_claimed_at: at }),
+        prev,
+      ));
+      return;
+    }
+    const clerkToken = await getToken({ template: 'komikone' });
+    if (!clerkToken) return;
+    const missed: string[] = [];
+    for (const p of batch) {
+      try {
+        await api.participants.claim(Number(eventId), p.id, clerkToken, myName);
+      } catch (e) {
+        missed.push(`${p.first_name} ${p.last_name}: ${e instanceof Error ? e.message : 'failed'}`);
+      }
+    }
+    await fetchAll();
+    if (missed.length > 0) alert(`Couldn't claim everyone:\n${missed.join('\n')}`);
   };
 
   const handleUnclaim = async (p: Participant) => {
@@ -1302,7 +1333,8 @@ export default function LiveBoard() {
                       : { position: 'sticky', top: 0, zIndex: 15, width: w, minWidth: w }
                     }
                     className={[
-                      'px-3 py-2 text-left text-xs uppercase tracking-wide select-none align-top',
+                      col === 'actions' ? 'px-1' : 'px-3',
+                      'py-2 text-left text-xs uppercase tracking-wide select-none align-top',
                       'bg-gray-50 dark:bg-gray-800 text-yellow-500/70 dark:text-yellow-400/60',
                       'border-b-2 border-yellow-900 dark:border-gray-300',
                       isSorted ? 'text-yellow-400 dark:text-yellow-300' : 'hover:text-gray-900 dark:hover:text-yellow-200 cursor-pointer',
@@ -1391,7 +1423,8 @@ export default function LiveBoard() {
                           : { width: w, minWidth: w }
                         }
                         className={[
-                          'px-3 py-1.5 border-b border-gray-100 dark:border-gray-200/70 align-middle',
+                          col === 'actions' ? 'px-1' : 'px-3',
+                          'py-1.5 border-b border-gray-100 dark:border-gray-200/70 align-middle',
                           isFrozen ? frozenBg : '',
                           col === 'idx' ? statusAccentCls(status) : '',
                           isRowDragTarget ? 'border-t-2 border-t-blue-400' : '',
@@ -1430,6 +1463,9 @@ export default function LiveBoard() {
                             onPurchaseToggle={handlePurchaseToggle}
                             onWhoChange={handleWhoChange}
                             onEditParticipant={setEditParticipant}
+                            buyListRank={listRank.has(p.id) ? listRank.get(p.id)! + 1 : undefined}
+                            onAddToBuyList={me && canAddToBuyList(p, event) ? (x) => void saveBuyList([...buyList, x.id]) : undefined}
+                            onOpenBuyList={openWhosNext}
                           />
                         )}
                       </td>
@@ -1484,10 +1520,9 @@ export default function LiveBoard() {
             suggested={suggestedOffList}
             reasonFor={(p) => priorityReason(p, me, identityId)}
             purchasing={showPurchaseChrome}
-            claimSlotsLeft={Math.max(0, MAX_ACTIVE_CLAIMS - myClaimCount)}
             now={now}
             onChange={(ids) => void saveBuyList(ids)}
-            onClaim={handleClaim}
+            onClaimMany={handleClaimMany}
             onRelease={handleUnclaim}
             onDismiss={() => setShowNextUp(false)}
           />
@@ -1538,6 +1573,7 @@ function CopyCell({ value, children }: { value: string; children?: React.ReactNo
 function CellContent({
   col, p, status, eventStatus, editingRow, setEditingRow, canEditRequested, canEditProfile, canTogglePurchase,
   atClaimLimit, blockers, now, onClaim, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
+  buyListRank, onAddToBuyList, onOpenBuyList,
 }: {
   col: ColKey;
   p: Participant;
@@ -1558,6 +1594,11 @@ function CellContent({
   onPurchaseToggle: (p: Participant, day: DayKey, checked: boolean) => void;
   onWhoChange: (p: Participant, who: string) => void;
   onEditParticipant: (p: Participant) => void;
+  /** 1-based spot on your buy list; undefined when they're not on it. */
+  buyListRank: number | undefined;
+  /** Omitted when you can't keep a buy list (no linked identity). */
+  onAddToBuyList?: (p: Participant) => void;
+  onOpenBuyList: () => void;
 }) {
   switch (col) {
 
@@ -1576,19 +1617,42 @@ function CellContent({
       return <span className="font-semibold">{p.first_name}</span>;
 
     case 'actions':
-      if (!canEditProfile) return null;
       return (
-        <div className="flex items-center justify-center">
-          <button
-            onClick={() => onEditParticipant(p)}
-            // Always visible on touch, where there is no hover to reveal it with.
-            className="sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-400"
-            title="Edit participant"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
-          </button>
+        <div className="flex items-center justify-center gap-1">
+          {buyListRank != null ? (
+            <button
+              type="button"
+              onClick={onOpenBuyList}
+              className="w-5 h-5 rounded-full bg-yellow-400 text-black text-[10px] font-black leading-none flex items-center justify-center hover:bg-yellow-300"
+              title={`#${buyListRank} on your buy list — open it`}
+            >
+              {buyListRank}
+            </button>
+          ) : onAddToBuyList && !p.all_purchased ? (
+            <button
+              type="button"
+              onClick={() => onAddToBuyList(p)}
+              className="w-5 h-5 rounded-full border border-yellow-500/70 text-yellow-600 dark:text-yellow-400 text-sm font-bold leading-none flex items-center justify-center hover:bg-yellow-400 hover:text-black"
+              title={`Add ${p.first_name} to your buy list`}
+              aria-label={`Add ${p.first_name} ${p.last_name} to your buy list`}
+            >
+              +
+            </button>
+          ) : (
+            <span className="w-5" />
+          )}
+          {canEditProfile && (
+            <button
+              onClick={() => onEditParticipant(p)}
+              // Always visible on touch, where there is no hover to reveal it with.
+              className="sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-400"
+              title="Edit participant"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+          )}
         </div>
       );
 

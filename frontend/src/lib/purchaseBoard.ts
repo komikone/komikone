@@ -174,6 +174,11 @@ export function purchaseBlockers(p: Participant, event: EventDetail | null): Pur
   return blockers;
 }
 
+/** Worth putting on a buy list: still needs badges, and any blocker is one the member can fix. */
+export function canAddToBuyList(p: Participant, event: EventDetail | null): boolean {
+  return !p.all_purchased && !purchaseBlockers(p, event).includes('return_eligible');
+}
+
 export function isClaimable(p: Participant, event: EventDetail | null): boolean {
   return purchaseBlockers(p, event).length === 0 && computeGaps(p, event).length > 0;
 }
