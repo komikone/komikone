@@ -110,6 +110,15 @@ export function BuyListPanel({
   const inSpots = new Set(spotIdeas.slice(0, openSpots).map((p) => p.id));
   const quickAddLeft = quickAddable.filter((p) => !inSpots.has(p.id));
   const suggestions = spotIdeas.slice(openSpots).filter((p) => !quickAddIds.has(p.id));
+  // Only as many as your places can buy, in the order the empty spots suggest them.
+  const startWith = [
+    ...quickAddable.filter((p) => buyableNow.has(p.id)),
+    ...quickAddable.filter((p) => !buyableNow.has(p.id)),
+  ].slice(0, openSpots > 0 ? openSpots : MAX_ACTIVE_CLAIMS);
+  const startNames = startWith.map((p) => (p.id === identityId ? 'you' : p.first_name));
+  const startLabel = startNames.length === 1
+    ? (startWith[0].id === identityId ? 'yourself' : fullName(startWith[0]))
+    : `${startNames.slice(0, -1).join(', ')} & ${startNames[startNames.length - 1]}`;
 
   const save = (order: number[]) => onChange([...claimedOnList, ...order]);
   const add = (p: Participant) => { onChange([...savedIds, p.id]); setSearch(''); };
@@ -360,13 +369,13 @@ export function BuyListPanel({
 
         <section>
           <SectionLabel>Your list{savedIds.length > 0 ? ` · ${savedIds.length}` : ''}</SectionLabel>
-          {savedIds.length === 0 && quickAddable.length > 0 && (
+          {savedIds.length === 0 && startWith.length > 0 && (
             <button
               type="button"
-              onClick={() => onChange(quickAddable.map((p) => p.id))}
+              onClick={() => onChange(startWith.map((p) => p.id))}
               className="mb-1.5 w-full text-xs font-bold px-3 py-2 rounded bg-yellow-400 hover:bg-yellow-300 text-black"
             >
-              Start with {quickAddable.length === 1 ? fullName(quickAddable[0]) : `me + ${quickAddable.length - 1} from my group`}
+              Start with {startLabel}
             </button>
           )}
           <ol className="space-y-2">{plan.slots.map(placeCard)}</ol>
