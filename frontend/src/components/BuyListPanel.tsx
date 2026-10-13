@@ -35,7 +35,7 @@ const fullName = (p: Participant) => `${p.first_name} ${p.last_name}`.trim();
 const firstNames = (ps: Participant[]) => ps.map((p) => p.first_name).join(', ');
 
 /**
- * Who's next as a draft board: your own ranked list of who to buy for, split across your
+ * Who To Buy For as a draft board: your own ranked list of who to buy for, split across your
  * places in the Queue-It line. Each place buys the next 3 off your list, soonest place
  * first, and claims them in one tap once it's through. Dragging someone up or down moves
  * them between places. The list is yours alone and saved on the server.
@@ -385,7 +385,7 @@ export function BuyListPanel({
       <div className="px-3 py-2.5 border-b border-yellow-200 dark:border-gray-700 shrink-0">
         <div className="flex items-center justify-between gap-2">
           <div className="text-yellow-700 dark:text-yellow-400 text-[11px] font-black uppercase tracking-widest">
-            ⚡ Who&apos;s next · your buy list
+            ⚡ Who To Buy For · your buy list
           </div>
           <button type="button" onClick={onDismiss} className="text-yellow-700/70 hover:text-yellow-900 dark:text-yellow-500 text-sm px-1.5" aria-label="Close">✕</button>
         </div>

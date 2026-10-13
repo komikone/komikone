@@ -229,7 +229,7 @@ export default function LiveBoard() {
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [identityId, setIdentityId] = useState<number | null>(null);
-  /** Your own ranked participant ids for Who's next. */
+  /** Your own ranked participant ids for Who To Buy For. */
   const [buyList, setBuyList] = useState<number[]>([]);
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [editingRow, setEditingRow] = useState<number | null>(null);
@@ -1143,7 +1143,7 @@ export default function LiveBoard() {
                   : 'whos-next-flash bg-yellow-400 text-black border-yellow-200 hover:bg-yellow-300'
               }`}
             >
-              ⚡ Who&apos;s next?
+              ⚡ Who To Buy For
             </button>
           ) : (
             <button
@@ -2090,7 +2090,7 @@ function EditParticipantModal({
   );
 }
 
-// ─── Who's next ───────────────────────────────────────────────────────────
+// ─── Who To Buy For ───────────────────────────────────────────────────────
 
 function priorityReason(p: Participant, me: Participant | null, identityId: number | null): string {
   if (p.id === identityId) return "It's you!";
