@@ -11,7 +11,7 @@ export default function DashboardProfile() {
   const [form, setForm] = useState(() => ({
     first_name: member?.first_name ?? '',
     last_name: member?.last_name ?? '',
-    member_id: member?.member_id ?? '',
+    member_id: normalizeMemberIdInput(member?.member_id ?? ''),
     badge_type: member?.badge_type ?? 'ADULT' as 'ADULT' | 'JUNIOR',
     return_eligible: member?.return_eligible ?? false,
   }));
@@ -24,7 +24,7 @@ export default function DashboardProfile() {
     setForm({
       first_name: member.first_name,
       last_name: member.last_name,
-      member_id: member.member_id ?? '',
+      member_id: normalizeMemberIdInput(member.member_id ?? ''),
       badge_type: member.badge_type,
       return_eligible: !!member.return_eligible,
     });

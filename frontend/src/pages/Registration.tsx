@@ -49,7 +49,7 @@ export default function Registration() {
               ...f,
               first_name: m.first_name || f.first_name,
               last_name: m.last_name || f.last_name,
-              member_id: m.member_id || f.member_id,
+              member_id: normalizeMemberIdInput(m.member_id || f.member_id),
               badge_type: m.badge_type || f.badge_type,
             }));
           }
@@ -62,7 +62,7 @@ export default function Registration() {
           setForm({
             first_name: p.first_name,
             last_name: p.last_name,
-            member_id: p.member_id,
+            member_id: normalizeMemberIdInput(p.member_id),
             badge_type: p.badge_type,
             req_preview: p.req_preview,
             req_thu: p.req_thu,

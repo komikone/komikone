@@ -183,7 +183,7 @@ function PersonCheckout({ p, event, isMe, busy, onToggle, onRelease }: {
       {/* Comic-Con's checkout asks for each badge holder's last name and Member ID. */}
       <div className="mt-2 grid grid-cols-2 gap-1.5">
         <CopyField label="Last name" value={p.last_name} ariaLabel={`Copy last name for ${p.first_name}`} />
-        <CopyField label="Member ID" value={p.member_id} mono ariaLabel={`Copy Member ID for ${p.first_name}`} />
+        <CopyField label="Member ID" value={(p.member_id || '').trim().toUpperCase()} mono ariaLabel={`Copy Member ID for ${p.first_name}`} />
       </div>
 
       <div className="mt-2 grid grid-cols-2 gap-1">

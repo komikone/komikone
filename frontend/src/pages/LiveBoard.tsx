@@ -2003,7 +2003,7 @@ function EditParticipantModal({
   const [form, setForm] = useState({
     first_name: participant.first_name,
     last_name: participant.last_name,
-    member_id: participant.member_id,
+    member_id: normalizeMemberIdInput(participant.member_id),
     badge_type: participant.badge_type as 'ADULT' | 'JUNIOR',
     notes: participant.notes,
     return_eligible: participant.return_eligible,

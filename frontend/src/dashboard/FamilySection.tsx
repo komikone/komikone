@@ -405,7 +405,7 @@ function EditParticipantRow({
   const [form, setForm] = useState({
     first_name: participant.first_name,
     last_name: participant.last_name,
-    member_id: participant.member_id,
+    member_id: normalizeMemberIdInput(participant.member_id),
     email: participant.email ?? '',
     badge_type: participant.badge_type,
     return_eligible: participant.return_eligible,

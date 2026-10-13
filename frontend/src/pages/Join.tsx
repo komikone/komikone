@@ -78,7 +78,7 @@ export default function JoinPage() {
           ...f,
           first_name: f.first_name || prefill.first_name,
           last_name: f.last_name || prefill.last_name,
-          member_id: f.member_id || prefill.member_id,
+          member_id: normalizeMemberIdInput(f.member_id || prefill.member_id),
           badge_type: prefill.badge_type,
           return_eligible: prefill.return_eligible,
         }));

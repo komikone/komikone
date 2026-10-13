@@ -544,7 +544,7 @@ app.post('/api/events/:id/register', async (c) => {
   const identity = {
     first_name: body.first_name.trim(),
     last_name: body.last_name.trim(),
-    member_id: body.member_id?.trim() ?? '',
+    member_id: body.member_id?.trim().toUpperCase() ?? '',
     badge_type: (body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT') as 'ADULT' | 'JUNIOR',
   };
   const days = normalizeDays(body);
@@ -1521,7 +1521,7 @@ app.post('/api/invites/:code/accept', async (c) => {
 
   const firstName = body.first_name.trim();
   const lastName = body.last_name.trim();
-  const memberId = body.member_id?.trim() ?? '';
+  const memberId = body.member_id?.trim().toUpperCase() ?? '';
   const badgeType = body.badge_type ?? 'ADULT';
   const returnEligible = body.return_eligible ? 1 : 0;
   const signupEmail = await fetchClerkUserEmail({
@@ -1680,7 +1680,7 @@ app.post('/api/years/:yearId/enroll', async (c) => {
 
   const firstName = (body.first_name ?? '').trim() || 'Member';
   const lastName = (body.last_name ?? '').trim() || '';
-  const memberId = (body.member_id ?? '').trim();
+  const memberId = (body.member_id ?? '').trim().toUpperCase();
   const badgeType = body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT';
   const returnEligible = body.return_eligible ? 1 : 0;
 
@@ -1778,7 +1778,7 @@ app.patch('/api/years/:yearId/me', async (c) => {
 
   const firstName = body.first_name.trim();
   const lastName = body.last_name.trim();
-  const memberId = body.member_id?.trim() ?? '';
+  const memberId = body.member_id?.trim().toUpperCase() ?? '';
   const badgeType = body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT';
   const returnEligible = body.return_eligible ? 1 : 0;
 
@@ -1895,7 +1895,7 @@ app.post('/api/years/:yearId/events/:eventId/my-group/participants', async (c) =
   }>();
   if (!body.first_name?.trim() || !body.last_name?.trim()) return err('First and last name required');
 
-  const memberId = body.member_id?.trim() ?? '';
+  const memberId = body.member_id?.trim().toUpperCase() ?? '';
   const email = body.email?.trim().toLowerCase() ?? '';
 
   const event = await getEvent(c.env.DB, eventId);
@@ -2088,7 +2088,7 @@ app.patch('/api/years/:yearId/events/:eventId/my-group/participants/:pid', async
   `).bind(
     body.first_name?.trim() ?? null,
     body.last_name?.trim() ?? null,
-    body.member_id?.trim() ?? null,
+    body.member_id?.trim().toUpperCase() ?? null,
     body.email != null ? body.email.trim().toLowerCase() : null,
     body.badge_type ?? null,
     body.return_eligible != null ? (body.return_eligible ? 1 : 0) : null,
@@ -2112,7 +2112,7 @@ app.patch('/api/years/:yearId/events/:eventId/my-group/participants/:pid', async
     `).bind(
       body.first_name?.trim() ?? null,
       body.last_name?.trim() ?? null,
-      body.member_id !== undefined ? (body.member_id.trim() ?? '') : null,
+      body.member_id !== undefined ? body.member_id.trim().toUpperCase() : null,
       body.badge_type ?? null,
       body.return_eligible != null ? (body.return_eligible ? 1 : 0) : null,
       yearId,
@@ -2421,7 +2421,7 @@ admin.post('/events/:id/participants', async (c) => {
     `).bind(
       eventId,
       body.first_name.trim(), body.last_name.trim(),
-      body.member_id?.trim() ?? '',
+      body.member_id?.trim().toUpperCase() ?? '',
       body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT',
       body.return_eligible ? 1 : 0,
       body.notes?.trim() ?? '',
@@ -2487,7 +2487,10 @@ admin.patch('/events/:id/participants/:pid', async (c) => {
     if (key in body) {
       fields.push(`${key} = ?`);
       const val = body[key];
-      values.push(typeof val === 'boolean' ? (val ? 1 : 0) : (val as string | number | null));
+      values.push(
+        key === 'member_id' ? String(val ?? '').trim().toUpperCase()
+          : typeof val === 'boolean' ? (val ? 1 : 0) : (val as string | number | null),
+      );
     }
   }
 

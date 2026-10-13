@@ -1653,7 +1653,7 @@ function ParticipantForm({
         <Field label="Member ID">
           <input
             type="text"
-            value={value.member_id ?? ''}
+            value={normalizeMemberIdInput(value.member_id ?? '')}
             onChange={(e) => set('member_id', normalizeMemberIdInput(e.target.value))}
             className={`${inputCls} font-mono uppercase tracking-wide`}
             autoCapitalize="characters"
