@@ -1138,19 +1138,6 @@ export default function LiveBoard() {
           {showPurchaseChrome && (
             <button
               type="button"
-              onClick={toggleBuyerQueue}
-              className={`whitespace-nowrap text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
-                showBuyerQueue
-                  ? 'text-sky-200 border-sky-400 bg-sky-400/15'
-                  : 'text-sky-300 border-sky-700 hover:border-sky-400 hover:text-sky-200'
-              }`}
-            >
-              Get In Line{buyerQueue.length > 0 ? ` · ${activeQueue(buyerQueue).length}` : ''}
-            </button>
-          )}
-          {showPurchaseChrome && (
-            <button
-              type="button"
               onClick={toggleDays}
               className={`whitespace-nowrap text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
                 soldOutDays(event).length > 0
@@ -1166,6 +1153,19 @@ export default function LiveBoard() {
               Days{soldOutDays(event).length > 0 && (
                 <> · {soldOutDays(event).length}<span className="hidden sm:inline"> sold out</span><span className="sm:hidden"> out</span></>
               )}
+            </button>
+          )}
+          {showPurchaseChrome && (
+            <button
+              type="button"
+              onClick={toggleBuyerQueue}
+              className={`whitespace-nowrap text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
+                showBuyerQueue
+                  ? 'text-sky-200 border-sky-400 bg-sky-400/15'
+                  : 'text-sky-300 border-sky-700 hover:border-sky-400 hover:text-sky-200'
+              }`}
+            >
+              Get In Line{buyerQueue.length > 0 ? ` · ${activeQueue(buyerQueue).length}` : ''}
             </button>
           )}
           {me && (showPurchaseChrome ? (
