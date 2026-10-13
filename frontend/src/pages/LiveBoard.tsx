@@ -10,8 +10,9 @@ import {
   rankById,
   rankMovement,
 } from '../lib/queueBoard';
-import { BuyerQueuePanel, SoldOutBar } from '../components/QueueDraftBoard';
+import { BuyerQueuePanel } from '../components/QueueDraftBoard';
 import { BuyListPanel } from '../components/BuyListPanel';
+import { DaysPanel } from '../components/DaysPanel';
 import { planBuyList } from '../lib/buyPlan';
 import { HeaderUserMenu } from '../components/HeaderUserMenu';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -37,8 +38,10 @@ import {
   nothingLeftToBuy,
   purchasedByMe,
   SALE_DAY_FULL,
+  SALE_DAY_LABEL,
   setSimPatch,
   soldOutDays,
+  soldOutOnly,
 } from '../lib/purchaseBoard';
 
 const POLL_MS = 8000;
@@ -48,7 +51,7 @@ const DAY_GAP = 2;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type RowStatus = 'setup' | 'complete' | 'claiming' | 'partial' | 'none';
+type RowStatus = 'setup' | 'soldout' | 'complete' | 'claiming' | 'partial' | 'none';
 type ColKey = 'idx' | 'first' | 'last' | 'actions' | 'return_eligible' | 'badge_type' | 'member_id' | 'requested' | 'purchased' | 'gaps' | 'status' | 'total' | 'who' | 'group';
 type SortDir = 'asc' | 'desc';
 
@@ -97,6 +100,7 @@ const BLOCKER_SHORT: Record<PurchaseBlocker, string> = {
 
 function rowStatus(p: Participant, now = Date.now()): RowStatus {
   if (!hasRequestedDays(p)) return 'setup';
+  if (soldOutOnly(p)) return 'soldout';
   if (nothingLeftToBuy(p)) return 'complete';
   if (isClaimLive(p, now)) return 'claiming';
   if (p.any_purchased) return 'partial';
@@ -111,7 +115,7 @@ function sortValue(p: Participant, col: ColKey, naturalIdx: number, now = Date.n
     case 'member_id':  return p.member_id.toLowerCase();
     case 'badge_type': return p.badge_type;
     case 'requested':  return DAY_KEYS.filter((d) => p[`req_${d}` as keyof Participant]).length;
-    case 'status':     return ['setup', 'none', 'partial', 'claiming', 'complete'].indexOf(rowStatus(p, now));
+    case 'status':     return ['setup', 'none', 'partial', 'claiming', 'complete', 'soldout'].indexOf(rowStatus(p, now));
     case 'purchased':  return DAY_KEYS.filter((d) => p[`pur_${d}` as keyof Participant]).length;
     case 'gaps':            return p.gaps.length;
     case 'total':           return p.purchase_total;
@@ -127,6 +131,7 @@ function statusAccentCls(status: RowStatus): string {
     case 'claiming': return 'border-l-4 border-l-orange-500 dark:border-l-yellow-400';
     case 'partial':  return 'border-l-4 border-l-blue-500';
     case 'setup':    return 'border-l-4 border-l-zinc-400';
+    case 'soldout':  return 'border-l-4 border-l-red-500';
     default:         return 'border-l-4 border-l-transparent';
   }
 }
@@ -560,7 +565,7 @@ export default function LiveBoard() {
   const handlePurchaseToggle = async (p: Participant, day: DayKey, checked: boolean) => {
     const me = participants.find((x) => x.id === identityId);
     const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
-    if (!canEditPurchases(p, myDisplayName, now)) {
+    if (!isPlatformAdmin && !canEditPurchases(p, myDisplayName, now)) {
       alert('Claim this person first before marking purchase days');
       return;
     }
@@ -603,7 +608,7 @@ export default function LiveBoard() {
   const handleWhoChange = async (p: Participant, who: string) => {
     const me = participants.find((x) => x.id === identityId);
     const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
-    if (!canEditPurchases(p, myDisplayName, now)) {
+    if (!isPlatformAdmin && !canEditPurchases(p, myDisplayName, now)) {
       alert('Claim this person first before editing who bought');
       setEditingRow(null);
       return;
@@ -749,7 +754,7 @@ export default function LiveBoard() {
 
   // People you're responsible for who can't be claimed yet — fix before purchase day.
   const blockedInMyGroup = participants
-    .filter((p) => !p.all_purchased && canEditIdentityRow(p, me, identityId, myClerkId))
+    .filter((p) => !nothingLeftToBuy(p) && canEditIdentityRow(p, me, identityId, myClerkId))
     .map((p) => ({ p, blockers: purchaseBlockers(p, event) }))
     .filter(({ blockers }) => blockers.length > 0);
 
@@ -758,15 +763,17 @@ export default function LiveBoard() {
   // "left" means buyable right now, so blocked people are counted separately.
   const remaining  = participants.filter((p) => isClaimable(p, event) && !isClaimLive(p, now)).length;
   const withGaps   = participants.filter((p) => p.gaps.length > 0 && p.any_purchased).length;
-  const needsSetup = participants.filter((p) => !p.all_purchased && purchaseBlockers(p, event).length > 0).length;
+  const needsSetup = participants.filter((p) => !nothingLeftToBuy(p) && purchaseBlockers(p, event).length > 0).length;
 
   const [showNextUp, setShowNextUp] = useState(false);
+  const [showDays, setShowDays] = useState(false);
 
   const byDefaultPriority = (a: Participant, b: Participant) => {
     const diff = priorityScore(b, me, identityId) - priorityScore(a, me, identityId);
     return diff !== 0 ? diff : a.sort_order - b.sort_order;
   };
-  const listRank = new Map(buyList.map((id, i) => [id, i]));
+  const soldOutIds = new Set(participants.filter(soldOutOnly).map((p) => p.id));
+  const listRank = new Map(buyList.filter((id) => !soldOutIds.has(id)).map((id, i) => [id, i]));
   const buyable = participants.filter((p) => isClaimable(p, event) && !isClaimLive(p, now));
   // Your own buy list comes first, in your order; everyone else follows by default priority.
   const priorityQueue = [
@@ -803,10 +810,11 @@ export default function LiveBoard() {
   };
   const claimCapacity = MAX_ACTIVE_CLAIMS * Math.max(1, myPlaces.length);
 
-  const openWhosNext = () => { setShowBuyerQueue(false); setShowNextUp(true); };
-  const openBuyerQueue = () => { setShowNextUp(false); setShowBuyerQueue(true); };
-  const toggleWhosNext = () => { setShowBuyerQueue(false); setShowNextUp((v) => !v); };
-  const toggleBuyerQueue = () => { setShowNextUp(false); setShowBuyerQueue((v) => !v); };
+  const openWhosNext = () => { setShowBuyerQueue(false); setShowDays(false); setShowNextUp(true); };
+  const openBuyerQueue = () => { setShowNextUp(false); setShowDays(false); setShowBuyerQueue(true); };
+  const toggleWhosNext = () => { setShowBuyerQueue(false); setShowDays(false); setShowNextUp((v) => !v); };
+  const toggleBuyerQueue = () => { setShowNextUp(false); setShowDays(false); setShowBuyerQueue((v) => !v); };
+  const toggleDays = () => { setShowNextUp(false); setShowBuyerQueue(false); setShowDays((v) => !v); };
 
   const allCols = [...FROZEN, ...movableCols];
 
@@ -928,7 +936,14 @@ export default function LiveBoard() {
   const handleSoldOut = async (day: SaleDay, soldOut: boolean) => {
     const verb = soldOut ? 'Mark' : 'Un-mark';
     const what = soldOut ? 'SOLD OUT for everyone' : 'available again';
-    if (!window.confirm(`${verb} ${SALE_DAY_FULL[day]} as ${what}?`)) return;
+    // People this leaves with no day to buy, who drop off every buy list.
+    const stranded = soldOut
+      ? participants.filter((p) => !p.any_purchased && p.gaps.length === 1 && p.gaps[0] === SALE_DAY_LABEL[day]).length
+      : 0;
+    const note = stranded > 0
+      ? `\n\n${stranded} ${stranded === 1 ? 'person only wants' : 'people only want'} days that would all be sold out, so they come off every buy list.`
+      : '';
+    if (!window.confirm(`${verb} ${SALE_DAY_FULL[day]} as ${what}?${note}`)) return;
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     try {
@@ -1119,12 +1134,12 @@ export default function LiveBoard() {
           </span>
         )}
         {withGaps > 0 && <span className="text-red-400 dark:text-red-700 text-xs font-mono font-bold">{withGaps} gaps</span>}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {showPurchaseChrome && (
             <button
               type="button"
               onClick={toggleBuyerQueue}
-              className={`text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
+              className={`whitespace-nowrap text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
                 showBuyerQueue
                   ? 'text-sky-200 border-sky-400 bg-sky-400/15'
                   : 'text-sky-300 border-sky-700 hover:border-sky-400 hover:text-sky-200'
@@ -1133,11 +1148,31 @@ export default function LiveBoard() {
               Get In Line{buyerQueue.length > 0 ? ` · ${activeQueue(buyerQueue).length}` : ''}
             </button>
           )}
+          {showPurchaseChrome && (
+            <button
+              type="button"
+              onClick={toggleDays}
+              className={`whitespace-nowrap text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
+                soldOutDays(event).length > 0
+                  ? showDays
+                    ? 'text-white border-red-300 bg-red-600'
+                    : 'text-white border-red-500 bg-red-600/80 hover:bg-red-600'
+                  : showDays
+                    ? 'text-rose-200 border-rose-400 bg-rose-400/15'
+                    : 'text-rose-300 border-rose-800 hover:border-rose-400 hover:text-rose-200'
+              }`}
+              title="Which badge days are still available"
+            >
+              Days{soldOutDays(event).length > 0 && (
+                <> · {soldOutDays(event).length}<span className="hidden sm:inline"> sold out</span><span className="sm:hidden"> out</span></>
+              )}
+            </button>
+          )}
           {me && (showPurchaseChrome ? (
             <button
               type="button"
               onClick={toggleWhosNext}
-              className={`text-sm font-black uppercase tracking-wide px-4 py-1.5 rounded-md border-2 transition-colors ${
+              className={`whitespace-nowrap text-sm font-black uppercase tracking-wide px-3 sm:px-4 py-1.5 rounded-md border-2 transition-colors ${
                 showNextUp
                   ? 'bg-yellow-300 text-black border-yellow-100 shadow-lg shadow-yellow-400/40'
                   : 'whos-next-flash bg-yellow-400 text-black border-yellow-200 hover:bg-yellow-300'
@@ -1149,7 +1184,7 @@ export default function LiveBoard() {
             <button
               type="button"
               onClick={toggleWhosNext}
-              className={`text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
+              className={`whitespace-nowrap text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
                 showNextUp
                   ? 'bg-yellow-400 text-black border-yellow-200'
                   : 'text-yellow-300 border-yellow-700 hover:border-yellow-400 hover:text-yellow-200'
@@ -1161,15 +1196,6 @@ export default function LiveBoard() {
           ))}
         </div>
       </div>
-
-      {showPurchaseChrome && (
-        <SoldOutBar
-          soldOut={soldOutDays(event)}
-          // Practice mode promises nothing is saved, and this writes to the real event.
-          canEdit={!simulation && (identityId != null || isPlatformAdmin)}
-          onToggle={handleSoldOut}
-        />
-      )}
 
       {/* ── Group readiness: who can't be bought for yet ── */}
       {blockedInMyGroup.length > 0 && (
@@ -1404,7 +1430,7 @@ export default function LiveBoard() {
               return (
                 <tr
                   key={p.id}
-                  className={`group transition-colors ${rowBg}`}
+                  className={`group transition-colors ${rowBg} ${status === 'soldout' ? 'opacity-50' : ''}`}
                   onDragOver={(e) => onRowDragOver(e, p.id)}
                   onDrop={(e) => onRowDrop(e, p.id)}
                 >
@@ -1449,7 +1475,7 @@ export default function LiveBoard() {
                             setEditingRow={setEditingRow}
                             canEditRequested={!showPurchaseChrome && canEditIdentityRow(p, me, identityId, myClerkId)}
                             canEditProfile={canEditIdentityRow(p, me, identityId, myClerkId)}
-                            canTogglePurchase={canEditPurchases(p, myDisplayName, now)}
+                            canTogglePurchase={isPlatformAdmin || canEditPurchases(p, myDisplayName, now)}
                             blockers={purchaseBlockers(p, event)}
                             now={now}
                             onUnclaim={handleUnclaim}
@@ -1501,6 +1527,17 @@ export default function LiveBoard() {
             onRename={handleQueueRename}
             onClearAll={handleQueueClearAll}
             onDismiss={() => setShowBuyerQueue(false)}
+          />
+        )}
+
+        {showPurchaseChrome && showDays && (
+          <DaysPanel
+            event={event}
+            participants={participants}
+            // Practice mode promises nothing is saved, and this writes to the real event.
+            canEdit={!simulation && (identityId != null || isPlatformAdmin)}
+            onToggle={handleSoldOut}
+            onDismiss={() => setShowDays(false)}
           />
         )}
 
@@ -1804,6 +1841,17 @@ function CellContent({
       );
 
     case 'status':
+      if (status === 'soldout') {
+        return (
+          <span
+            className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 px-2 py-0.5 rounded-full"
+            title="Every day they wanted is sold out, so there's nothing to buy for them"
+          >
+            ✕ Sold out
+            <span className="font-normal text-zinc-500">· {p.sold_out_gaps!.join(', ')}</span>
+          </span>
+        );
+      }
       if (status === 'complete') {
         return (
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 border border-green-300 dark:border-green-800 px-2 py-0.5 rounded-full">

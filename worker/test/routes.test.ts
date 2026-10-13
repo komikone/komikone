@@ -196,6 +196,8 @@ describe('POST /participants/:pid/claim', () => {
     for (let i = 0; i < 2; i += 1) {
       insertParticipant(h.db, eventId, {
         first_name: `Held${i}`,
+        req_sat: 0,
+        req_sun: 1,
         purchasing_claimed_by: 'Tony Nguyen',
         purchasing_claimed_at: held,
         purchasing_claimed_queue_id: place,
@@ -207,12 +209,24 @@ describe('POST /participants/:pid/claim', () => {
       purchasing_claimed_at: held,
       purchasing_claimed_queue_id: place,
     });
-    const fourth = insertParticipant(h.db, eventId, { first_name: 'Fourth' });
+    const fourth = insertParticipant(h.db, eventId, { first_name: 'Fourth', req_sat: 0, req_sun: 1 });
 
     const res = await claim(eventId, fourth, place);
 
     expect(res.status).toBe(200);
     expect(getParticipant(h.db, fourth).purchasing_claimed_by).toBe('Tony Nguyen');
+  });
+
+  it('refuses to claim someone whose only days are sold out', async () => {
+    const eventId = insertEvent(h.db);
+    h.db.prepare('UPDATE events SET sold_out_sat = 1 WHERE id = ?').run(eventId);
+    const { place } = seedBuyerWithPlace(eventId);
+    const pid = insertParticipant(h.db, eventId, { first_name: 'Satonly' });
+
+    const res = await claim(eventId, pid, place);
+
+    expect(res.status).toBe(409);
+    expect(getParticipant(h.db, pid).purchasing_claimed_by).toBe('');
   });
 
   it('ignores expired claims when counting the limit', async () => {

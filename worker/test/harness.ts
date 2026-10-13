@@ -213,7 +213,8 @@ async function setUpClerkAuth(): Promise<TokenSigner> {
 export type TestHarness = {
   db: DatabaseSync;
   /** Signed request as a Clerk user (`sub`), or omit for an unauthenticated call. */
-  request: (path: string, init?: RequestInit & { as?: string; adminSecret?: boolean }) => Promise<Response>;
+  /** `asAdmin` signs `as` with the admin role, like a Clerk user with publicMetadata.role = admin. */
+  request: (path: string, init?: RequestInit & { as?: string; asAdmin?: boolean; adminSecret?: boolean }) => Promise<Response>;
   close: () => void;
 };
 
@@ -234,10 +235,10 @@ export async function createHarness(): Promise<TestHarness> {
   return {
     db,
     request: async (path, init = {}) => {
-      const { as, adminSecret, ...rest } = init;
+      const { as, asAdmin, adminSecret, ...rest } = init;
       const headers = new Headers(rest.headers);
       if (adminSecret) headers.set('authorization', `Bearer ${ADMIN_SECRET}`);
-      else if (as) headers.set('authorization', `Bearer ${await signToken(as)}`);
+      else if (as) headers.set('authorization', `Bearer ${await signToken(as, { admin: asAdmin })}`);
       if (rest.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
 
       return app.fetch(

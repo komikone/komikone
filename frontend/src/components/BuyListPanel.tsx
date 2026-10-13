@@ -12,6 +12,7 @@ import {
   isClaimedBy,
   nothingLeftToBuy,
   purchaseBlockers,
+  soldOutOnly,
 } from '../lib/purchaseBoard';
 import { etaRemainingMs, formatEtaRemaining } from '../lib/queueBoard';
 
@@ -80,8 +81,11 @@ export function BuyListPanel({
   const searchRef = useRef<HTMLInputElement>(null);
 
   const byId = new Map(participants.map((p) => [p.id, p]));
-  const savedIds = list.filter((id) => byId.has(id));
-  const onList = new Set(savedIds);
+  const keptIds = list.filter((id) => byId.has(id));
+  // Kept in the saved list but out of the plan, so they come back if their day does.
+  const soldOutIds = keptIds.filter((id) => soldOutOnly(byId.get(id)!));
+  const savedIds = keptIds.filter((id) => !soldOutIds.includes(id));
+  const onList = new Set(keptIds);
   const myClaims = participants.filter((p) => holdsClaimSlot(p, myDisplayName, now));
   const myPlaceIds = new Set(places.map((q) => q.id));
   const bought = participants.filter((p) =>
@@ -138,9 +142,9 @@ export function BuyListPanel({
     ? (startWith[0].id === identityId ? 'yourself' : fullName(startWith[0]))
     : `${startNames.slice(0, -1).join(', ')} & ${startNames[startNames.length - 1]}`;
 
-  const save = (order: number[]) => onChange([...claimedOnList, ...order]);
-  const add = (p: Participant) => { onChange([...savedIds, p.id]); setSearch(''); };
-  const remove = (id: number) => onChange(savedIds.filter((x) => x !== id));
+  const save = (order: number[]) => onChange([...claimedOnList, ...order, ...soldOutIds]);
+  const add = (p: Participant) => { onChange([...keptIds, p.id]); setSearch(''); };
+  const remove = (id: number) => onChange(keptIds.filter((x) => x !== id));
   const move = (id: number, delta: -1 | 1) => {
     const ids = [...displayIds];
     const from = ids.indexOf(id);
@@ -173,7 +177,7 @@ export function BuyListPanel({
       if (order.some((id, i) => id !== drag.order[i])) setDrag({ ...drag, order });
     };
     const onUp = () => {
-      if (drag.order.some((id, i) => id !== drag.start[i])) onChange([...claimedOnList, ...drag.order]);
+      if (drag.order.some((id, i) => id !== drag.start[i])) onChange([...claimedOnList, ...drag.order, ...soldOutIds]);
       setDrag(null);
     };
     const onCancel = () => setDrag(null);
@@ -185,7 +189,7 @@ export function BuyListPanel({
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
     };
-  }, [drag, onChange, claimedOnList]);
+  }, [drag, onChange, claimedOnList, soldOutIds]);
   const keyMove = (e: KeyboardEvent, id: number) => {
     if (e.key === 'ArrowUp') { e.preventDefault(); move(id, -1); }
     if (e.key === 'ArrowDown') { e.preventDefault(); move(id, 1); }
@@ -415,7 +419,7 @@ export function BuyListPanel({
           {savedIds.length === 0 && startWith.length > 0 && (
             <button
               type="button"
-              onClick={() => onChange(startWith.map((p) => p.id))}
+              onClick={() => onChange([...startWith.map((p) => p.id), ...soldOutIds])}
               className="mb-1.5 w-full text-xs font-bold px-3 py-2 rounded bg-yellow-400 hover:bg-yellow-300 text-black"
             >
               Start with {startLabel}
@@ -437,6 +441,26 @@ export function BuyListPanel({
                   + Add another browser to the line to buy {Math.min(overflowReady, MAX_ACTIVE_CLAIMS)} more
                 </button>
               )}
+            </div>
+          )}
+          {soldOutIds.length > 0 && (
+            <div className="mt-2 rounded-md border border-red-200 dark:border-red-900/60 bg-red-50/60 dark:bg-red-950/20 px-2 py-1.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-red-700 dark:text-red-400">
+                Sold out · nothing to buy
+              </div>
+              <ul className="mt-0.5 space-y-0.5">
+                {soldOutIds.map((id) => {
+                  const p = byId.get(id)!;
+                  return (
+                    <li key={id} className="flex items-center gap-2 text-xs text-gray-500">
+                      <span className="flex-1 min-w-0 truncate line-through">{fullName(p)}</span>
+                      <span className="shrink-0 text-[10px]">only wanted {p.sold_out_gaps?.join(', ')}</span>
+                      <button type="button" onClick={() => remove(id)} className="shrink-0 w-5 text-gray-400 hover:text-red-600" aria-label={`Remove ${p.first_name} from your list`}>✕</button>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="text-[10px] text-gray-500 mt-0.5">They come back on your list if a day they wanted is marked available again.</p>
             </div>
           )}
         </section>

@@ -69,6 +69,14 @@ export function nothingLeftToBuy(p: Participant): boolean {
   return p.all_purchased || (p.gaps.length === 0 && (p.sold_out_gaps?.length ?? 0) > 0);
 }
 
+/**
+ * Every day they wanted sold out before anyone bought them one, so there is nothing to
+ * buy for them. Derived from the event, so un-marking a day brings them straight back.
+ */
+export function soldOutOnly(p: Participant): boolean {
+  return !p.any_purchased && p.gaps.length === 0 && (p.sold_out_gaps?.length ?? 0) > 0;
+}
+
 /** You bought for this person, so you can still correct days after the claim ends. */
 export function purchasedByMe(p: Participant, displayName: string): boolean {
   if (!displayName.trim()) return false;
@@ -174,9 +182,9 @@ export function purchaseBlockers(p: Participant, event: EventDetail | null): Pur
   return blockers;
 }
 
-/** Worth putting on a buy list: still needs badges, and any blocker is one the member can fix. */
+/** Worth putting on a buy list: still has a day to buy, and any blocker is one the member can fix. */
 export function canAddToBuyList(p: Participant, event: EventDetail | null): boolean {
-  return !p.all_purchased && !purchaseBlockers(p, event).includes('return_eligible');
+  return !nothingLeftToBuy(p) && !purchaseBlockers(p, event).includes('return_eligible');
 }
 
 export function isClaimable(p: Participant, event: EventDetail | null): boolean {

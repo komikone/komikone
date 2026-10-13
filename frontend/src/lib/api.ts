@@ -190,6 +190,8 @@ export type Group = {
   name: string;
   color: string;
   sort_order: number;
+  /** Clerk user who manages the group; empty when nobody does. */
+  owner_clerk_user_id?: string;
   created_at: string;
   updated_at: string;
 };
@@ -584,7 +586,7 @@ export const api = {
         req<{ id: number }>(`/api/admin/events/${eventId}/groups`, {
           method: 'POST', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
         }),
-      update: (authToken: string, eventId: number, gid: number, data: { name?: string; color?: string }) =>
+      update: (authToken: string, eventId: number, gid: number, data: { name?: string; color?: string; owner_clerk_user_id?: string }) =>
         req<{ ok: boolean }>(`/api/admin/events/${eventId}/groups/${gid}`, {
           method: 'PATCH', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
         }),
@@ -659,11 +661,26 @@ export const api = {
         req<MemberDeleteSummary>(`/api/admin/years/${yearId}/members/${memberId}${dryRun ? '?dry_run=1' : ''}`, {
           method: 'DELETE', headers: authHeaders(undefined, authToken),
         }),
+      update: (
+        authToken: string,
+        yearId: number,
+        memberId: number,
+        data: Partial<Pick<YearMember, 'first_name' | 'last_name' | 'member_id' | 'badge_type' | 'return_eligible'>> & {
+          role?: 'admin' | 'registered';
+        },
+      ) =>
+        req<YearMember>(`/api/admin/years/${yearId}/members/${memberId}`, {
+          method: 'PATCH', headers: authHeaders(undefined, authToken), body: JSON.stringify(data),
+        }),
     },
     purchaseQueue: {
       clear: (authToken: string, eventId: number) =>
         req<{ ok: boolean; cleared: number }>(`/api/admin/events/${eventId}/purchase-queue`, {
           method: 'DELETE', headers: authHeaders(undefined, authToken),
+        }),
+      setOwner: (authToken: string, eventId: number, qid: number, clerkUserId: string) =>
+        req<PurchaseQueueEntry[]>(`/api/admin/events/${eventId}/purchase-queue/${qid}/owner`, {
+          method: 'PATCH', headers: authHeaders(undefined, authToken), body: JSON.stringify({ clerk_user_id: clerkUserId }),
         }),
     },
     inviteRequests: {

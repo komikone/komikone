@@ -150,10 +150,14 @@ async function canEditParticipantIdentity(
  */
 async function canActOnClaimedParticipant(
   db: D1Database,
-  access: { userId: string },
+  access: { userId: string; isAdmin: boolean },
   eventId: number,
   pid: number,
 ): Promise<boolean> {
+  // Admins fix records after the fact, when nobody holds a claim any more.
+  if (access.isAdmin) {
+    return !!(await db.prepare('SELECT id FROM participants WHERE id = ? AND event_id = ?').bind(pid, eventId).first());
+  }
   const target = await db.prepare(
     'SELECT purchasing_claimed_by, purchasing_claimed_at, who_purchased FROM participants WHERE id = ? AND event_id = ?'
   ).bind(pid, eventId).first<{ purchasing_claimed_by: string; purchasing_claimed_at: string | null; who_purchased: string }>();
@@ -162,7 +166,6 @@ async function canActOnClaimedParticipant(
   const claimActive = !!target.purchasing_claimed_by && !isClaimExpired(target.purchasing_claimed_at);
   const buyerOnRecord = target.who_purchased?.trim() ?? '';
   if (!claimActive && !buyerOnRecord) return false;
-  if (access.userId === 'admin') return true;
 
   const me = await db.prepare(
     'SELECT first_name, last_name FROM participants WHERE event_id = ? AND clerk_user_id = ?'
@@ -629,6 +632,9 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
 
   if (p.purchasing_claimed_by && !isClaimExpired(p.purchasing_claimed_at)) {
     return err(`Already claimed by ${p.purchasing_claimed_by}`, 409);
+  }
+  if (nothingLeftToBuy(p, event)) {
+    return err(`Nothing left to buy for ${p.first_name}: every day they wanted is bought or sold out`, 409);
   }
 
   const onPlace = await c.env.DB.prepare(`
@@ -2665,6 +2671,44 @@ admin.delete('/events/:id/purchase-queue', async (c) => {
   return json({ ok: true, cleared: res[1].meta.changes ?? 0 });
 });
 
+/** Hands a place in line to someone else on the board, who then claims and buys through it. */
+admin.patch('/events/:id/purchase-queue/:qid/owner', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const qid = Number(c.req.param('qid'));
+  const body = await c.req.json<{ clerk_user_id?: string }>();
+  const owner = body.clerk_user_id?.trim() ?? '';
+  if (!owner) return err('clerk_user_id required');
+
+  const place = await c.env.DB.prepare(
+    'SELECT id, clerk_user_id FROM purchase_queue WHERE id = ? AND event_id = ?'
+  ).bind(qid, eventId).first<{ id: number; clerk_user_id: string }>();
+  if (!place) return err('Queue entry not found', 404);
+  const row = await c.env.DB.prepare(
+    'SELECT id FROM participants WHERE event_id = ? AND clerk_user_id = ?'
+  ).bind(eventId, owner).first<{ id: number }>();
+  if (!row) return err("The new owner isn't on this event's board", 400);
+  if (place.clerk_user_id === owner) return json(await listPurchaseQueue(c.env.DB, eventId));
+
+  // Claims were made under the old owner's name, so they go back up rather than move.
+  // Anyone already bought for keeps the link, since they used one of the place's 3 badges.
+  await c.env.DB.batch([
+    c.env.DB.prepare(`
+      UPDATE participants
+      SET purchasing_claimed_by = '', purchasing_claimed_at = NULL,
+          purchasing_claimed_queue_id = CASE
+            WHEN pur_preview OR pur_thu OR pur_fri OR pur_sat OR pur_sun THEN purchasing_claimed_queue_id
+            ELSE NULL END,
+          updated_at = datetime('now')
+      WHERE purchasing_claimed_queue_id = ? AND event_id = ?
+    `).bind(qid, eventId),
+    c.env.DB.prepare(`
+      UPDATE purchase_queue SET clerk_user_id = ?, participant_id = ?, updated_at = datetime('now')
+      WHERE id = ? AND event_id = ?
+    `).bind(owner, row.id, qid, eventId),
+  ]);
+  return json(await listPurchaseQueue(c.env.DB, eventId));
+});
+
 admin.delete('/events/:id/participants/:pid', async (c) => {
   const eventId = Number(c.req.param('id'));
   const pid = Number(c.req.param('pid'));
@@ -2721,11 +2765,24 @@ admin.post('/events/:id/groups', async (c) => {
 admin.patch('/events/:id/groups/:gid', async (c) => {
   const eventId = Number(c.req.param('id'));
   const gid = Number(c.req.param('gid'));
-  const body = await c.req.json<{ name?: string; color?: string }>();
+  const body = await c.req.json<{ name?: string; color?: string; owner_clerk_user_id?: string }>();
   const fields: string[] = [];
   const values: (string | number)[] = [];
-  if (body.name !== undefined) { fields.push('name = ?'); values.push(body.name.trim()); }
+  if (body.name !== undefined) {
+    if (!body.name.trim()) return err('Name cannot be empty');
+    fields.push('name = ?'); values.push(body.name.trim());
+  }
   if (body.color !== undefined) { fields.push('color = ?'); values.push(body.color); }
+  if (body.owner_clerk_user_id !== undefined) {
+    const owner = body.owner_clerk_user_id.trim();
+    if (owner) {
+      const onBoard = await c.env.DB.prepare(
+        'SELECT id FROM participants WHERE event_id = ? AND clerk_user_id = ?'
+      ).bind(eventId, owner).first();
+      if (!onBoard) return err("The new owner isn't on this event's board", 400);
+    }
+    fields.push('owner_clerk_user_id = ?'); values.push(owner);
+  }
   if (fields.length === 0) return err('No fields to update');
   fields.push("updated_at = datetime('now')");
   values.push(gid, eventId);
@@ -2977,6 +3034,49 @@ admin.get('/years/:yearId/members', async (c) => {
     'SELECT * FROM year_members WHERE year_id = ? ORDER BY joined_at'
   ).bind(yearId).all<YearMember>();
   return json(rows.results);
+});
+
+/** Edits someone's profile for the year and copies it to their own rows on every event board. */
+admin.patch('/years/:yearId/members/:memberId', async (c) => {
+  const yearId = Number(c.req.param('yearId'));
+  const memberId = Number(c.req.param('memberId'));
+  const member = await c.env.DB.prepare(
+    'SELECT * FROM year_members WHERE id = ? AND year_id = ?'
+  ).bind(memberId, yearId).first<YearMember>();
+  if (!member) return err('Member not found', 404);
+
+  const body = await c.req.json<{
+    first_name?: string; last_name?: string; member_id?: string;
+    badge_type?: 'ADULT' | 'JUNIOR'; return_eligible?: boolean; role?: 'admin' | 'registered';
+  }>();
+  const firstName = body.first_name?.trim() ?? member.first_name;
+  const lastName = body.last_name?.trim() ?? member.last_name;
+  if (!firstName || !lastName) return err('First and last name required');
+  const memberIdValue = body.member_id !== undefined ? body.member_id.trim().toUpperCase() : member.member_id;
+  const badgeType = body.badge_type === undefined ? member.badge_type : body.badge_type === 'JUNIOR' ? 'JUNIOR' : 'ADULT';
+  const returnEligible = body.return_eligible === undefined ? (member.return_eligible ? 1 : 0) : body.return_eligible ? 1 : 0;
+  let role = member.role;
+  if (body.role !== undefined) {
+    if (member.role === 'owner') return err("The year's owner keeps the owner role", 400);
+    if (body.role !== 'admin' && body.role !== 'registered') return err('role must be admin or registered');
+    role = body.role;
+  }
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(`
+      UPDATE year_members SET first_name = ?, last_name = ?, member_id = ?, badge_type = ?,
+        return_eligible = ?, role = ?
+      WHERE id = ? AND year_id = ?
+    `).bind(firstName, lastName, memberIdValue, badgeType, returnEligible, role, memberId, yearId),
+    c.env.DB.prepare(`
+      UPDATE participants SET first_name = ?, last_name = ?, member_id = ?, badge_type = ?,
+        return_eligible = ?, updated_at = datetime('now')
+      WHERE clerk_user_id = ? AND event_id IN (SELECT id FROM events WHERE year_id = ?)
+    `).bind(firstName, lastName, memberIdValue, badgeType, returnEligible, member.clerk_user_id, yearId),
+  ]);
+
+  const updated = await c.env.DB.prepare('SELECT * FROM year_members WHERE id = ?').bind(memberId).first<YearMember>();
+  return json(updated);
 });
 
 /**

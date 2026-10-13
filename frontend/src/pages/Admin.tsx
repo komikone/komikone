@@ -13,6 +13,8 @@ import {
   type Invite,
   type InviteRequest,
   type Background,
+  type PurchaseQueueEntry,
+  type PurchaseQueueStatus,
   formatDollars,
   DAY_KEYS,
   dayLabel,
@@ -74,7 +76,7 @@ export default function Admin() {
   const [yearMeta, setYearMeta] = useState<YearMeta | null>(null);
 
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'overview' | 'people' | 'prices' | 'dates' | 'settings'>('overview');
+  const [tab, setTab] = useState<'overview' | 'people' | 'lines' | 'prices' | 'dates' | 'settings'>('overview');
   const [adminView, setAdminView] = useState<'year' | 'requests' | 'backgrounds' | 'invites'>('year');
   const [invitePanelYearId, setInvitePanelYearId] = useState<number | null>(null);
   const [accessRequests, setAccessRequests] = useState<InviteRequest[]>([]);
@@ -479,6 +481,7 @@ export default function Admin() {
                 {([
                   ['overview', 'Overview'],
                   ['people', 'People'],
+                  ['lines', 'Lines'],
                   ['prices', 'Prices'],
                   ['dates', 'Dates'],
                   ['settings', 'Settings'],
@@ -532,6 +535,19 @@ export default function Admin() {
                   if (activeYear) loadYearExtras(activeYear);
                   if (selectedYear) reloadEventData(activeRegType, events, selectedYear);
                 }}
+              />
+            )}
+            {tab === 'lines' && (
+              <LinesTab
+                key={activeEvent?.id ?? 'none'}
+                event={activeEvent}
+                activeRegType={activeRegType}
+                returnEvent={returnEvent}
+                openEvent={openEvent}
+                onRegTypeChange={handleRegTypeSwitch}
+                auth={auth}
+                participants={participants}
+                onParticipantsChanged={() => { if (selectedYear) reloadEventData(activeRegType, events, selectedYear); }}
               />
             )}
             {tab === 'prices' && (
@@ -964,6 +980,7 @@ function AccountMembersTable({
   onDeleted: () => void;
 }) {
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [editing, setEditing] = useState<YearMember | null>(null);
 
   const handleDelete = async (m: YearMember) => {
     const name = `${m.first_name} ${m.last_name}`.trim() || 'this member';
@@ -1006,7 +1023,7 @@ function AccountMembersTable({
             <th className="px-3 py-2 text-center">Return</th>
             <th className="px-3 py-2 text-left">Role</th>
             <th className="px-3 py-2 text-left">Joined</th>
-            <th className="px-3 py-2 w-16"></th>
+            <th className="px-3 py-2 w-24"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800">
@@ -1038,13 +1055,20 @@ function AccountMembersTable({
               <td className="px-3 py-2 text-xs text-gray-400">
                 {new Date(m.joined_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </td>
-              <td className="px-3 py-2 text-right">
+              <td className="px-3 py-2 text-right whitespace-nowrap">
+                <button
+                  type="button"
+                  onClick={() => setEditing(m)}
+                  className="text-xs text-gray-400 hover:text-gray-900 dark:hover:text-white px-1.5 py-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+                >
+                  Edit
+                </button>
                 {m.role !== 'owner' && (
                   <button
                     type="button"
                     disabled={deleting !== null}
                     onClick={() => handleDelete(m)}
-                    className="text-xs text-red-500 hover:text-red-400 disabled:opacity-50"
+                    className="ml-1 text-xs text-red-500 hover:text-red-400 disabled:opacity-50"
                   >
                     {deleting === m.id ? '…' : 'Delete'}
                   </button>
@@ -1054,6 +1078,106 @@ function AccountMembersTable({
           ))}
         </tbody>
       </table>
+      {editing && (
+        <EditMemberModal
+          member={editing}
+          auth={auth}
+          onSaved={() => { setEditing(null); onDeleted(); }}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditMemberModal({ member, auth, onSaved, onClose }: {
+  member: YearMember;
+  auth: () => Promise<string>;
+  onSaved: () => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState({
+    first_name: member.first_name,
+    last_name: member.last_name,
+    member_id: normalizeMemberIdInput(member.member_id ?? ''),
+    badge_type: member.badge_type,
+    return_eligible: !!member.return_eligible,
+    role: member.role,
+  });
+  const [saving, setSaving] = useState(false);
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    if (!form.first_name.trim() || !form.last_name.trim()) { alert('First and last name required'); return; }
+    setSaving(true);
+    try {
+      const { role, ...profile } = form;
+      await api.admin.members.update(await auth(), member.year_id, member.id, {
+        ...profile,
+        ...(member.role !== 'owner' && role !== 'owner' ? { role } : {}),
+      });
+      onSaved();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-1">
+          <h3 className="font-bold text-gray-900 dark:text-white">Edit user</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-900 dark:hover:text-white" aria-label="Close">✕</button>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">Saving also updates their own row on every board this year.</p>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="First Name">
+              <input type="text" value={form.first_name} onChange={(e) => set('first_name', e.target.value)} className={inputCls} />
+            </Field>
+            <Field label="Last Name">
+              <input type="text" value={form.last_name} onChange={(e) => set('last_name', e.target.value)} className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Member ID">
+              <input
+                type="text"
+                value={form.member_id}
+                onChange={(e) => set('member_id', normalizeMemberIdInput(e.target.value))}
+                className={`${inputCls} font-mono uppercase tracking-wide`}
+                autoCapitalize="characters"
+                spellCheck={false}
+              />
+            </Field>
+            <Field label="Badge Type">
+              <select value={form.badge_type} onChange={(e) => set('badge_type', e.target.value as 'ADULT' | 'JUNIOR')} className={inputCls}>
+                <option value="ADULT">Adult</option>
+                <option value="JUNIOR">Junior / Military / Senior</option>
+              </select>
+            </Field>
+          </div>
+          <Field label="Role">
+            {member.role === 'owner' ? (
+              <p className="text-sm text-gray-500">Owner of this year</p>
+            ) : (
+              <select value={form.role} onChange={(e) => set('role', e.target.value as 'admin' | 'registered')} className={inputCls}>
+                <option value="registered">Registered</option>
+                <option value="admin">Admin</option>
+              </select>
+            )}
+          </Field>
+          <ToggleSwitch checked={form.return_eligible} onChange={(v) => set('return_eligible', v)} label="Return eligible" />
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button onClick={save} disabled={saving} className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2 rounded">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-900 px-4">Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1112,6 +1236,16 @@ function PeopleTab({
     if (!window.confirm(`Delete ${p.first_name} ${p.last_name}?`)) return;
     try {
       await api.admin.participants.delete(await auth(), event.id, p.id);
+      onUpdate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  const handleMoveGroup = async (p: Participant, groupId: number | null) => {
+    if (!event) return;
+    try {
+      await api.admin.participants.update(await auth(), event.id, p.id, { group_id: groupId });
       onUpdate();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed');
@@ -1208,6 +1342,7 @@ function PeopleTab({
         eventId={event.id}
         auth={auth}
         groups={groups}
+        participants={participants}
         onUpdate={() => { reloadGroups(); onUpdate(); }}
       />
 
@@ -1231,6 +1366,7 @@ function PeopleTab({
               <th className="px-2 py-2 text-left w-8"></th>
               <th className="px-2 py-2 text-left">Name</th>
               <th className="px-2 py-2 text-left">Kind</th>
+              {groups.length > 0 && <th className="px-2 py-2 text-left">Group</th>}
               <th className="px-2 py-2 text-left">Member ID</th>
               <th className="px-2 py-2 text-center">Type</th>
               <th className="px-2 py-2 text-center">Ret.</th>
@@ -1285,6 +1421,19 @@ function PeopleTab({
                     {p.clerk_user_id ? 'Account' : 'Family'}
                   </span>
                 </td>
+                {groups.length > 0 && (
+                  <td className="px-2 py-2">
+                    <select
+                      value={p.group_id ?? ''}
+                      onChange={(e) => void handleMoveGroup(p, e.target.value === '' ? null : Number(e.target.value))}
+                      aria-label={`Group for ${p.first_name} ${p.last_name}`}
+                      className="bg-transparent border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 text-xs text-gray-700 dark:text-gray-300 max-w-[9rem]"
+                    >
+                      <option value="">No group</option>
+                      {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    </select>
+                  </td>
+                )}
                 <td className="px-2 py-2">
                   <MemberId
                     value={p.member_id}
@@ -1371,16 +1520,249 @@ function PeopleTab({
   );
 }
 
+// ─── Lines Tab ────────────────────────────────────────────────────────────────
+
+const QUEUE_STATUS_LABEL: Record<PurchaseQueueStatus, string> = {
+  waiting: 'Waiting',
+  on_deck: 'On deck',
+  in_queueit: 'In Queue-It',
+  buying: 'Buying (through)',
+  done: 'Done',
+  skipped: 'Skipped',
+};
+
+function LinesTab({
+  event, activeRegType, returnEvent, openEvent, onRegTypeChange, auth, participants, onParticipantsChanged,
+}: {
+  event: EventDetail | null;
+  activeRegType: 'return' | 'open';
+  returnEvent: EventDetail | null;
+  openEvent: EventDetail | null;
+  onRegTypeChange: (t: 'return' | 'open') => void;
+  auth: () => Promise<string>;
+  participants: Participant[];
+  onParticipantsChanged: () => void;
+}) {
+  const [queue, setQueue] = useState<PurchaseQueueEntry[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [renaming, setRenaming] = useState<{ id: number; label: string } | null>(null);
+
+  const load = useCallback(async () => {
+    if (!event) return;
+    try {
+      setQueue(await api.purchaseQueue.list(event.id, await auth()));
+    } catch {
+      setQueue([]);
+    } finally {
+      setLoaded(true);
+    }
+  }, [event, auth]);
+
+  useEffect(() => {
+    if (!event) return;
+    let live = true;
+    auth()
+      .then((tok) => api.purchaseQueue.list(event.id, tok))
+      .catch(() => [] as PurchaseQueueEntry[])
+      .then((q) => { if (live) { setQueue(q); setLoaded(true); } });
+    return () => { live = false; };
+  }, [event, auth]);
+
+  const accounts = participants
+    .filter((p) => p.clerk_user_id)
+    .sort((a, b) => `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`));
+  const ordered = [...queue].sort((a, b) => a.position - b.position || a.id - b.id);
+
+  const run = async (fn: (tok: string) => Promise<PurchaseQueueEntry[] | void>, claimsChange = false) => {
+    if (!event) return;
+    setBusy(true);
+    try {
+      const next = await fn(await auth());
+      if (next) setQueue(next); else await load();
+      if (claimsChange) onParticipantsChanged();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const move = (q: PurchaseQueueEntry, delta: -1 | 1) => {
+    const ids = ordered.map((x) => x.id);
+    const i = ids.indexOf(q.id);
+    const j = i + delta;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    void run((tok) => api.purchaseQueue.reorder(event!.id, tok, ids));
+  };
+
+  const setOwner = (q: PurchaseQueueEntry, clerkId: string) => {
+    const who = accounts.find((p) => p.clerk_user_id === clerkId);
+    const holding = participants.filter((p) => p.purchasing_claimed_queue_id === q.id && p.purchasing_claimed_by && !p.any_purchased);
+    if (!window.confirm(
+      `Give "${q.label}" to ${who ? `${who.first_name} ${who.last_name}` : 'them'}?`
+      + (holding.length > 0 ? `\n\n${plural(holding.length, 'open claim')} on it will be released so the new owner can claim again.` : ''),
+    )) return;
+    void run((tok) => api.admin.purchaseQueue.setOwner(tok, event!.id, q.id, clerkId), true);
+  };
+
+  const remove = (q: PurchaseQueueEntry) => {
+    if (!window.confirm(`Remove "${q.label}" (${q.first_name} ${q.last_name}) from the line? Anyone it was buying for goes back up for grabs.`)) return;
+    void run((tok) => api.purchaseQueue.leave(event!.id, q.id, tok), true);
+  };
+
+  return (
+    <div className="space-y-4">
+      <EventToggle returnEvent={returnEvent} openEvent={openEvent} active={activeRegType} onChange={onRegTypeChange} />
+      {!event ? (
+        <p className="text-gray-500 text-sm">No event for this registration type.</p>
+      ) : (
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="font-semibold text-gray-800 dark:text-gray-100">Get In Line</h3>
+              <p className="text-gray-500 text-xs mt-1">
+                Every place in line for this event ({ordered.length}). Changes show on the Live Board right away.
+              </p>
+            </div>
+            <button type="button" onClick={() => void load()} className="text-xs text-gray-500 hover:text-gray-900 dark:hover:text-white underline">
+              Refresh
+            </button>
+          </div>
+          {loaded && ordered.length === 0 ? (
+            <p className="text-gray-500 text-sm">Nobody is in line yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[760px]">
+                <thead className="text-gray-400 text-xs border-b border-gray-300 dark:border-gray-700">
+                  <tr>
+                    <th className="px-2 py-2 text-left w-10">#</th>
+                    <th className="px-2 py-2 text-left">Place</th>
+                    <th className="px-2 py-2 text-left">Owner</th>
+                    <th className="px-2 py-2 text-left">Status</th>
+                    <th className="px-2 py-2 text-left">Buying for</th>
+                    <th className="px-2 py-2 w-40"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                  {ordered.map((q, i) => {
+                    const people = participants.filter((p) => p.purchasing_claimed_queue_id === q.id);
+                    const finished = q.status === 'done' || q.status === 'skipped';
+                    return (
+                      <tr key={q.id} className={finished ? 'opacity-60' : ''}>
+                        <td className="px-2 py-2 font-mono text-xs text-gray-500">{i + 1}</td>
+                        <td className="px-2 py-2">
+                          {renaming?.id === q.id ? (
+                            <form
+                              className="flex items-center gap-1"
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                const label = renaming.label.trim();
+                                setRenaming(null);
+                                if (label && label !== q.label) void run((tok) => api.purchaseQueue.rename(event.id, q.id, tok, label));
+                              }}
+                            >
+                              <input
+                                autoFocus
+                                value={renaming.label}
+                                onChange={(e) => setRenaming({ id: q.id, label: e.target.value })}
+                                onKeyDown={(e) => { if (e.key === 'Escape') setRenaming(null); }}
+                                className={`${inputCls} py-1 text-xs`}
+                                aria-label="Place name"
+                              />
+                              <button type="submit" className="text-xs text-green-500">✓</button>
+                            </form>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setRenaming({ id: q.id, label: q.label })}
+                              className="font-medium text-gray-900 dark:text-white hover:underline text-left"
+                              title="Rename"
+                            >
+                              {q.label}
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-2 py-2">
+                          <select
+                            value={q.clerk_user_id}
+                            disabled={busy}
+                            onChange={(e) => setOwner(q, e.target.value)}
+                            aria-label={`Owner of ${q.label}`}
+                            className="bg-transparent border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 text-xs text-gray-800 dark:text-gray-200 max-w-[11rem]"
+                          >
+                            {!accounts.some((p) => p.clerk_user_id === q.clerk_user_id) && (
+                              <option value={q.clerk_user_id}>{q.first_name} {q.last_name}</option>
+                            )}
+                            {accounts.map((p) => (
+                              <option key={p.id} value={p.clerk_user_id!}>{p.first_name} {p.last_name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-2 py-2">
+                          <select
+                            value={q.status}
+                            disabled={busy}
+                            onChange={(e) => {
+                              const status = e.target.value as PurchaseQueueStatus;
+                              const ends = status === 'done' || status === 'skipped';
+                              if (ends && !window.confirm(`Mark "${q.label}" ${QUEUE_STATUS_LABEL[status].toLowerCase()}? Anyone it hasn't finished goes back up for grabs.`)) return;
+                              void run((tok) => api.purchaseQueue.setStatus(event.id, q.id, tok, status), ends);
+                            }}
+                            aria-label={`Status of ${q.label}`}
+                            className="bg-transparent border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 text-xs text-gray-800 dark:text-gray-200"
+                          >
+                            {(Object.keys(QUEUE_STATUS_LABEL) as PurchaseQueueStatus[]).map((s) => (
+                              <option key={s} value={s}>{QUEUE_STATUS_LABEL[s]}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-2 py-2 text-xs text-gray-600 dark:text-gray-400">
+                          {people.length === 0 ? '—' : people.map((p) => (
+                            <span key={p.id} className="mr-2 whitespace-nowrap">
+                              {p.first_name} {p.last_name}{p.any_purchased ? ' ✓' : ''}
+                            </span>
+                          ))}
+                        </td>
+                        <td className="px-2 py-2 text-right whitespace-nowrap">
+                          <button type="button" disabled={busy || i === 0} onClick={() => move(q, -1)} className="px-1.5 text-gray-400 hover:text-gray-900 dark:hover:text-white disabled:opacity-30" aria-label={`Move ${q.label} up`}>▲</button>
+                          <button type="button" disabled={busy || i === ordered.length - 1} onClick={() => move(q, 1)} className="px-1.5 text-gray-400 hover:text-gray-900 dark:hover:text-white disabled:opacity-30" aria-label={`Move ${q.label} down`}>▼</button>
+                          <button type="button" disabled={busy} onClick={() => remove(q)} className="ml-2 text-xs text-red-500 hover:text-red-400 disabled:opacity-50">Remove</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
 // ─── Groups Panel ─────────────────────────────────────────────────────────────
 
 function GroupsPanel({
-  eventId, auth, groups, onUpdate,
+  eventId, auth, groups, participants, onUpdate,
 }: {
   eventId: number;
   auth: () => Promise<string>;
   groups: Group[];
+  /** Board rows; the ones linked to an account can own a group. */
+  participants: Participant[];
   onUpdate: () => void;
 }) {
+  const accounts = participants
+    .filter((p) => p.clerk_user_id)
+    .sort((a, b) => `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`));
+  const ownerName = (clerkId?: string) => {
+    const p = clerkId ? accounts.find((x) => x.clerk_user_id === clerkId) : undefined;
+    return p ? `${p.first_name} ${p.last_name}` : '';
+  };
+  const [editOwner, setEditOwner] = useState('');
   const [addingName, setAddingName] = useState('');
   const [addingColor, setAddingColor] = useState('#6366f1');
   const [addOpen, setAddOpen] = useState(false);
@@ -1430,11 +1812,16 @@ function GroupsPanel({
     setEditingId(g.id);
     setEditName(g.name);
     setEditColor(g.color);
+    setEditOwner(g.owner_clerk_user_id ?? '');
   };
 
   const handleEditSave = async (g: Group) => {
     try {
-      await api.admin.groups.update(await auth(), eventId, g.id, { name: editName, color: editColor });
+      await api.admin.groups.update(await auth(), eventId, g.id, {
+        name: editName,
+        color: editColor,
+        ...(editOwner !== (g.owner_clerk_user_id ?? '') ? { owner_clerk_user_id: editOwner } : {}),
+      });
       setEditingId(null);
       onUpdate();
     } catch (e) {
@@ -1528,6 +1915,18 @@ function GroupsPanel({
                 onChange={(e) => setEditColor(e.target.value)}
                 className="w-6 h-6 rounded cursor-pointer border border-gray-300"
               />
+              <select
+                value={editOwner}
+                onChange={(e) => setEditOwner(e.target.value)}
+                aria-label={`Owner of ${g.name}`}
+                className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-1.5 py-0.5 text-gray-900 dark:text-white text-xs max-w-[10rem]"
+              >
+                <option value="">No owner</option>
+                {editOwner && !ownerName(editOwner) && <option value={editOwner}>Not on this board</option>}
+                {accounts.map((p) => (
+                  <option key={p.id} value={p.clerk_user_id!}>{p.first_name} {p.last_name}</option>
+                ))}
+              </select>
               <button onClick={() => handleEditSave(g)} className="text-xs text-green-400 hover:text-green-300">✓</button>
               <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-gray-900">✕</button>
             </div>
@@ -1544,7 +1943,13 @@ function GroupsPanel({
               }`}
               style={{ backgroundColor: g.color }}
             >
-              <button onClick={() => startEdit(g)} className="hover:opacity-80">{g.name}</button>
+              <button
+                onClick={() => startEdit(g)}
+                className="hover:opacity-80"
+                title={ownerName(g.owner_clerk_user_id) ? `Owner: ${ownerName(g.owner_clerk_user_id)} · click to edit` : 'No owner · click to edit'}
+              >
+                {g.name}
+              </button>
               <button
                 onClick={() => handleDelete(g)}
                 className="ml-0.5 opacity-70 hover:opacity-100 text-white"
@@ -1717,6 +2122,30 @@ function ParticipantForm({
             onChange={(v) => set('return_eligible', v)}
             label="Return eligible"
           />
+          <Field label="Purchased Days">
+            <div className="flex flex-wrap gap-3">
+              {DAY_KEYS.map((day) => (
+                <label key={day} className="flex items-center gap-1.5 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(value[`pur_${day}` as keyof Participant])}
+                    onChange={(e) => set(`pur_${day}` as keyof Participant, e.target.checked)}
+                    className="accent-green-500"
+                  />
+                  {dayLabel(day)}
+                </label>
+              ))}
+            </div>
+          </Field>
+          <Field label="Bought by">
+            <input
+              type="text"
+              value={value.who_purchased ?? ''}
+              onChange={(e) => set('who_purchased', e.target.value)}
+              className={inputCls}
+              placeholder="Who bought these days"
+            />
+          </Field>
           <Field label="Notes">
             <input type="text" value={value.notes ?? ''} onChange={(e) => set('notes', e.target.value)} className={inputCls} />
           </Field>

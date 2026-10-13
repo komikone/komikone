@@ -4,6 +4,7 @@ import {
   CLAIM_TIMEOUT_MS,
   HANDLING_FEE_CENTS,
   applySimPatches,
+  canAddToBuyList,
   claimRemainingMs,
   computeAllPurchased,
   computePurchaseTotal,
@@ -17,6 +18,7 @@ import {
   purchasedByMe,
   reDerive,
   setSimPatch,
+  soldOutOnly,
 } from './purchaseBoard';
 
 const event: EventDetail = {
@@ -83,6 +85,36 @@ function participant(over: Partial<Participant> = {}): Participant {
     ...over,
   };
 }
+
+describe('sold-out days', () => {
+  const satGone = { ...event, sold_out_sat: 1 } as EventDetail;
+
+  it('takes someone who only wanted a sold-out day off buy lists', () => {
+    const p = reDerive(participant({ req_sat: true }), satGone);
+    expect(soldOutOnly(p)).toBe(true);
+    expect(canAddToBuyList(p, satGone)).toBe(false);
+    expect(isClaimable(p, satGone)).toBe(false);
+  });
+
+  it('keeps someone who still has another day to buy, offering only that day', () => {
+    const p = reDerive(participant({ req_sat: true, req_sun: true }), satGone);
+    expect(soldOutOnly(p)).toBe(false);
+    expect(p.gaps).toEqual(['Sun']);
+    expect(canAddToBuyList(p, satGone)).toBe(true);
+  });
+
+  it('counts someone already bought a day as done, not sold out', () => {
+    const p = reDerive(participant({ req_sat: true, req_sun: true, pur_sun: true }), satGone);
+    expect(soldOutOnly(p)).toBe(false);
+    expect(canAddToBuyList(p, satGone)).toBe(false);
+  });
+
+  it('brings them back when the day is marked available again', () => {
+    const p = reDerive(participant({ req_sat: true }), event);
+    expect(soldOutOnly(p)).toBe(false);
+    expect(canAddToBuyList(p, event)).toBe(true);
+  });
+});
 
 describe('claim timing', () => {
   it('treats bare D1 timestamps as UTC', () => {
