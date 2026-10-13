@@ -5,7 +5,9 @@ type Theme = 'dark' | 'light';
 export type ThemePreference = Theme | 'system';
 
 // index.html reads this key before first paint, so keep the two in sync.
-const STORAGE_KEY = 'komikone_theme';
+const STORAGE_KEY = 'komikone_theme_pref';
+// Choices saved under the old key predate Auto; dropping them puts everyone back on Auto once.
+const LEGACY_STORAGE_KEY = 'komikone_theme';
 const NEXT_PREFERENCE: Record<ThemePreference, ThemePreference> = {
   system: 'light',
   light: 'dark',
@@ -25,6 +27,7 @@ function applyTheme(theme: Theme) {
 }
 
 function readStoredPreference(): ThemePreference {
+  localStorage.removeItem(LEGACY_STORAGE_KEY);
   const saved = localStorage.getItem(STORAGE_KEY);
   return saved === 'light' || saved === 'dark' ? saved : 'system';
 }

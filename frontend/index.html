@@ -13,7 +13,7 @@
       (function () {
         try {
           if (location.pathname === '/') return;
-          var saved = localStorage.getItem('komikone_theme');
+          var saved = localStorage.getItem('komikone_theme_pref');
           var dark = saved === 'dark' || (saved !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
           if (dark) document.documentElement.classList.add('dark');
         } catch (e) {}
