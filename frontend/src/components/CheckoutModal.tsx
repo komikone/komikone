@@ -112,7 +112,7 @@ export function CheckoutModal({
                 : 'Complete Checkout'}
           </button>
           <p className="text-[10px] text-gray-500 text-center">
-            Completing marks this browser done in the Queue-It line and takes everyone finished off your list.
+            Completing marks this browser done in Get In Line and takes everyone finished off your list.
           </p>
         </div>
       </div>
