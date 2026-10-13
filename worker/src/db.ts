@@ -30,6 +30,8 @@ export type Event = {
   sold_out_fri?: number;
   sold_out_sat?: number;
   sold_out_sun?: number;
+  /** Set on a practice copy: the real event it rehearses. */
+  practice_of?: number | null;
   created_at: string;
   updated_at: string;
 };

@@ -3,7 +3,6 @@ import type { EventDetail, Participant } from './api';
 import {
   CLAIM_TIMEOUT_MS,
   HANDLING_FEE_CENTS,
-  applySimPatches,
   canAddToBuyList,
   claimRemainingMs,
   computeAllPurchased,
@@ -17,7 +16,6 @@ import {
   purchaseBlockers,
   purchasedByMe,
   reDerive,
-  setSimPatch,
   soldOutOnly,
 } from './purchaseBoard';
 
@@ -203,45 +201,33 @@ describe('purchase blockers', () => {
   });
 });
 
-describe('simulation sandbox', () => {
+describe('re-deriving after an edit', () => {
   const now = Date.parse('2026-10-17T16:00:30Z');
 
-  it('leaves the roster untouched and re-derives patched rows', () => {
-    const roster = [participant({ id: 1 }), participant({ id: 2, first_name: 'Henry' })];
-    const patches = setSimPatch({}, 1, {
+  it('recomputes gaps, totals and claim state', () => {
+    const view = reDerive(participant({
+      id: 1,
       purchasing_claimed_by: 'Tony Nguyen',
       purchasing_claimed_at: '2026-10-17 16:00:00',
       pur_sat: true,
       who_purchased: 'Tony Nguyen',
-    });
+    }), event, now);
 
-    const view = applySimPatches(roster, patches, event, now);
-
-    expect(view[0].all_purchased).toBe(true);
-    expect(view[0].gaps).toEqual([]);
+    expect(view.all_purchased).toBe(true);
+    expect(view.gaps).toEqual([]);
     // One Saturday badge plus Comic-Con's per-member handling fee.
-    expect(view[0].purchase_total).toBe(8000 + HANDLING_FEE_CENTS);
-    expect(view[0].claim_active).toBe(true);
-    // Untouched rows and the underlying roster objects are unchanged.
-    expect(view[1]).toBe(roster[1]);
-    expect(roster[0].pur_sat).toBe(false);
-    expect(roster[0].all_purchased).toBe(false);
+    expect(view.purchase_total).toBe(8000 + HANDLING_FEE_CENTS);
+    expect(view.claim_active).toBe(true);
   });
 
-  it('returns the original list when there is nothing to practice', () => {
-    const roster = [participant()];
-    expect(applySimPatches(roster, {}, event, now)).toBe(roster);
-  });
-
-  it('frees the practice slot when the practice purchase completes', () => {
-    const roster = [participant({ id: 1 })];
-    const patches = setSimPatch({}, 1, {
+  it('frees the slot once the purchase completes', () => {
+    const view = reDerive(participant({
+      id: 1,
       purchasing_claimed_by: 'Tony Nguyen',
       purchasing_claimed_at: '2026-10-17 16:00:00',
       pur_sat: true,
-    });
-    const view = applySimPatches(roster, patches, event, now);
-    expect(holdsClaimSlot(view[0], 'Tony Nguyen', now)).toBe(false);
+    }), event, now);
+    expect(holdsClaimSlot(view, 'Tony Nguyen', now)).toBe(false);
   });
 });
 

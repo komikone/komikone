@@ -44,6 +44,8 @@ export type EventDetail = EventSummary & {
   sold_out_fri?: number;
   sold_out_sat?: number;
   sold_out_sun?: number;
+  /** Set on a practice copy: the real event it rehearses. */
+  practice_of?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -406,6 +408,19 @@ export const api = {
     save: (eventId: number, clerkToken: string, participantIds: number[]) =>
       req<{ participant_ids: number[] }>(`/api/events/${eventId}/buy-list`, {
         method: 'PUT', headers: authHeaders(clerkToken), body: JSON.stringify({ participant_ids: participantIds }),
+      }),
+  },
+
+  practice: {
+    /** Joins the shared practice board for an event, building it if needed. */
+    join: (eventId: number, clerkToken: string) =>
+      req<{ id: number; practice_of: number }>(`/api/events/${eventId}/practice`, {
+        method: 'POST', headers: authHeaders(clerkToken),
+      }),
+    /** Throws practice away and rebuilds it from the real board. */
+    reset: (eventId: number, clerkToken: string) =>
+      req<{ id: number; practice_of: number }>(`/api/events/${eventId}/practice/reset`, {
+        method: 'POST', headers: authHeaders(clerkToken),
       }),
   },
 

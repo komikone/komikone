@@ -475,7 +475,7 @@ app.post('/api/invite-requests', async (c) => {
 
 app.get('/api/events', async (c) => {
   const rows = await c.env.DB.prepare(
-    'SELECT id, year, year_id, name, reg_type, status FROM events ORDER BY year DESC, id DESC'
+    'SELECT id, year, year_id, name, reg_type, status FROM events WHERE practice_of IS NULL ORDER BY year DESC, id DESC'
   ).all<Pick<Event, 'id' | 'year' | 'year_id' | 'name' | 'reg_type' | 'status'>>();
   return json(rows.results);
 });
@@ -954,6 +954,128 @@ app.post('/api/events/:id/purchase-queue/join', async (c) => {
   return json(await listPurchaseQueue(c.env.DB, eventId));
 });
 
+// ── Practice: a shared copy of the board to rehearse purchase day on ─────────
+//
+// Everyone who joins practice lands on the same copy, so they see each other's practice
+// claims, purchases, sold-out days and places in line, while the real board stays
+// untouched. Starting over or opening real purchasing throws the copy away.
+
+const COPY_SKIP = new Set(['id', 'created_at', 'updated_at']);
+
+function insertCopy(db: D1Database, table: string, row: Record<string, unknown>, over: Record<string, unknown>) {
+  const data = { ...row, ...over };
+  const cols = Object.keys(data).filter((k) => !COPY_SKIP.has(k));
+  return db.prepare(
+    `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`
+  ).bind(...cols.map((k) => data[k] ?? null));
+}
+
+async function deletePracticeCopies(db: D1Database, eventId: number): Promise<void> {
+  const copies = await db.prepare('SELECT id FROM events WHERE practice_of = ?').bind(eventId).all<{ id: number }>();
+  for (const { id } of copies.results ?? []) {
+    await db.batch([
+      db.prepare('DELETE FROM purchase_queue WHERE event_id = ?').bind(id),
+      db.prepare('DELETE FROM buy_list_entries WHERE event_id = ?').bind(id),
+      db.prepare('DELETE FROM participants WHERE event_id = ?').bind(id),
+      db.prepare('DELETE FROM groups WHERE event_id = ?').bind(id),
+      db.prepare('DELETE FROM coordinators WHERE event_id = ?').bind(id),
+      db.prepare('DELETE FROM events WHERE id = ?').bind(id),
+    ]);
+  }
+}
+
+async function createPracticeCopy(db: D1Database, source: Event): Promise<number> {
+  const created = await insertCopy(db, 'events', source as unknown as Record<string, unknown>, {
+    name: `${source.name} · Practice`,
+    status: 'purchasing',
+    year_id: null,
+    practice_of: source.id,
+  }).run();
+  const copyId = Number(created.meta.last_row_id);
+
+  const groups = await db.prepare('SELECT * FROM groups WHERE event_id = ? ORDER BY id').bind(source.id).all<Record<string, unknown>>();
+  const groupMap = new Map<number, number>();
+  for (const g of groups.results ?? []) {
+    const res = await insertCopy(db, 'groups', g, { event_id: copyId }).run();
+    groupMap.set(Number(g.id), Number(res.meta.last_row_id));
+  }
+
+  const people = await db.prepare('SELECT * FROM participants WHERE event_id = ? ORDER BY id').bind(source.id).all<Record<string, unknown>>();
+  if ((people.results ?? []).length > 0) {
+    await db.batch((people.results ?? []).map((p) => insertCopy(db, 'participants', p, {
+      event_id: copyId,
+      group_id: p.group_id == null ? null : groupMap.get(Number(p.group_id)) ?? null,
+      practice_source_id: p.id,
+    })));
+  }
+  const copied = await db.prepare('SELECT id, practice_source_id FROM participants WHERE event_id = ?')
+    .bind(copyId).all<{ id: number; practice_source_id: number }>();
+  const personMap = new Map((copied.results ?? []).map((r) => [r.practice_source_id, r.id]));
+
+  const places = await db.prepare('SELECT * FROM purchase_queue WHERE event_id = ? ORDER BY position, id').bind(source.id).all<Record<string, unknown>>();
+  const placeRows = (places.results ?? []).filter((q) => personMap.has(Number(q.participant_id)));
+  if (placeRows.length > 0) {
+    await db.batch(placeRows.map((q) => insertCopy(db, 'purchase_queue', q, {
+      event_id: copyId,
+      participant_id: personMap.get(Number(q.participant_id)),
+    })));
+  }
+
+  // Two people joining at once can each build a copy; everyone settles on the oldest.
+  const oldest = await db.prepare('SELECT MIN(id) AS id FROM events WHERE practice_of = ?')
+    .bind(source.id).first<{ id: number }>();
+  if (oldest && oldest.id !== copyId) {
+    await db.batch([
+      db.prepare('DELETE FROM purchase_queue WHERE event_id = ?').bind(copyId),
+      db.prepare('DELETE FROM participants WHERE event_id = ?').bind(copyId),
+      db.prepare('DELETE FROM groups WHERE event_id = ?').bind(copyId),
+      db.prepare('DELETE FROM events WHERE id = ?').bind(copyId),
+    ]);
+    return oldest.id;
+  }
+  return copyId;
+}
+
+/** Anyone with a row on the real event can practice, as can admins. */
+async function canPractice(db: D1Database, access: { isAdmin: boolean; userId: string }, eventId: number): Promise<boolean> {
+  if (access.isAdmin) return true;
+  return !!(await db.prepare('SELECT id FROM participants WHERE event_id = ? AND clerk_user_id = ? LIMIT 1')
+    .bind(eventId, access.userId).first());
+}
+
+/** Joins practice for an event, building the shared copy if nobody has yet. Returns its id. */
+app.post('/api/events/:id/practice', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+  const event = await getEvent(c.env.DB, eventId);
+  if (!event) return err('Event not found', 404);
+  if (event.practice_of) return json({ id: event.id, practice_of: event.practice_of });
+  if (event.status === 'purchasing') return err('Purchasing is open, so practice is closed', 409);
+  if (!(await canPractice(c.env.DB, access, eventId))) return err('Only people on this board can practice', 403);
+
+  const existing = await c.env.DB.prepare('SELECT MIN(id) AS id FROM events WHERE practice_of = ?')
+    .bind(eventId).first<{ id: number | null }>();
+  const id = existing?.id ?? await createPracticeCopy(c.env.DB, event);
+  return json({ id, practice_of: eventId });
+});
+
+/** Starts practice over: throws the shared copy away and builds a fresh one from the real board. */
+app.post('/api/events/:id/practice/reset', async (c) => {
+  const eventId = Number(c.req.param('id'));
+  const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
+  if (!access) return err('Authentication required', 401);
+  const given = await getEvent(c.env.DB, eventId);
+  if (!given) return err('Event not found', 404);
+  const source = given.practice_of ? await getEvent(c.env.DB, given.practice_of) : given;
+  if (!source) return err('Event not found', 404);
+  if (source.status === 'purchasing') return err('Purchasing is open, so practice is closed', 409);
+  if (!(await canPractice(c.env.DB, access, source.id))) return err('Only people on this board can practice', 403);
+
+  await deletePracticeCopies(c.env.DB, source.id);
+  return json({ id: await createPracticeCopy(c.env.DB, source), practice_of: source.id });
+});
+
 // ── Buy list: each member's own order of who to buy for ──────────────────────
 
 const MAX_BUY_LIST = 50;
@@ -965,11 +1087,27 @@ async function getBuyList(db: D1Database, eventId: number, userId: string): Prom
   return (rows.results ?? []).map((r) => r.participant_id);
 }
 
+/**
+ * Practice uses your real buy list, so planning done while practicing is kept. Maps
+ * between practice row ids and the real rows they were copied from.
+ */
+async function practiceIdMap(db: D1Database, copyId: number): Promise<Map<number, number>> {
+  const rows = await db.prepare('SELECT id, practice_source_id FROM participants WHERE event_id = ?')
+    .bind(copyId).all<{ id: number; practice_source_id: number | null }>();
+  return new Map((rows.results ?? []).filter((r) => r.practice_source_id != null).map((r) => [r.practice_source_id!, r.id]));
+}
+
 app.get('/api/events/:id/buy-list', async (c) => {
   const eventId = Number(c.req.param('id'));
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
   if (!access) return err('Authentication required', 401);
   if (access.userId === 'admin') return json({ participant_ids: [] });
+  const event = await getEvent(c.env.DB, eventId);
+  if (event?.practice_of) {
+    const toCopy = await practiceIdMap(c.env.DB, eventId);
+    const real = await getBuyList(c.env.DB, event.practice_of, access.userId);
+    return json({ participant_ids: real.map((id) => toCopy.get(id)).filter((id): id is number => id != null) });
+  }
   return json({ participant_ids: await getBuyList(c.env.DB, eventId, access.userId) });
 });
 
@@ -994,11 +1132,20 @@ app.put('/api/events/:id/buy-list', async (c) => {
     if ((found.results ?? []).length !== ids.length) return err('Everyone on a buy list must be on this event', 400);
   }
 
+  let listEventId = eventId;
+  let listIds = ids;
+  if (event.practice_of) {
+    const toCopy = await practiceIdMap(c.env.DB, eventId);
+    const toReal = new Map([...toCopy].map(([real, copy]) => [copy, real]));
+    listEventId = event.practice_of;
+    listIds = ids.map((id) => toReal.get(id)).filter((id): id is number => id != null);
+  }
+
   await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM buy_list_entries WHERE event_id = ? AND clerk_user_id = ?').bind(eventId, access.userId),
-    ...ids.map((pid, i) => c.env.DB.prepare(
+    c.env.DB.prepare('DELETE FROM buy_list_entries WHERE event_id = ? AND clerk_user_id = ?').bind(listEventId, access.userId),
+    ...listIds.map((pid, i) => c.env.DB.prepare(
       'INSERT INTO buy_list_entries (event_id, clerk_user_id, participant_id, rank) VALUES (?, ?, ?, ?)'
-    ).bind(eventId, access.userId, pid, i + 1)),
+    ).bind(listEventId, access.userId, pid, i + 1)),
   ]);
   return json({ participant_ids: ids });
 });
@@ -2391,11 +2538,14 @@ admin.patch('/events/:id', async (c) => {
   values.push(id);
 
   await c.env.DB.prepare(`UPDATE events SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
+  // Real purchasing replaces practice, so nobody is left rehearsing on a stale copy.
+  if (body.status === 'purchasing') await deletePracticeCopies(c.env.DB, id);
   return json({ ok: true });
 });
 
 admin.delete('/events/:id', async (c) => {
   const id = Number(c.req.param('id'));
+  await deletePracticeCopies(c.env.DB, id);
   const res = await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM purchase_queue WHERE event_id = ?').bind(id),
     c.env.DB.prepare('DELETE FROM buy_list_entries WHERE event_id = ?').bind(id),
@@ -3358,7 +3508,7 @@ app.get('/api/stats', async (c) => {
         COUNT(DISTINCT e.year) AS years_active,
         GROUP_CONCAT(DISTINCT e.year ORDER BY e.year) AS year_list
       FROM participants p JOIN events e ON e.id = p.event_id
-      WHERE who_purchased != '' AND LENGTH(who_purchased) < 25
+      WHERE e.practice_of IS NULL AND who_purchased != '' AND LENGTH(who_purchased) < 25
         AND (p.pur_preview OR p.pur_thu OR p.pur_fri OR p.pur_sat OR p.pur_sun)
       GROUP BY who_purchased
       ORDER BY participants_served DESC
@@ -3372,7 +3522,7 @@ app.get('/api/stats', async (c) => {
         COUNT(DISTINCT e.year) AS year_count,
         GROUP_CONCAT(DISTINCT e.year ORDER BY e.year) AS years
       FROM participants p JOIN events e ON e.id = p.event_id
-      WHERE p.member_id != ''
+      WHERE e.practice_of IS NULL AND p.member_id != ''
       GROUP BY UPPER(p.member_id)
       HAVING year_count >= 2
       ORDER BY year_count DESC, UPPER(p.member_id)

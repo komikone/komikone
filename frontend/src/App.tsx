@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
 import { ThemeProvider } from './lib/useTheme';
 import Home from './pages/Home';
@@ -26,6 +26,12 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Remounts the board per event, so joining or leaving practice starts from a clean slate. */
+function LiveBoardRoute() {
+  const { eventId } = useParams();
+  return <LiveBoard key={eventId} />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -44,7 +50,7 @@ export default function App() {
           <Route path="invitations" element={<DashboardInvitations />} />
         </Route>
         <Route path="/profile" element={<Navigate to="/dashboard/billing" replace />} />
-        <Route path="/live/:eventId" element={<RequireAuth><LiveBoard /></RequireAuth>} />
+        <Route path="/live/:eventId" element={<RequireAuth><LiveBoardRoute /></RequireAuth>} />
         <Route path="/payment/:eventId" element={<RequireAuth><Payment /></RequireAuth>} />
         <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
         </Routes>

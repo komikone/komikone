@@ -191,25 +191,7 @@ export function isClaimable(p: Participant, event: EventDetail | null): boolean 
   return purchaseBlockers(p, event).length === 0 && computeGaps(p, event).length > 0;
 }
 
-// ─── Simulation sandbox ──────────────────────────────────────────────────────
-
-/**
- * Practice-mode edits. Held in the browser only — Simulate never writes to the
- * event roster, so exiting practice restores the real board exactly.
- */
-export type SimPatch = Partial<Pick<Participant,
-  | 'purchasing_claimed_by'
-  | 'purchasing_claimed_at'
-  | 'purchasing_claimed_queue_id'
-  | 'pur_preview'
-  | 'pur_thu'
-  | 'pur_fri'
-  | 'pur_sat'
-  | 'pur_sun'
-  | 'who_purchased'
->>;
-
-export type SimPatches = Record<number, SimPatch>;
+// ─── Local re-derivation ─────────────────────────────────────────────────────
 
 /** Recompute the fields the server normally derives, after a local edit. */
 export function reDerive(p: Participant, event: EventDetail | null, now = Date.now()): Participant {
@@ -224,22 +206,4 @@ export function reDerive(p: Participant, event: EventDetail | null, now = Date.n
   };
   withDerived.claim_active = isClaimLive(withDerived, now);
   return withDerived;
-}
-
-export function applySimPatches(
-  participants: Participant[],
-  patches: SimPatches,
-  event: EventDetail | null,
-  now = Date.now(),
-): Participant[] {
-  if (Object.keys(patches).length === 0) return participants;
-  return participants.map((p) => {
-    const patch = patches[p.id];
-    if (!patch) return p;
-    return reDerive({ ...p, ...patch }, event, now);
-  });
-}
-
-export function setSimPatch(patches: SimPatches, id: number, patch: SimPatch): SimPatches {
-  return { ...patches, [id]: { ...patches[id], ...patch } };
 }

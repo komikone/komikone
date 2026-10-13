@@ -23,8 +23,6 @@ import {
   CLAIM_TIMEOUT_MINUTES,
   MAX_ACTIVE_CLAIMS,
   type PurchaseBlocker,
-  type SimPatches,
-  applySimPatches,
   canAddToBuyList,
   claimRemainingMs,
   formatClaimCountdown,
@@ -39,7 +37,6 @@ import {
   purchasedByMe,
   SALE_DAY_FULL,
   SALE_DAY_LABEL,
-  setSimPatch,
   soldOutDays,
   soldOutOnly,
 } from '../lib/purchaseBoard';
@@ -155,12 +152,6 @@ function priorityScore(p: Participant, me: Participant | null, identityId: numbe
   return groupBonus + p.gaps.length * 100 + dayScore;
 }
 
-const SIM_STORAGE_PREFIX = 'komikone_sim_';
-
-function simStorageKey(eventId: string | undefined) {
-  return `${SIM_STORAGE_PREFIX}${eventId ?? 'global'}`;
-}
-
 /** Self, family you registered, or group you own. No admin bypass on the live board. */
 function canEditIdentityRow(
   p: Participant,
@@ -240,11 +231,8 @@ export default function LiveBoard() {
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editParticipant, setEditParticipant] = useState<Participant | null>(null);
   const [flash, setFlash] = useState<Record<number, boolean>>({});
-  const [simulation, setSimulation] = useState(() => {
-    try { return localStorage.getItem(simStorageKey(eventId)) === '1'; } catch { return false; }
-  });
-  /** Practice edits live here only — Simulate never writes to the roster. */
-  const [simPatches, setSimPatches] = useState<SimPatches>({});
+  const [practiceBusy, setPracticeBusy] = useState(false);
+  const practiceOfRef = useRef<number | null>(null);
   /** null = still checking; string = block reason before board access */
   const [accessBlock, setAccessBlock] = useState<'member_id' | 'return_eligible' | null | undefined>(undefined);
   const [openLiveEventId, setOpenLiveEventId] = useState<number | null>(null);
@@ -254,23 +242,27 @@ export default function LiveBoard() {
 
   const isPlatformAdmin = user?.publicMetadata?.role === 'admin';
 
-  useEffect(() => {
+  const participants = serverParticipants;
+  /** On the shared practice copy: the real event it rehearses. */
+  const practiceOf = event?.practice_of ?? null;
+  const canPractice = practiceOf == null && event != null && event.status !== 'purchasing' && event.status !== 'complete';
+
+  const goPractice = async (reset: boolean) => {
+    if (reset && !window.confirm('Start practice over for everyone practicing? All practice claims, purchases and places in line go back to the real board.')) return;
+    setPracticeBusy(true);
     try {
-      localStorage.setItem(simStorageKey(eventId), simulation ? '1' : '0');
-    } catch { /* ignore */ }
-  }, [simulation, eventId]);
-
-  const participants = simulation
-    ? applySimPatches(serverParticipants, simPatches, event, now)
-    : serverParticipants;
-
-  const exitSimulation = () => {
-    setSimulation(false);
-    setSimPatches({});
-    setEditingRow(null);
+      const clerkToken = await getToken({ template: 'komikone' });
+      if (!clerkToken) return;
+      const { id } = reset
+        ? await api.practice.reset(Number(eventId), clerkToken)
+        : await api.practice.join(Number(eventId), clerkToken);
+      navigate(`/live/${id}`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not open practice');
+    } finally {
+      setPracticeBusy(false);
+    }
   };
-
-  const hasSimEdits = Object.keys(simPatches).length > 0;
 
   // Tick once per second while any claim or queue ETA is counting down.
   const hasLiveClaims = participants.some((p) => isClaimLive(p, now));
@@ -391,10 +383,20 @@ export default function LiveBoard() {
       });
       setLastUpdated(new Date());
       setError('');
+      practiceOfRef.current = ev.practice_of ?? null;
     } catch (e) {
+      const realId = practiceOfRef.current;
+      if (realId != null && e instanceof Error && e.message === 'Event not found') {
+        // Someone started practice over, or real purchasing opened: follow along.
+        practiceOfRef.current = null;
+        api.practice.join(realId, clerkToken)
+          .then(({ id }) => navigate(`/live/${id}`))
+          .catch(() => navigate(`/live/${realId}`));
+        return;
+      }
       setError(e instanceof Error ? e.message : 'Failed to load');
     }
-  }, [eventId, getToken, serverParticipants, applyQueue]);
+  }, [eventId, getToken, serverParticipants, applyQueue, navigate]);
 
   useEffect(() => {
     fetchAll();
@@ -521,16 +523,6 @@ export default function LiveBoard() {
     ).length;
     const batch = picks.filter((p) => purchaseBlockers(p, event).length === 0).slice(0, Math.max(0, room));
     if (batch.length === 0) return;
-    if (simulation) {
-      const at = new Date().toISOString();
-      setSimPatches((prev) => batch.reduce(
-        (acc, p) => setSimPatch(acc, p.id, {
-          purchasing_claimed_by: myName, purchasing_claimed_at: at, purchasing_claimed_queue_id: place.id,
-        }),
-        prev,
-      ));
-      return;
-    }
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     const missed: string[] = [];
@@ -546,14 +538,6 @@ export default function LiveBoard() {
   };
 
   const handleUnclaim = async (p: Participant) => {
-    if (simulation) {
-      setSimPatches((prev) => setSimPatch(prev, p.id, {
-        purchasing_claimed_by: '',
-        purchasing_claimed_at: null,
-        purchasing_claimed_queue_id: null,
-      }));
-      return;
-    }
     try {
       const clerkToken = await getToken({ template: 'komikone' });
       if (!clerkToken) return;
@@ -569,13 +553,6 @@ export default function LiveBoard() {
       alert('Claim this person first before marking purchase days');
       return;
     }
-    if (simulation) {
-      setSimPatches((prev) => setSimPatch(prev, p.id, {
-        [`pur_${day}`]: checked,
-        who_purchased: p.who_purchased || myDisplayName,
-      }));
-      return;
-    }
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     await api.participants.updatePurchased(Number(eventId), p.id, clerkToken, {
@@ -586,7 +563,7 @@ export default function LiveBoard() {
   };
 
   const handleRequestedToggle = async (p: Participant, day: DayKey, checked: boolean) => {
-    if (simulation || event?.status === 'purchasing') {
+    if (event?.status === 'purchasing') {
       alert('Requested days are locked during purchasing');
       return;
     }
@@ -610,11 +587,6 @@ export default function LiveBoard() {
     const myDisplayName = me ? `${me.first_name} ${me.last_name}` : '';
     if (!isPlatformAdmin && !canEditPurchases(p, myDisplayName, now)) {
       alert('Claim this person first before editing who bought');
-      setEditingRow(null);
-      return;
-    }
-    if (simulation) {
-      setSimPatches((prev) => setSimPatch(prev, p.id, { who_purchased: who }));
       setEditingRow(null);
       return;
     }
@@ -701,7 +673,7 @@ export default function LiveBoard() {
 
   // ─── Derived data ────────────────────────────────────────────────────────────
 
-  const boardStatus = simulation ? 'purchasing' : (event?.status ?? '');
+  const boardStatus = event?.status ?? '';
   const showPurchaseChrome = boardStatus === 'purchasing';
 
   const getColWidth = (col: ColKey): number => colWidths[col] ?? DEFAULT_WIDTHS[col];
@@ -727,7 +699,7 @@ export default function LiveBoard() {
     ? participants.filter((p) => holdsClaimSlot(p, myDisplayName, now)).length
     : 0;
   // Default: you + group pinned; during purchasing your active claims rise next (claim order).
-  // Manual drag order applies outside purchase/simulation only — purchase toggles don't reshuffle.
+  // Manual drag order applies outside purchasing only — purchase toggles don't reshuffle.
   const displayRows = customRowOrder && !showPurchaseChrome
     ? filtered
     : [...filtered].sort((a, b) => {
@@ -867,7 +839,7 @@ export default function LiveBoard() {
 
   const handleQueueClearAll = async () => {
     const count = buyerQueue.length;
-    const live = event?.status === 'purchasing' && !simulation;
+    const live = event?.status === 'purchasing' && practiceOf == null;
     if (!window.confirm(
       `Clear all ${count} place${count === 1 ? '' : 's'} from the Queue-It line for everyone?`
       + (live ? '\n\nPurchase day is LIVE. Only do this if these are leftover practice places.' : '')
@@ -1037,39 +1009,45 @@ export default function LiveBoard() {
   }
 
   return (
-    <div className={`h-screen bg-amber-50 dark:bg-gray-950 text-gray-950 dark:text-white flex flex-col overflow-hidden ${simulation ? 'ring-4 ring-inset ring-fuchsia-500' : ''}`}>
+    <div className={`h-screen bg-amber-50 dark:bg-gray-950 text-gray-950 dark:text-white flex flex-col overflow-hidden ${practiceOf != null ? 'ring-4 ring-inset ring-fuchsia-500' : ''}`}>
 
       {/* ── Top bar ── */}
       <div className={`bg-zinc-950 dark:bg-zinc-900 border-b-[5px] px-3 sm:px-4 py-2.5 flex items-center gap-2 sm:gap-3 shrink-0 ${
-        simulation ? 'border-fuchsia-500' : 'border-yellow-400 dark:border-yellow-500'
+        practiceOf != null ? 'border-fuchsia-500' : 'border-yellow-400 dark:border-yellow-500'
       }`}>
         <Link to="/" className="font-bangers text-yellow-400 text-xl tracking-wide shrink-0 hover:text-yellow-300 transition-colors">komikone</Link>
         <span className="text-zinc-600 dark:text-zinc-500 shrink-0 text-base hidden sm:inline">·</span>
         <div className="flex-1 min-w-0">
           <div className="font-bangers text-white text-lg tracking-wide leading-tight truncate" title={event?.name}>{event?.name}</div>
           <div className={`text-[10px] uppercase tracking-widest leading-tight truncate ${
-            simulation ? 'text-fuchsia-400' : 'text-yellow-600 dark:text-yellow-500'
+            practiceOf != null ? 'text-fuchsia-400' : 'text-yellow-600 dark:text-yellow-500'
           }`}>
             {event?.reg_type === 'return' ? 'Return Reg' : 'Open Reg'} · Live Board
-            {simulation && ' · Simulation'}
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <span className="text-zinc-500 dark:text-zinc-400 text-xs hidden sm:block">
             {lastUpdated ? lastUpdated.toLocaleTimeString() : '…'}
           </span>
-          <button
-            type="button"
-            onClick={() => (simulation ? exitSimulation() : setSimulation(true))}
-            className={`text-xs font-bold px-2.5 py-0.5 rounded border transition-colors ${
-              simulation
-                ? 'bg-fuchsia-500 text-white border-fuchsia-300 shadow-[0_0_12px_rgba(217,70,239,0.55)]'
-                : 'text-zinc-400 dark:text-zinc-300 border-zinc-700 dark:border-zinc-600 hover:text-fuchsia-300 hover:border-fuchsia-500'
-            }`}
-            title={simulation ? 'Exit practice mode and discard practice changes' : 'Practice claim & purchase without touching the real roster'}
-          >
-            {simulation ? 'Sim ON' : 'Simulate'}
-          </button>
+          {practiceOf != null ? (
+            <Link
+              to={`/live/${practiceOf}`}
+              className="text-xs font-bold px-2.5 py-0.5 rounded border bg-fuchsia-500 text-white border-fuchsia-300 shadow-[0_0_12px_rgba(217,70,239,0.55)] whitespace-nowrap"
+              title="Back to the real board. Practice stays as it is for anyone still practicing."
+            >
+              Leave practice
+            </Link>
+          ) : canPractice && (
+            <button
+              type="button"
+              onClick={() => goPractice(false)}
+              disabled={practiceBusy}
+              className="text-xs font-bold px-2.5 py-0.5 rounded border transition-colors text-zinc-400 dark:text-zinc-300 border-zinc-700 dark:border-zinc-600 hover:text-fuchsia-300 hover:border-fuchsia-500 disabled:opacity-50 whitespace-nowrap"
+              title="Join the shared practice board: everyone practicing sees the same claims, purchases and line. The real board is untouched."
+            >
+              {practiceBusy ? 'Opening…' : 'Practice'}
+            </button>
+          )}
           <ThemeToggle
             compact
             className="text-zinc-400 dark:text-zinc-300 hover:text-yellow-400 text-xs border border-zinc-700 dark:border-zinc-600 px-2 py-0.5 rounded transition-colors"
@@ -1088,29 +1066,24 @@ export default function LiveBoard() {
 
       {/* On phones this stack can outgrow the screen; cap it so the board always keeps room. */}
       <div className="shrink-0 max-h-[50vh] overflow-y-auto sm:max-h-none sm:overflow-visible">
-      {simulation && (
-        <div className="bg-fuchsia-600 text-white px-4 py-2 shrink-0 flex items-center gap-3 border-b-2 border-fuchsia-300">
-          <span className="text-xs font-black uppercase tracking-[0.2em]">Practice mode</span>
+      {practiceOf != null && (
+        <div className="bg-fuchsia-600 text-white px-4 py-2 shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1 border-b-2 border-fuchsia-300">
+          <span className="text-xs font-black uppercase tracking-[0.2em]">Practice</span>
           <span className="text-xs text-fuchsia-100">
-            Nothing is saved. Practice claims and purchases stay on your screen — the real roster is untouched.
+            Shared with everyone practicing. Claims, purchases, sold-out days and the line here never touch the real board. Your buy list is the real one.
           </span>
           <div className="ml-auto flex items-center gap-3 shrink-0">
-            {hasSimEdits && (
-              <button
-                type="button"
-                onClick={() => setSimPatches({})}
-                className="text-xs font-bold underline hover:no-underline"
-              >
-                Reset practice
-              </button>
-            )}
             <button
               type="button"
-              onClick={exitSimulation}
-              className="text-xs font-bold underline hover:no-underline"
+              onClick={() => goPractice(true)}
+              disabled={practiceBusy}
+              className="text-xs font-bold underline hover:no-underline disabled:opacity-50"
             >
-              Exit
+              Start over
             </button>
+            <Link to={`/live/${practiceOf}`} className="text-xs font-bold underline hover:no-underline">
+              Leave practice
+            </Link>
           </div>
         </div>
       )}
@@ -1226,20 +1199,20 @@ export default function LiveBoard() {
         </div>
       )}
 
-      {/* ── Pre-purchase tip banners (hidden while simulating) ── */}
-      {!simulation && event?.status === 'setup' && (
+      {/* ── Pre-purchase tip banners ── */}
+      {event?.status === 'setup' && (
         <div className="bg-amber-50 dark:bg-yellow-950/30 border-b-2 border-amber-300 dark:border-yellow-800 px-4 py-2 shrink-0">
           <span className="text-amber-800 dark:text-yellow-300 text-xs font-bold uppercase tracking-wider">Preview · </span>
           <span className="text-amber-700 dark:text-yellow-400/90 text-xs">
-            Look around and get familiar with the board. Claiming opens when purchase day starts — or turn on Simulate to practice.
+            Look around and get familiar with the board. Claiming opens when purchase day starts. Tap Practice to rehearse with everyone.
           </span>
         </div>
       )}
-      {!simulation && event?.status === 'registration' && (
+      {event?.status === 'registration' && (
         <div className="bg-blue-50 dark:bg-blue-950/30 border-b-2 border-blue-300 dark:border-blue-800 px-4 py-2 shrink-0">
           <span className="text-blue-700 dark:text-blue-300 text-xs font-bold uppercase tracking-wider">Registration is open · </span>
           <span className="text-blue-600 dark:text-blue-400 text-xs">
-            Purchase day hasn&apos;t started. Verify your requested days, Member ID, and badge type — or turn on Simulate to practice claiming.
+            Purchase day hasn&apos;t started. Verify your requested days, Member ID, and badge type, or tap Practice to rehearse claiming with everyone.
           </span>
         </div>
       )}
@@ -1318,7 +1291,7 @@ export default function LiveBoard() {
           {editParticipant && (
             <EditParticipantModal
               participant={editParticipant}
-              daysLocked={simulation || event?.status === 'purchasing'}
+              daysLocked={event?.status === 'purchasing'}
               onSave={handleEditSave}
               onClose={() => setEditParticipant(null)}
             />
@@ -1535,7 +1508,7 @@ export default function LiveBoard() {
             event={event}
             participants={participants}
             // Practice mode promises nothing is saved, and this writes to the real event.
-            canEdit={!simulation && (identityId != null || isPlatformAdmin)}
+            canEdit={identityId != null || isPlatformAdmin}
             onToggle={handleSoldOut}
             onDismiss={() => setShowDays(false)}
           />
