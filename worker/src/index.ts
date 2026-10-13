@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, enrichParticipant, inviteUnavailableMessage, MAX_SHARED_INVITE_USES, isClaimExpired, MAX_ACTIVE_CLAIMS, nothingLeftToBuy, SALE_DAYS, type SaleDay } from './db';
+import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, enrichParticipant, inviteUnavailableMessage, MAX_SHARED_INVITE_USES, isClaimExpired, MAX_ACTIVE_CLAIMS, anyPurchased, nothingLeftToBuy, SALE_DAYS, type SaleDay } from './db';
 import {
   assertPreviewNightAllowed,
   assertRegistrationOpen,
@@ -632,17 +632,19 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
   }
 
   const onPlace = await c.env.DB.prepare(`
-    SELECT purchasing_claimed_at,
+    SELECT purchasing_claimed_by, purchasing_claimed_at,
            req_preview, req_thu, req_fri, req_sat, req_sun,
            pur_preview, pur_thu, pur_fri, pur_sat, pur_sun
     FROM participants
-    WHERE event_id = ? AND purchasing_claimed_by != '' AND purchasing_claimed_queue_id = ?
+    WHERE event_id = ? AND purchasing_claimed_queue_id = ?
   `).bind(eventId, queueId).all<Participant>();
-  // A finished person keeps the "who bought" record but no longer ties up a slot.
-  const activeClaims = onPlace.results.filter(
-    (r) => !isClaimExpired(r.purchasing_claimed_at) && !nothingLeftToBuy(r, event),
+  // Someone this place bought for used one of its 3 badges. Someone claimed but never
+  // bought for (left only with sold-out days, or an expired claim) did not.
+  const usedSlots = onPlace.results.filter((r) =>
+    anyPurchased(r)
+    || (!!r.purchasing_claimed_by && !isClaimExpired(r.purchasing_claimed_at) && !nothingLeftToBuy(r, event)),
   ).length;
-  if (activeClaims >= MAX_ACTIVE_CLAIMS) {
+  if (usedSlots >= MAX_ACTIVE_CLAIMS) {
     return err(
       `"${place.label}" already has ${MAX_ACTIVE_CLAIMS} people (Comic-Con purchase limit). Use another place in line or release someone.`,
       400,
@@ -701,19 +703,24 @@ app.patch('/api/events/:id/participants/:pid/purchased', async (c) => {
     pur_sat?: boolean; pur_sun?: boolean; who_purchased?: string;
   }>();
 
+  // Only the days sent change. Ticking one day must not undo another the client hadn't
+  // refreshed yet, which a full overwrite would.
+  const flag = (v: boolean | undefined) => (v == null ? null : v ? 1 : 0);
   await c.env.DB.prepare(`
     UPDATE participants
-    SET pur_preview = ?, pur_thu = ?, pur_fri = ?, pur_sat = ?, pur_sun = ?,
-        who_purchased = ?, updated_at = datetime('now')
+    SET pur_preview = COALESCE(?, pur_preview), pur_thu = COALESCE(?, pur_thu),
+        pur_fri = COALESCE(?, pur_fri), pur_sat = COALESCE(?, pur_sat), pur_sun = COALESCE(?, pur_sun),
+        who_purchased = COALESCE(?, who_purchased), updated_at = datetime('now')
     WHERE id = ? AND event_id = ?
   `).bind(
-    body.pur_preview ? 1 : 0, body.pur_thu ? 1 : 0, body.pur_fri ? 1 : 0,
-    body.pur_sat ? 1 : 0, body.pur_sun ? 1 : 0,
-    body.who_purchased?.trim() ?? '',
+    flag(body.pur_preview), flag(body.pur_thu), flag(body.pur_fri),
+    flag(body.pur_sat), flag(body.pur_sun),
+    body.who_purchased != null ? body.who_purchased.trim() : null,
     pid, eventId,
   ).run();
 
-  // Finishing someone frees one of the buyer's 3 slots without a manual release.
+  // Finishing someone ends the claim without a manual release. The place link stays when
+  // something was bought, so the place still shows them and can't claim past 3.
   const updated = await c.env.DB.prepare(`
     SELECT req_preview, req_thu, req_fri, req_sat, req_sun,
            pur_preview, pur_thu, pur_fri, pur_sat, pur_sun
@@ -724,9 +731,11 @@ app.patch('/api/events/:id/participants/:pid/purchased', async (c) => {
   if (claimReleased) {
     await c.env.DB.prepare(`
       UPDATE participants
-      SET purchasing_claimed_by = '', purchasing_claimed_at = NULL, purchasing_claimed_queue_id = NULL, updated_at = datetime('now')
+      SET purchasing_claimed_by = '', purchasing_claimed_at = NULL,
+          purchasing_claimed_queue_id = CASE WHEN ? THEN purchasing_claimed_queue_id ELSE NULL END,
+          updated_at = datetime('now')
       WHERE id = ? AND event_id = ?
-    `).bind(pid, eventId).run();
+    `).bind(anyPurchased(updated) ? 1 : 0, pid, eventId).run();
   }
 
   return json({ ok: true, claim_released: claimReleased });

@@ -34,6 +34,19 @@ describe('planBuyList', () => {
     expect(plan.slots[1].open).toBe(1);
   });
 
+  it('counts people a place already bought for against its 3', () => {
+    const plan = planBuyList({
+      list: [1, 2].map((i) => person(i)),
+      myClaims: [person(20, 10)],
+      bought: [person(30, 10), person(31, 10)],
+      places: [place(10), place(11)],
+      isReady: always,
+    });
+    expect(ids(plan.slots[0].bought)).toEqual([30, 31]);
+    expect(plan.slots[0].upcoming).toEqual([]);
+    expect(ids(plan.slots[1].upcoming)).toEqual([1, 2]);
+  });
+
   it('skips people who cannot be bought right now without using a spot', () => {
     const plan = planBuyList({
       list: [1, 2, 3, 4].map((i) => person(i)),

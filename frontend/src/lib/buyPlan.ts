@@ -6,6 +6,8 @@ export type PlaceSlot = {
   place: PurchaseQueueEntry | null;
   /** Already claimed through this place. */
   claimed: Participant[];
+  /** Finished through this place: the claim ended, but they used one of its 3 badges. */
+  bought: Participant[];
   /** Who this place claims next, straight off your list in order. */
   upcoming: Participant[];
   /** Spots this place still has nobody for. */
@@ -22,21 +24,28 @@ export type BuyPlan = {
 
 /**
  * Splits your buy list across your places in line, 3 per place in line order, so the
- * soonest place always buys your top picks. Whoever a place already claimed stays with it;
- * moving someone up or down the list is how you move them to a different place.
+ * soonest place always buys your top picks. Whoever a place already claimed or bought for
+ * stays with it; moving someone up or down the list is how you move them to a different place.
  */
-export function planBuyList({ list, myClaims, places, isReady }: {
-  /** Your list in order, without the people you've already claimed. */
+export function planBuyList({ list, myClaims, bought = [], places, isReady }: {
+  /** Your list in order, without the people you've already claimed or bought for. */
   list: Participant[];
   myClaims: Participant[];
+  /** People whose purchase finished through one of your places. */
+  bought?: Participant[];
   /** Your places still in line, soonest first. */
   places: PurchaseQueueEntry[];
   isReady: (p: Participant) => boolean;
 }): BuyPlan {
   const placeIds = new Set(places.map((q) => q.id));
   const slots: PlaceSlot[] = (places.length > 0 ? places : [null]).map((place) => {
-    const claimed = place ? myClaims.filter((p) => p.purchasing_claimed_queue_id === place.id) : [];
-    return { place, claimed, upcoming: [], open: Math.max(0, MAX_ACTIVE_CLAIMS - claimed.length) };
+    const onPlace = (ps: Participant[]) => (place ? ps.filter((p) => p.purchasing_claimed_queue_id === place.id) : []);
+    const claimed = onPlace(myClaims);
+    const done = onPlace(bought);
+    return {
+      place, claimed, bought: done, upcoming: [],
+      open: Math.max(0, MAX_ACTIVE_CLAIMS - claimed.length - done.length),
+    };
   });
   const unplaced = myClaims.filter(
     (p) => p.purchasing_claimed_queue_id == null || !placeIds.has(p.purchasing_claimed_queue_id),

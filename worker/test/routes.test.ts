@@ -161,11 +161,38 @@ describe('POST /participants/:pid/claim', () => {
     expect(getParticipant(h.db, fourth).purchasing_claimed_queue_id).toBe(second);
   });
 
-  it('does not count a finished person toward the limit', async () => {
+  it('counts someone the place already bought for toward the limit', async () => {
     const eventId = insertEvent(h.db);
     const { place } = seedBuyerWithPlace(eventId);
     const held = new Date().toISOString();
-    // Two still in progress, one fully purchased.
+    for (let i = 0; i < 2; i += 1) {
+      insertParticipant(h.db, eventId, {
+        first_name: `Held${i}`,
+        purchasing_claimed_by: 'Tony Nguyen',
+        purchasing_claimed_at: held,
+        purchasing_claimed_queue_id: place,
+      });
+    }
+    // Finished: the claim ended, but the badge came out of this place's 3.
+    insertParticipant(h.db, eventId, {
+      first_name: 'Bought',
+      purchasing_claimed_queue_id: place,
+      req_sat: 1,
+      pur_sat: 1,
+    });
+    const fourth = insertParticipant(h.db, eventId, { first_name: 'Fourth' });
+
+    const res = await claim(eventId, fourth, place);
+
+    expect(res.status).toBe(400);
+    expect(getParticipant(h.db, fourth).purchasing_claimed_by).toBe('');
+  });
+
+  it('does not count someone left with only sold-out days toward the limit', async () => {
+    const eventId = insertEvent(h.db);
+    h.db.prepare('UPDATE events SET sold_out_sat = 1 WHERE id = ?').run(eventId);
+    const { place } = seedBuyerWithPlace(eventId);
+    const held = new Date().toISOString();
     for (let i = 0; i < 2; i += 1) {
       insertParticipant(h.db, eventId, {
         first_name: `Held${i}`,
@@ -175,12 +202,10 @@ describe('POST /participants/:pid/claim', () => {
       });
     }
     insertParticipant(h.db, eventId, {
-      first_name: 'Done',
+      first_name: 'SoldOut',
       purchasing_claimed_by: 'Tony Nguyen',
       purchasing_claimed_at: held,
       purchasing_claimed_queue_id: place,
-      req_sat: 1,
-      pur_sat: 1,
     });
     const fourth = insertParticipant(h.db, eventId, { first_name: 'Fourth' });
 
@@ -304,6 +329,51 @@ describe('PATCH /participants/:pid/purchased', () => {
     // The record of who bought must survive the release.
     expect(row.who_purchased).toBe('Tony Nguyen');
     expect(row.pur_sat).toBe(1);
+  });
+
+  it('only changes the days sent, so one tick never undoes another', async () => {
+    const eventId = insertEvent(h.db);
+    seedBuyer(eventId);
+    const pid = insertParticipant(h.db, eventId, {
+      req_sat: 1,
+      req_sun: 1,
+      pur_sat: 1,
+      who_purchased: 'Tony Nguyen',
+      purchasing_claimed_by: 'Tony Nguyen',
+      purchasing_claimed_at: new Date().toISOString(),
+    });
+
+    await h.request(`/api/events/${eventId}/participants/${pid}/purchased`, {
+      method: 'PATCH',
+      as: TONY,
+      body: JSON.stringify({ pur_sun: true }),
+    });
+
+    const row = getParticipant(h.db, pid);
+    expect(row.pur_sat).toBe(1);
+    expect(row.pur_sun).toBe(1);
+    expect(row.who_purchased).toBe('Tony Nguyen');
+  });
+
+  it('keeps a finished purchase linked to the place that bought it', async () => {
+    const eventId = insertEvent(h.db);
+    const place = insertPlace(h.db, eventId, seedBuyer(eventId), TONY, { status: 'buying', label: 'Laptop' });
+    const pid = insertParticipant(h.db, eventId, {
+      req_sat: 1,
+      purchasing_claimed_by: 'Tony Nguyen',
+      purchasing_claimed_at: new Date().toISOString(),
+      purchasing_claimed_queue_id: place,
+    });
+
+    await h.request(`/api/events/${eventId}/participants/${pid}/purchased`, {
+      method: 'PATCH',
+      as: TONY,
+      body: JSON.stringify({ pur_sat: true, who_purchased: 'Tony Nguyen' }),
+    });
+
+    const row = getParticipant(h.db, pid);
+    expect(row.purchasing_claimed_by).toBe('');
+    expect(row.purchasing_claimed_queue_id).toBe(place);
   });
 
   it('keeps the claim while requested days are still outstanding', async () => {

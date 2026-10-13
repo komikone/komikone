@@ -85,7 +85,7 @@ const DAY_COLS = new Set<ColKey>(['requested', 'purchased', 'gaps']);
 
 /** Claimed by you, or bought by you after the claim auto-released on Done. */
 function canEditPurchases(p: Participant, myDisplayName: string, now = Date.now()): boolean {
-  return isClaimedBy(p, myDisplayName, now) || (p.all_purchased && purchasedByMe(p, myDisplayName));
+  return isClaimedBy(p, myDisplayName, now) || (p.any_purchased && purchasedByMe(p, myDisplayName));
 }
 
 /** Column-width friendly version of BLOCKER_LABEL. */
@@ -574,8 +574,6 @@ export default function LiveBoard() {
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
     await api.participants.updatePurchased(Number(eventId), p.id, clerkToken, {
-      pur_preview: p.pur_preview, pur_thu: p.pur_thu, pur_fri: p.pur_fri,
-      pur_sat: p.pur_sat, pur_sun: p.pur_sun,
       who_purchased: p.who_purchased || myDisplayName,
       [`pur_${day}`]: checked,
     }).catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
@@ -617,10 +615,8 @@ export default function LiveBoard() {
     }
     const clerkToken = await getToken({ template: 'komikone' });
     if (!clerkToken) return;
-    await api.participants.updatePurchased(Number(eventId), p.id, clerkToken, {
-      pur_preview: p.pur_preview, pur_thu: p.pur_thu, pur_fri: p.pur_fri,
-      pur_sat: p.pur_sat, pur_sun: p.pur_sun, who_purchased: who,
-    }).catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
+    await api.participants.updatePurchased(Number(eventId), p.id, clerkToken, { who_purchased: who })
+      .catch((e) => alert(e instanceof Error ? e.message : 'Failed'));
     await fetchAll();
     setEditingRow(null);
   };
@@ -1533,6 +1529,15 @@ export default function LiveBoard() {
             onPlaceThrough={(q) => handleQueueStatus(q.id, 'buying')}
             onOpenQueue={openBuyerQueue}
             onDismiss={() => setShowNextUp(false)}
+            onTogglePurchased={handlePurchaseToggle}
+            onCompletePlace={async (place, finished) => {
+              await handleQueueStatus(place.id, 'done');
+              const finishedIds = new Set(finished.map((p) => p.id));
+              if (buyList.some((id) => finishedIds.has(id))) {
+                await saveBuyList(buyList.filter((id) => !finishedIds.has(id)));
+              }
+              await fetchAll();
+            }}
           />
         )}
       </div>

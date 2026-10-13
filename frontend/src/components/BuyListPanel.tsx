@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
-import type { EventDetail, Participant, PurchaseQueueEntry } from '../lib/api';
+import type { EventDetail, Participant, PurchaseQueueEntry, SaleDay } from '../lib/api';
 import { planBuyList, type PlaceSlot } from '../lib/buyPlan';
+import { CheckoutModal } from './CheckoutModal';
 import {
   BLOCKER_LABEL,
   DAY_CHIP_COLOR,
@@ -42,6 +43,7 @@ const firstNames = (ps: Participant[]) => ps.map((p) => p.first_name).join(', ')
 export function BuyListPanel({
   event, participants, list, identityId, myDisplayName, quickAdd, suggested, reasonFor,
   places, pickNumber, purchasing, now, onChange, onClaimMany, onRelease, onPlaceThrough, onOpenQueue, onDismiss,
+  onTogglePurchased, onCompletePlace,
 }: {
   event: EventDetail | null;
   participants: Participant[];
@@ -66,9 +68,13 @@ export function BuyListPanel({
   onPlaceThrough: (place: PurchaseQueueEntry) => Promise<void>;
   onOpenQueue: () => void;
   onDismiss: () => void;
+  onTogglePurchased: (p: Participant, day: SaleDay, checked: boolean) => Promise<void>;
+  /** Marks the place done; `finished` have nothing left to buy. */
+  onCompletePlace: (place: PurchaseQueueEntry, finished: Participant[]) => Promise<void>;
 }) {
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
+  const [checkoutPlaceId, setCheckoutPlaceId] = useState<number | null>(null);
   const [drag, setDrag] = useState<{ id: number; order: number[]; start: number[] } | null>(null);
   const rowEls = useRef(new Map<number, HTMLLIElement>());
   const searchRef = useRef<HTMLInputElement>(null);
@@ -77,13 +83,19 @@ export function BuyListPanel({
   const savedIds = list.filter((id) => byId.has(id));
   const onList = new Set(savedIds);
   const myClaims = participants.filter((p) => holdsClaimSlot(p, myDisplayName, now));
-  const claimedIds = new Set(myClaims.map((p) => p.id));
+  const myPlaceIds = new Set(places.map((q) => q.id));
+  const bought = participants.filter((p) =>
+    p.any_purchased && p.purchasing_claimed_queue_id != null && myPlaceIds.has(p.purchasing_claimed_queue_id)
+    && !holdsClaimSlot(p, myDisplayName, now));
+  // Pinned to a place, so they stay out of the draggable order but are kept when it's saved.
+  const claimedIds = new Set([...myClaims, ...bought].map((p) => p.id));
   const claimedOnList = savedIds.filter((id) => claimedIds.has(id));
   const states = new Map(participants.map((p) => [p.id, rowState(p, event, myDisplayName, now)]));
 
   const plan = planBuyList({
     list: (drag?.order ?? savedIds.filter((id) => !claimedIds.has(id))).map((id) => byId.get(id)!),
     myClaims,
+    bought,
     places,
     isReady: (p) => states.get(p.id)?.kind === 'ready',
   });
@@ -91,6 +103,12 @@ export function BuyListPanel({
   const numberOf = new Map(displayIds.map((id, i) => [id, i + 1]));
   const openSpots = plan.slots.reduce((n, s) => n + s.open, 0);
   const overflowReady = plan.rest.filter((p) => states.get(p.id)?.kind === 'ready').length;
+  const checkoutSlot = plan.slots.find((s) => s.place != null && s.place.id === checkoutPlaceId);
+  // Someone finishing mustn't make the checkout cards jump while the buyer is ticking days.
+  const listOrder = (p: Participant) => {
+    const i = savedIds.indexOf(p.id);
+    return i < 0 ? savedIds.length + p.id : i;
+  };
 
   const q = search.trim().toLowerCase();
   const matches = q
@@ -289,6 +307,15 @@ export function BuyListPanel({
               <ReleaseButton busy={busy} onClick={() => void run(() => onRelease(p))} />
             </li>
           ))}
+          {slot.bought.map((p) => (
+            <li key={p.id} className="flex items-center gap-2 rounded-md border border-green-500 bg-green-100/70 dark:bg-green-900/30 px-2 py-1.5">
+              <span className="text-green-700 dark:text-green-400 text-xs font-black w-4 shrink-0">✓</span>
+              <span className="flex-1 min-w-0">
+                <PersonName p={p} isMe={p.id === identityId} />
+                <span className="block text-[10px] text-green-700 dark:text-green-400 font-bold">Bought</span>
+              </span>
+            </li>
+          ))}
           {slot.upcoming.map(listRow)}
           {Array.from({ length: slot.open }, (_, i) => emptySpot(`empty-${k}-${i}`, firstIdeaOf[k] + i))}
         </ol>
@@ -309,16 +336,32 @@ export function BuyListPanel({
         );
       }
       if (onClock) {
-        if (slot.upcoming.length === 0) return null;
+        const inCheckout = slot.claimed.length + slot.bought.length;
         return (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void run(() => onClaimMany(slot.upcoming, place))}
-            className="mt-1.5 w-full text-sm font-black px-3 py-2 rounded-md bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-yellow-200 shadow disabled:opacity-60"
-          >
-            {busy ? 'Claiming…' : `Claim ${slot.upcoming.length} for ${place.label}: ${firstNames(slot.upcoming)}`}
-          </button>
+          <div className="mt-1.5 space-y-1.5">
+            {slot.upcoming.length > 0 && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void run(async () => {
+                  await onClaimMany(slot.upcoming, place);
+                  setCheckoutPlaceId(place.id);
+                })}
+                className="w-full text-sm font-black px-3 py-2 rounded-md bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-yellow-200 shadow disabled:opacity-60"
+              >
+                {busy ? 'Claiming…' : `Claim ${slot.upcoming.length} for ${place.label}: ${firstNames(slot.upcoming)}`}
+              </button>
+            )}
+            {inCheckout > 0 && (
+              <button
+                type="button"
+                onClick={() => setCheckoutPlaceId(place.id)}
+                className="w-full text-sm font-black px-3 py-2 rounded-md bg-orange-500 hover:bg-orange-400 text-white shadow"
+              >
+                Open checkout · {inCheckout} {inCheckout === 1 ? 'person' : 'people'}
+              </button>
+            )}
+          </div>
         );
       }
       return (
@@ -444,6 +487,21 @@ export function BuyListPanel({
           </section>
         )}
       </div>
+      {checkoutSlot?.place && (
+        <CheckoutModal
+          place={checkoutSlot.place}
+          people={[...checkoutSlot.claimed, ...checkoutSlot.bought].sort((a, b) => listOrder(a) - listOrder(b))}
+          event={event}
+          identityId={identityId}
+          onTogglePurchased={onTogglePurchased}
+          onRelease={onRelease}
+          onComplete={async (finished) => {
+            await onCompletePlace(checkoutSlot.place!, finished);
+            setCheckoutPlaceId(null);
+          }}
+          onClose={() => setCheckoutPlaceId(null)}
+        />
+      )}
     </aside>
   );
 }

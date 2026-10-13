@@ -289,6 +289,10 @@ type PurchaseDayFlags = Pick<Participant,
   'pur_preview' | 'pur_thu' | 'pur_fri' | 'pur_sat' | 'pur_sun'
 >;
 
+export function anyPurchased(p: Pick<Participant, 'pur_preview' | 'pur_thu' | 'pur_fri' | 'pur_sat' | 'pur_sun'>): boolean {
+  return Boolean(p.pur_preview || p.pur_thu || p.pur_fri || p.pur_sat || p.pur_sun);
+}
+
 /** Every requested day bought. Vacuous true when nobody requested days — treat as not done. */
 export function computeAllPurchased(p: PurchaseDayFlags): boolean {
   const anyRequested = p.req_preview || p.req_thu || p.req_fri || p.req_sat || p.req_sun;
