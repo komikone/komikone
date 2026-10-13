@@ -331,7 +331,7 @@ export function BuyListPanel({
             onClick={onOpenQueue}
             className="mt-1.5 w-full text-xs font-bold px-3 py-2 rounded bg-sky-500 hover:bg-sky-400 text-white"
           >
-            Join the Queue-It line to claim
+            Get In Line to claim
           </button>
         );
       }

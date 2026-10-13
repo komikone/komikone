@@ -1130,7 +1130,7 @@ export default function LiveBoard() {
                   : 'text-sky-300 border-sky-700 hover:border-sky-400 hover:text-sky-200'
               }`}
             >
-              Queue-It line{buyerQueue.length > 0 ? ` · ${activeQueue(buyerQueue).length}` : ''}
+              Get In Line{buyerQueue.length > 0 ? ` · ${activeQueue(buyerQueue).length}` : ''}
             </button>
           )}
           {me && (showPurchaseChrome ? (
