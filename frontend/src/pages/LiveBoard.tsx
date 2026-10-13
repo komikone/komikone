@@ -12,6 +12,7 @@ import {
 } from '../lib/queueBoard';
 import { BuyerQueuePanel, SoldOutBar } from '../components/QueueDraftBoard';
 import { BuyListPanel } from '../components/BuyListPanel';
+import { planBuyList } from '../lib/buyPlan';
 import { HeaderUserMenu } from '../components/HeaderUserMenu';
 import { useTheme } from '../lib/useTheme';
 import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
@@ -504,18 +505,25 @@ export default function LiveBoard() {
     }
   };
 
-  /** One tap claims the top of your buy list; whoever someone else grabbed first is reported, not retried. */
-  const handleClaimMany = async (picks: Participant[]) => {
+  /**
+   * One tap claims a place's next picks off your buy list; Comic-Con's limit of 3 is per
+   * place. Whoever someone else grabbed first is reported, not retried.
+   */
+  const handleClaimMany = async (picks: Participant[], place: PurchaseQueueEntry) => {
     const me = participants.find((x) => x.id === identityId);
     if (!me) { setShowLinkModal(true); return; }
     const myName = `${me.first_name} ${me.last_name}`;
-    const room = MAX_ACTIVE_CLAIMS - participants.filter((x) => holdsClaimSlot(x, myName, now)).length;
+    const room = MAX_ACTIVE_CLAIMS - participants.filter(
+      (x) => x.purchasing_claimed_queue_id === place.id && holdsClaimSlot(x, myName, now),
+    ).length;
     const batch = picks.filter((p) => purchaseBlockers(p, event).length === 0).slice(0, Math.max(0, room));
     if (batch.length === 0) return;
     if (simulation) {
       const at = new Date().toISOString();
       setSimPatches((prev) => batch.reduce(
-        (acc, p) => setSimPatch(acc, p.id, { purchasing_claimed_by: myName, purchasing_claimed_at: at }),
+        (acc, p) => setSimPatch(acc, p.id, {
+          purchasing_claimed_by: myName, purchasing_claimed_at: at, purchasing_claimed_queue_id: place.id,
+        }),
         prev,
       ));
       return;
@@ -525,7 +533,7 @@ export default function LiveBoard() {
     const missed: string[] = [];
     for (const p of batch) {
       try {
-        await api.participants.claim(Number(eventId), p.id, clerkToken, myName);
+        await api.participants.claim(Number(eventId), p.id, clerkToken, myName, place.id);
       } catch (e) {
         missed.push(`${p.first_name} ${p.last_name}: ${e instanceof Error ? e.message : 'failed'}`);
       }
@@ -539,6 +547,7 @@ export default function LiveBoard() {
       setSimPatches((prev) => setSimPatch(prev, p.id, {
         purchasing_claimed_by: '',
         purchasing_claimed_at: null,
+        purchasing_claimed_queue_id: null,
       }));
       return;
     }
@@ -718,8 +727,6 @@ export default function LiveBoard() {
   const myClaimCount = myDisplayName
     ? participants.filter((p) => holdsClaimSlot(p, myDisplayName, now)).length
     : 0;
-  const atClaimLimit = myClaimCount >= MAX_ACTIVE_CLAIMS;
-
   // Default: you + group pinned; during purchasing your active claims rise next (claim order).
   // Manual drag order applies outside purchase/simulation only — purchase toggles don't reshuffle.
   const displayRows = customRowOrder && !showPurchaseChrome
@@ -784,7 +791,26 @@ export default function LiveBoard() {
         })]
     : [];
 
+  const myPlaces = activeQueue(buyerQueue).filter((q) => q.clerk_user_id === (user?.id ?? null));
+  const pickNumbers = rankById(buyerQueue);
+  const placeLabels = new Map(buyerQueue.map((q) => [q.id, q.label]));
+  const buyableIds = new Set(buyable.map((p) => p.id));
+  const myClaims = myDisplayName ? participants.filter((p) => holdsClaimSlot(p, myDisplayName, now)) : [];
+  const myClaimIds = new Set(myClaims.map((p) => p.id));
+  const placePlan = planBuyList({
+    list: buyList.filter((id) => !myClaimIds.has(id)).map((id) => participants.find((p) => p.id === id)).filter((p): p is Participant => !!p),
+    myClaims,
+    places: myPlaces,
+    isReady: (p) => buyableIds.has(p.id),
+  });
+  const buyForPlace = (placeId: number) => {
+    const slot = placePlan.slots.find((s) => s.place?.id === placeId);
+    return slot ? [...slot.claimed, ...slot.upcoming] : [];
+  };
+  const claimCapacity = MAX_ACTIVE_CLAIMS * Math.max(1, myPlaces.length);
+
   const openWhosNext = () => { setShowBuyerQueue(false); setShowNextUp(true); };
+  const openBuyerQueue = () => { setShowNextUp(false); setShowBuyerQueue(true); };
   const toggleWhosNext = () => { setShowBuyerQueue(false); setShowNextUp((v) => !v); };
   const toggleBuyerQueue = () => { setShowNextUp(false); setShowBuyerQueue((v) => !v); };
 
@@ -1090,10 +1116,10 @@ export default function LiveBoard() {
         <span className="text-yellow-400 dark:text-yellow-300 text-xs font-mono">{inProgress} <span className="text-zinc-600 dark:text-zinc-500">claiming</span></span>
         {myDisplayName && (
           <span
-            className={`text-xs font-mono ${atClaimLimit ? 'text-orange-400 font-bold' : 'text-zinc-400'}`}
-            title="Comic-Con lets you buy for at most 3 people at a time"
+            className={`text-xs font-mono ${myClaimCount >= claimCapacity ? 'text-orange-400 font-bold' : 'text-zinc-400'}`}
+            title={`Comic-Con lets each place in line buy for ${MAX_ACTIVE_CLAIMS} people at a time`}
           >
-            {myClaimCount}/{MAX_ACTIVE_CLAIMS} <span className="text-zinc-600 dark:text-zinc-500">yours</span>
+            {myClaimCount}/{claimCapacity} <span className="text-zinc-600 dark:text-zinc-500">yours</span>
           </span>
         )}
         <span className="text-gray-700 dark:text-gray-600 text-xs font-mono">{remaining} <span className="text-zinc-600 dark:text-zinc-500">left</span></span>
@@ -1444,6 +1470,7 @@ export default function LiveBoard() {
                             buyListRank={listRank.has(p.id) ? listRank.get(p.id)! + 1 : undefined}
                             onAddToBuyList={me && canAddToBuyList(p, event) ? (x) => void saveBuyList([...buyList, x.id]) : undefined}
                             onOpenBuyList={openWhosNext}
+                            claimPlaceLabel={p.purchasing_claimed_queue_id != null ? placeLabels.get(p.purchasing_claimed_queue_id) : undefined}
                           />
                         )}
                       </td>
@@ -1474,7 +1501,7 @@ export default function LiveBoard() {
             myClerkId={user?.id ?? null}
             isAdmin={isPlatformAdmin}
             identityLinked={identityId != null}
-            buyFor={priorityQueue.slice(0, MAX_ACTIVE_CLAIMS)}
+            buyFor={buyForPlace}
             onOpenWhosNext={openWhosNext}
             onJoin={handleQueueJoin}
             onLeave={handleQueueLeave}
@@ -1502,11 +1529,15 @@ export default function LiveBoard() {
                 && buyListQuickAdd.some((x) => x.id === p.id);
               return managed ? `You manage them · ${reason}` : reason;
             }}
+            places={myPlaces}
+            pickNumber={(id) => pickNumbers.get(id) ?? 0}
             purchasing={showPurchaseChrome}
             now={now}
             onChange={(ids) => void saveBuyList(ids)}
             onClaimMany={handleClaimMany}
             onRelease={handleUnclaim}
+            onPlaceThrough={(q) => handleQueueStatus(q.id, 'buying')}
+            onOpenQueue={openBuyerQueue}
             onDismiss={() => setShowNextUp(false)}
           />
         )}
@@ -1556,7 +1587,7 @@ function CopyCell({ value, children }: { value: string; children?: React.ReactNo
 function CellContent({
   col, p, status, eventStatus, editingRow, setEditingRow, canEditRequested, canEditProfile, canTogglePurchase,
   blockers, now, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
-  buyListRank, onAddToBuyList, onOpenBuyList,
+  buyListRank, onAddToBuyList, onOpenBuyList, claimPlaceLabel,
 }: {
   col: ColKey;
   p: Participant;
@@ -1580,6 +1611,8 @@ function CellContent({
   /** Omitted when you can't keep a buy list (no linked identity). */
   onAddToBuyList?: (p: Participant) => void;
   onOpenBuyList: () => void;
+  /** Name of the place in line this person's claim is being bought through. */
+  claimPlaceLabel?: string;
 }) {
   switch (col) {
 
@@ -1816,6 +1849,7 @@ function CellContent({
         return (
           <div className="flex flex-col items-start gap-0.5">
             <span className="text-xs font-bold text-orange-600 dark:text-yellow-400">{p.purchasing_claimed_by}</span>
+            {claimPlaceLabel && <span className="text-[10px] text-gray-500 leading-none">via {claimPlaceLabel}</span>}
             <span
               className={`font-mono text-[11px] tabular-nums leading-none ${timerCls}`}
               title={`Claim auto-releases after ${CLAIM_TIMEOUT_MINUTES} minutes`}

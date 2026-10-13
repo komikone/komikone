@@ -10,6 +10,7 @@ import {
   getParticipant,
   insertEvent,
   insertParticipant,
+  insertPlace,
   type TestHarness,
 } from './harness';
 
@@ -38,25 +39,35 @@ function seedBuyer(eventId: number, clerkUserId = TONY, first = 'Tony', last = '
 }
 
 describe('POST /participants/:pid/claim', () => {
+  /** Tony's participant row plus one place in line, through Queue-It unless told otherwise. */
+  function seedBuyerWithPlace(eventId: number, status = 'buying', label = 'Laptop') {
+    const buyer = seedBuyer(eventId);
+    return { buyer, place: insertPlace(h.db, eventId, buyer, TONY, { status, label }) };
+  }
+
+  const claim = (eventId: number, pid: number, queueId?: number, as: string | null = TONY) =>
+    h.request(`/api/events/${eventId}/participants/${pid}/claim`, {
+      method: 'POST',
+      as: as ?? undefined,
+      body: JSON.stringify({ coordinator_name: 'Tony Nguyen', queue_id: queueId }),
+    });
+
   it('requires authentication', async () => {
     const eventId = insertEvent(h.db);
     const pid = insertParticipant(h.db, eventId);
-    const res = await h.request(`/api/events/${eventId}/participants/${pid}/claim`, {
-      method: 'POST',
-      body: JSON.stringify({ coordinator_name: 'Tony Nguyen' }),
-    });
+    const res = await claim(eventId, pid, 1, null);
     expect(res.status).toBe(401);
   });
 
   it('refuses to claim outside the purchasing phase, even with a simulation flag', async () => {
     const eventId = insertEvent(h.db, { status: 'registration' });
     const pid = insertParticipant(h.db, eventId);
-    seedBuyer(eventId);
+    const { place } = seedBuyerWithPlace(eventId);
 
     const res = await h.request(`/api/events/${eventId}/participants/${pid}/claim`, {
       method: 'POST',
       as: TONY,
-      body: JSON.stringify({ coordinator_name: 'Tony Nguyen', simulation: true }),
+      body: JSON.stringify({ coordinator_name: 'Tony Nguyen', queue_id: place, simulation: true }),
     });
 
     expect(res.status).toBe(403);
@@ -64,21 +75,52 @@ describe('POST /participants/:pid/claim', () => {
     expect(getParticipant(h.db, pid).purchasing_claimed_by).toBe('');
   });
 
-  it('claims an unclaimed person during purchasing', async () => {
+  it('claims through a place that is through Queue-It and records the place', async () => {
     const eventId = insertEvent(h.db);
     const pid = insertParticipant(h.db, eventId);
-    seedBuyer(eventId);
+    const { place } = seedBuyerWithPlace(eventId);
 
-    const res = await h.request(`/api/events/${eventId}/participants/${pid}/claim`, {
-      method: 'POST',
-      as: TONY,
-      body: JSON.stringify({ coordinator_name: 'Tony Nguyen' }),
-    });
+    const res = await claim(eventId, pid, place);
 
     expect(res.status).toBe(200);
     const row = getParticipant(h.db, pid);
     expect(row.purchasing_claimed_by).toBe('Tony Nguyen');
     expect(row.purchasing_claimed_at).toBeTruthy();
+    expect(row.purchasing_claimed_queue_id).toBe(place);
+  });
+
+  it('requires a place in line', async () => {
+    const eventId = insertEvent(h.db);
+    const pid = insertParticipant(h.db, eventId);
+    seedBuyer(eventId);
+
+    const res = await claim(eventId, pid);
+
+    expect(res.status).toBe(400);
+    expect(getParticipant(h.db, pid).purchasing_claimed_by).toBe('');
+  });
+
+  it('waits until the place is through Queue-It', async () => {
+    const eventId = insertEvent(h.db);
+    const pid = insertParticipant(h.db, eventId);
+    const { place } = seedBuyerWithPlace(eventId, 'in_queueit', 'iPhone');
+
+    const res = await claim(eventId, pid, place);
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining('iPhone') });
+  });
+
+  it("refuses someone else's place", async () => {
+    const eventId = insertEvent(h.db);
+    const pid = insertParticipant(h.db, eventId);
+    seedBuyer(eventId);
+    const henry = seedBuyer(eventId, HENRY, 'Henry', 'Garcia');
+    const henrysPlace = insertPlace(h.db, eventId, henry, HENRY);
+
+    const res = await claim(eventId, pid, henrysPlace);
+
+    expect(res.status).toBe(403);
   });
 
   it('rejects a claim already held by someone else', async () => {
@@ -87,46 +129,41 @@ describe('POST /participants/:pid/claim', () => {
       purchasing_claimed_by: 'Henry Garcia',
       purchasing_claimed_at: new Date().toISOString(),
     });
-    seedBuyer(eventId);
+    const { place } = seedBuyerWithPlace(eventId);
 
-    const res = await h.request(`/api/events/${eventId}/participants/${pid}/claim`, {
-      method: 'POST',
-      as: TONY,
-      body: JSON.stringify({ coordinator_name: 'Tony Nguyen' }),
-    });
+    const res = await claim(eventId, pid, place);
 
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toEqual({ error: 'Already claimed by Henry Garcia' });
   });
 
-  it('stops at 3 simultaneous claims', async () => {
+  it('stops at 3 per place, and a second place can take 3 more', async () => {
     const eventId = insertEvent(h.db);
-    seedBuyer(eventId);
+    const { buyer, place } = seedBuyerWithPlace(eventId);
+    const second = insertPlace(h.db, eventId, buyer, TONY, { label: 'iPhone' });
     const held = new Date().toISOString();
     for (let i = 0; i < 3; i += 1) {
       insertParticipant(h.db, eventId, {
         first_name: `Held${i}`,
         purchasing_claimed_by: 'Tony Nguyen',
         purchasing_claimed_at: held,
+        purchasing_claimed_queue_id: place,
       });
     }
     const fourth = insertParticipant(h.db, eventId, { first_name: 'Fourth' });
 
-    const res = await h.request(`/api/events/${eventId}/participants/${fourth}/claim`, {
-      method: 'POST',
-      as: TONY,
-      body: JSON.stringify({ coordinator_name: 'Tony Nguyen' }),
-    });
+    const full = await claim(eventId, fourth, place);
+    expect(full.status).toBe(400);
+    await expect(full.json()).resolves.toMatchObject({ error: expect.stringContaining('already has 3 people') });
 
-    expect(res.status).toBe(400);
-    await expect(res.json()).resolves.toMatchObject({
-      error: expect.stringContaining('only claim 3 people at a time'),
-    });
+    const other = await claim(eventId, fourth, second);
+    expect(other.status).toBe(200);
+    expect(getParticipant(h.db, fourth).purchasing_claimed_queue_id).toBe(second);
   });
 
   it('does not count a finished person toward the limit', async () => {
     const eventId = insertEvent(h.db);
-    seedBuyer(eventId);
+    const { place } = seedBuyerWithPlace(eventId);
     const held = new Date().toISOString();
     // Two still in progress, one fully purchased.
     for (let i = 0; i < 2; i += 1) {
@@ -134,22 +171,20 @@ describe('POST /participants/:pid/claim', () => {
         first_name: `Held${i}`,
         purchasing_claimed_by: 'Tony Nguyen',
         purchasing_claimed_at: held,
+        purchasing_claimed_queue_id: place,
       });
     }
     insertParticipant(h.db, eventId, {
       first_name: 'Done',
       purchasing_claimed_by: 'Tony Nguyen',
       purchasing_claimed_at: held,
+      purchasing_claimed_queue_id: place,
       req_sat: 1,
       pur_sat: 1,
     });
     const fourth = insertParticipant(h.db, eventId, { first_name: 'Fourth' });
 
-    const res = await h.request(`/api/events/${eventId}/participants/${fourth}/claim`, {
-      method: 'POST',
-      as: TONY,
-      body: JSON.stringify({ coordinator_name: 'Tony Nguyen' }),
-    });
+    const res = await claim(eventId, fourth, place);
 
     expect(res.status).toBe(200);
     expect(getParticipant(h.db, fourth).purchasing_claimed_by).toBe('Tony Nguyen');
@@ -157,24 +192,73 @@ describe('POST /participants/:pid/claim', () => {
 
   it('ignores expired claims when counting the limit', async () => {
     const eventId = insertEvent(h.db);
-    seedBuyer(eventId);
+    const { place } = seedBuyerWithPlace(eventId);
     const stale = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     for (let i = 0; i < 3; i += 1) {
       insertParticipant(h.db, eventId, {
         first_name: `Stale${i}`,
         purchasing_claimed_by: 'Tony Nguyen',
         purchasing_claimed_at: stale,
+        purchasing_claimed_queue_id: place,
       });
     }
     const fresh = insertParticipant(h.db, eventId, { first_name: 'Fresh' });
 
-    const res = await h.request(`/api/events/${eventId}/participants/${fresh}/claim`, {
-      method: 'POST',
-      as: TONY,
-      body: JSON.stringify({ coordinator_name: 'Tony Nguyen' }),
-    });
+    const res = await claim(eventId, fresh, place);
 
     expect(res.status).toBe(200);
+  });
+
+  describe('when a place ends', () => {
+    function claimedOn(eventId: number, place: number, over: { req_sat?: number; pur_sat?: number } = {}) {
+      return insertParticipant(h.db, eventId, {
+        purchasing_claimed_by: 'Tony Nguyen',
+        purchasing_claimed_at: new Date().toISOString(),
+        purchasing_claimed_queue_id: place,
+        ...over,
+      });
+    }
+
+    it('marking it done releases whoever it was still buying for', async () => {
+      const eventId = insertEvent(h.db);
+      const { buyer, place } = seedBuyerWithPlace(eventId);
+      const other = insertPlace(h.db, eventId, buyer, TONY, { label: 'iPhone' });
+      const pending = claimedOn(eventId, place);
+      const elsewhere = claimedOn(eventId, other);
+
+      const res = await h.request(`/api/events/${eventId}/purchase-queue/${place}`, {
+        method: 'PATCH', as: TONY, body: JSON.stringify({ status: 'done' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(getParticipant(h.db, pending)).toMatchObject({
+        purchasing_claimed_by: '', purchasing_claimed_at: null, purchasing_claimed_queue_id: null,
+      });
+      expect(getParticipant(h.db, elsewhere).purchasing_claimed_queue_id).toBe(other);
+    });
+
+    it('removing it releases its claims', async () => {
+      const eventId = insertEvent(h.db);
+      const { place } = seedBuyerWithPlace(eventId);
+      const pending = claimedOn(eventId, place);
+
+      const res = await h.request(`/api/events/${eventId}/purchase-queue/${place}`, { method: 'DELETE', as: TONY });
+
+      expect(res.status).toBe(200);
+      expect(getParticipant(h.db, pending).purchasing_claimed_by).toBe('');
+    });
+
+    it('clearing the whole line releases every claim on it', async () => {
+      const eventId = insertEvent(h.db);
+      const { place } = seedBuyerWithPlace(eventId);
+      const pending = claimedOn(eventId, place);
+
+      const res = await h.request(`/api/admin/events/${eventId}/purchase-queue`, { method: 'DELETE', adminSecret: true });
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ ok: true, cleared: 1 });
+      expect(getParticipant(h.db, pending).purchasing_claimed_by).toBe('');
+    });
   });
 });
 

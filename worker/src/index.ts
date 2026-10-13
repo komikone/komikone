@@ -600,12 +600,27 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
   const event = await getEvent(c.env.DB, eventId);
   if (!event) return err('Event not found', 404);
 
-  const body = await c.req.json<{ coordinator_name: string }>();
+  const body = await c.req.json<{ coordinator_name: string; queue_id?: number }>();
   if (!body.coordinator_name?.trim()) return err('coordinator_name required');
+  const queueId = Number(body.queue_id);
+  if (!Number.isInteger(queueId) || queueId <= 0) {
+    return err('Pick which place in line you are buying through (refresh if you see this)', 400);
+  }
 
   // Practice mode is client-side only, so claims always require a live purchase window.
   if (event.status !== 'purchasing') {
     return err('Not in purchasing phase', 403);
+  }
+
+  const place = await c.env.DB.prepare(
+    'SELECT id, clerk_user_id, status, label FROM purchase_queue WHERE id = ? AND event_id = ?'
+  ).bind(queueId, eventId).first<{ id: number; clerk_user_id: string; status: PurchaseQueueStatus; label: string }>();
+  if (!place) return err('That place in line no longer exists', 404);
+  if (!canManageQueueEntry(access, place.clerk_user_id)) {
+    return err('You can only claim through your own place in line', 403);
+  }
+  if (place.status !== 'buying') {
+    return err(`Mark "${place.label}" as through Queue-It before claiming for it`, 409);
   }
 
   const p = await c.env.DB.prepare('SELECT * FROM participants WHERE id = ? AND event_id = ?')
@@ -616,32 +631,30 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
     return err(`Already claimed by ${p.purchasing_claimed_by}`, 409);
   }
 
-  const claimer = body.coordinator_name.trim();
-  const mine = await c.env.DB.prepare(`
+  const onPlace = await c.env.DB.prepare(`
     SELECT purchasing_claimed_at,
            req_preview, req_thu, req_fri, req_sat, req_sun,
            pur_preview, pur_thu, pur_fri, pur_sat, pur_sun
     FROM participants
-    WHERE event_id = ?
-      AND purchasing_claimed_by != ''
-      AND LOWER(TRIM(purchasing_claimed_by)) = LOWER(?)
-  `).bind(eventId, claimer).all<Participant>();
+    WHERE event_id = ? AND purchasing_claimed_by != '' AND purchasing_claimed_queue_id = ?
+  `).bind(eventId, queueId).all<Participant>();
   // A finished person keeps the "who bought" record but no longer ties up a slot.
-  const activeClaims = mine.results.filter(
+  const activeClaims = onPlace.results.filter(
     (r) => !isClaimExpired(r.purchasing_claimed_at) && !nothingLeftToBuy(r, event),
   ).length;
   if (activeClaims >= MAX_ACTIVE_CLAIMS) {
     return err(
-      `You can only claim ${MAX_ACTIVE_CLAIMS} people at a time (Comic-Con purchase limit). Release someone first.`,
+      `"${place.label}" already has ${MAX_ACTIVE_CLAIMS} people (Comic-Con purchase limit). Use another place in line or release someone.`,
       400,
     );
   }
 
   await c.env.DB.prepare(`
     UPDATE participants
-    SET purchasing_claimed_by = ?, purchasing_claimed_at = datetime('now'), updated_at = datetime('now')
+    SET purchasing_claimed_by = ?, purchasing_claimed_at = datetime('now'),
+        purchasing_claimed_queue_id = ?, updated_at = datetime('now')
     WHERE id = ?
-  `).bind(claimer, pid).run();
+  `).bind(body.coordinator_name.trim(), queueId, pid).run();
 
   return json({ ok: true });
 });
@@ -654,7 +667,7 @@ app.post('/api/events/:id/participants/:pid/unclaim', async (c) => {
 
   await c.env.DB.prepare(`
     UPDATE participants
-    SET purchasing_claimed_by = '', purchasing_claimed_at = NULL, updated_at = datetime('now')
+    SET purchasing_claimed_by = '', purchasing_claimed_at = NULL, purchasing_claimed_queue_id = NULL, updated_at = datetime('now')
     WHERE id = ? AND event_id = ?
   `).bind(pid, eventId).run();
 
@@ -711,7 +724,7 @@ app.patch('/api/events/:id/participants/:pid/purchased', async (c) => {
   if (claimReleased) {
     await c.env.DB.prepare(`
       UPDATE participants
-      SET purchasing_claimed_by = '', purchasing_claimed_at = NULL, updated_at = datetime('now')
+      SET purchasing_claimed_by = '', purchasing_claimed_at = NULL, purchasing_claimed_queue_id = NULL, updated_at = datetime('now')
       WHERE id = ? AND event_id = ?
     `).bind(pid, eventId).run();
   }
@@ -845,6 +858,19 @@ function canManageQueueEntry(access: { isAdmin: boolean; userId: string }, owner
   return access.isAdmin || access.userId === owner;
 }
 
+/**
+ * A place that is done, skipped or removed stops holding anyone it was buying for, so
+ * whoever it didn't finish goes back up for grabs. `placeIdsSql` selects the place ids.
+ */
+function releasePlaceClaims(db: D1Database, placeIdsSql: string, ...binds: (string | number)[]) {
+  return db.prepare(`
+    UPDATE participants
+    SET purchasing_claimed_by = '', purchasing_claimed_at = NULL, purchasing_claimed_queue_id = NULL,
+        updated_at = datetime('now')
+    WHERE purchasing_claimed_queue_id IN (${placeIdsSql})
+  `).bind(...binds);
+}
+
 async function listPurchaseQueue(db: D1Database, eventId: number): Promise<PurchaseQueueRow[]> {
   const rows = await db.prepare(`
     SELECT q.*, p.first_name, p.last_name, p.member_id, g.name AS group_name
@@ -969,9 +995,12 @@ app.delete('/api/events/:id/purchase-queue/me', async (c) => {
   if (!access) return err('Authentication required', 401);
   if (access.userId === 'admin') return err('Leave as a signed-in member', 400);
 
-  await c.env.DB.prepare(
-    'DELETE FROM purchase_queue WHERE event_id = ? AND clerk_user_id = ?'
-  ).bind(eventId, access.userId).run();
+  await c.env.DB.batch([
+    releasePlaceClaims(
+      c.env.DB, 'SELECT id FROM purchase_queue WHERE event_id = ? AND clerk_user_id = ?', eventId, access.userId,
+    ),
+    c.env.DB.prepare('DELETE FROM purchase_queue WHERE event_id = ? AND clerk_user_id = ?').bind(eventId, access.userId),
+  ]);
 
   return json(await listPurchaseQueue(c.env.DB, eventId));
 });
@@ -990,9 +1019,10 @@ app.delete('/api/events/:id/purchase-queue/:qid', async (c) => {
     return err('Only the owner of this place in line or an admin can remove it', 403);
   }
 
-  await c.env.DB.prepare(
-    'DELETE FROM purchase_queue WHERE id = ? AND event_id = ?'
-  ).bind(qid, eventId).run();
+  await c.env.DB.batch([
+    releasePlaceClaims(c.env.DB, '?', qid),
+    c.env.DB.prepare('DELETE FROM purchase_queue WHERE id = ? AND event_id = ?').bind(qid, eventId),
+  ]);
 
   return json(await listPurchaseQueue(c.env.DB, eventId));
 });
@@ -1068,10 +1098,15 @@ app.patch('/api/events/:id/purchase-queue/:qid', async (c) => {
   }
 
   values.push(qid, eventId);
-  await c.env.DB.prepare(`
+  const update = c.env.DB.prepare(`
     UPDATE purchase_queue SET ${fields.join(', ')}
     WHERE id = ? AND event_id = ?
-  `).bind(...values).run();
+  `).bind(...values);
+  await c.env.DB.batch(
+    nextStatus === 'done' || nextStatus === 'skipped'
+      ? [update, releasePlaceClaims(c.env.DB, '?', qid)]
+      : [update],
+  );
 
   return json(await listPurchaseQueue(c.env.DB, eventId));
 });
@@ -2611,8 +2646,11 @@ admin.post('/events/:id/participants/copy', async (c) => {
 /** Wipes an event's Queue-It line, e.g. the places people joined while practicing. */
 admin.delete('/events/:id/purchase-queue', async (c) => {
   const eventId = Number(c.req.param('id'));
-  const res = await c.env.DB.prepare('DELETE FROM purchase_queue WHERE event_id = ?').bind(eventId).run();
-  return json({ ok: true, cleared: res.meta.changes ?? 0 });
+  const res = await c.env.DB.batch([
+    releasePlaceClaims(c.env.DB, 'SELECT id FROM purchase_queue WHERE event_id = ?', eventId),
+    c.env.DB.prepare('DELETE FROM purchase_queue WHERE event_id = ?').bind(eventId),
+  ]);
+  return json({ ok: true, cleared: res[1].meta.changes ?? 0 });
 });
 
 admin.delete('/events/:id/participants/:pid', async (c) => {
@@ -2970,6 +3008,10 @@ admin.delete('/years/:yearId/members/:memberId', async (c) => {
   if (dryRun) return json({ ok: true, dry_run: true, ...summary });
 
   await c.env.DB.batch([
+    releasePlaceClaims(c.env.DB, `
+      SELECT id FROM purchase_queue WHERE (clerk_user_id = ? OR participant_id IN (
+        SELECT id FROM participants WHERE clerk_user_id = ? AND ${inYear})) AND ${inYear}
+    `, uid, uid, yearId, yearId),
     c.env.DB.prepare(`
       DELETE FROM purchase_queue WHERE (clerk_user_id = ? OR participant_id IN (
         SELECT id FROM participants WHERE clerk_user_id = ? AND ${inYear})) AND ${inYear}

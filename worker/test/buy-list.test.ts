@@ -35,7 +35,7 @@ function save(as: string, ids: unknown, evt = eventId) {
 async function load(as: string): Promise<number[]> {
   const res = await h.request(`/api/events/${eventId}/buy-list`, { as });
   expect(res.status).toBe(200);
-  return (await res.json()).participant_ids;
+  return ((await res.json()) as { participant_ids: number[] }).participant_ids;
 }
 
 describe('buy list', () => {

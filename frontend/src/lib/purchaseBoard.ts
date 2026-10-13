@@ -192,6 +192,7 @@ export function isClaimable(p: Participant, event: EventDetail | null): boolean 
 export type SimPatch = Partial<Pick<Participant,
   | 'purchasing_claimed_by'
   | 'purchasing_claimed_at'
+  | 'purchasing_claimed_queue_id'
   | 'pur_preview'
   | 'pur_thu'
   | 'pur_fri'

@@ -1,5 +1,6 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
-import type { EventDetail, Participant } from '../lib/api';
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import type { EventDetail, Participant, PurchaseQueueEntry } from '../lib/api';
+import { planBuyList, type PlaceSlot } from '../lib/buyPlan';
 import {
   BLOCKER_LABEL,
   DAY_CHIP_COLOR,
@@ -11,6 +12,7 @@ import {
   nothingLeftToBuy,
   purchaseBlockers,
 } from '../lib/purchaseBoard';
+import { etaRemainingMs, formatEtaRemaining } from '../lib/queueBoard';
 
 type RowState =
   | { kind: 'done' }
@@ -32,14 +34,14 @@ const fullName = (p: Participant) => `${p.first_name} ${p.last_name}`.trim();
 const firstNames = (ps: Participant[]) => ps.map((p) => p.first_name).join(', ');
 
 /**
- * Who's next as a draft board: your own ranked list of who to buy for. Your next three
- * buyable people are your picks, and one tap claims them all. Empty spots show as dashed
- * boxes with a suggestion so a short list still fills up. The list is yours alone and
- * saved on the server, so it follows you from laptop to phone.
+ * Who's next as a draft board: your own ranked list of who to buy for, split across your
+ * places in the Queue-It line. Each place buys the next 3 off your list, soonest place
+ * first, and claims them in one tap once it's through. Dragging someone up or down moves
+ * them between places. The list is yours alone and saved on the server.
  */
 export function BuyListPanel({
   event, participants, list, identityId, myDisplayName, quickAdd, suggested, reasonFor,
-  purchasing, now, onChange, onClaimMany, onRelease, onDismiss,
+  places, pickNumber, purchasing, now, onChange, onClaimMany, onRelease, onPlaceThrough, onOpenQueue, onDismiss,
 }: {
   event: EventDetail | null;
   participants: Participant[];
@@ -52,32 +54,43 @@ export function BuyListPanel({
   /** Buyable people not on your list, best first. */
   suggested: Participant[];
   reasonFor: (p: Participant) => string;
+  /** Your places still in the Queue-It line, soonest first. */
+  places: PurchaseQueueEntry[];
+  /** Draft pick number of a place in the whole line. */
+  pickNumber: (placeId: number) => number;
   purchasing: boolean;
   now: number;
   onChange: (ids: number[]) => void;
-  onClaimMany: (ps: Participant[]) => Promise<void>;
+  onClaimMany: (ps: Participant[], place: PurchaseQueueEntry) => Promise<void>;
   onRelease: (p: Participant) => Promise<void>;
+  onPlaceThrough: (place: PurchaseQueueEntry) => Promise<void>;
+  onOpenQueue: () => void;
   onDismiss: () => void;
 }) {
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
-  const [drag, setDrag] = useState<{ id: number; order: number[] } | null>(null);
+  const [drag, setDrag] = useState<{ id: number; order: number[]; start: number[] } | null>(null);
   const rowEls = useRef(new Map<number, HTMLLIElement>());
   const searchRef = useRef<HTMLInputElement>(null);
 
   const byId = new Map(participants.map((p) => [p.id, p]));
   const savedIds = list.filter((id) => byId.has(id));
-  const orderIds = drag?.order ?? savedIds;
-  const ranked = orderIds.map((id) => byId.get(id)!);
   const onList = new Set(savedIds);
-  const states = new Map(ranked.map((p) => [p.id, rowState(p, event, myDisplayName, now)]));
-
   const myClaims = participants.filter((p) => holdsClaimSlot(p, myDisplayName, now));
-  const slotsLeft = Math.max(0, MAX_ACTIVE_CLAIMS - myClaims.length);
-  const picks = ranked.filter((p) => states.get(p.id)?.kind === 'ready').slice(0, slotsLeft);
-  const pickIds = new Set(picks.map((p) => p.id));
-  const emptySpots = Math.max(0, slotsLeft - picks.length);
-  const claimsOffList = myClaims.filter((p) => !onList.has(p.id));
+  const claimedIds = new Set(myClaims.map((p) => p.id));
+  const claimedOnList = savedIds.filter((id) => claimedIds.has(id));
+  const states = new Map(participants.map((p) => [p.id, rowState(p, event, myDisplayName, now)]));
+
+  const plan = planBuyList({
+    list: (drag?.order ?? savedIds.filter((id) => !claimedIds.has(id))).map((id) => byId.get(id)!),
+    myClaims,
+    places,
+    isReady: (p) => states.get(p.id)?.kind === 'ready',
+  });
+  const displayIds = [...plan.slots.flatMap((s) => s.upcoming), ...plan.rest].map((p) => p.id);
+  const numberOf = new Map(displayIds.map((id, i) => [id, i + 1]));
+  const openSpots = plan.slots.reduce((n, s) => n + s.open, 0);
+  const overflowReady = plan.rest.filter((p) => states.get(p.id)?.kind === 'ready').length;
 
   const q = search.trim().toLowerCase();
   const matches = q
@@ -94,52 +107,66 @@ export function BuyListPanel({
     ...quickAddable.filter((p) => buyableNow.has(p.id)),
     ...suggested.filter((p) => !onList.has(p.id) && !quickAddIds.has(p.id)),
   ];
-  const inSpots = new Set(spotIdeas.slice(0, emptySpots).map((p) => p.id));
+  const inSpots = new Set(spotIdeas.slice(0, openSpots).map((p) => p.id));
   const quickAddLeft = quickAddable.filter((p) => !inSpots.has(p.id));
-  const suggestions = spotIdeas.slice(emptySpots).filter((p) => !quickAddIds.has(p.id));
+  const suggestions = spotIdeas.slice(openSpots).filter((p) => !quickAddIds.has(p.id));
 
+  const save = (order: number[]) => onChange([...claimedOnList, ...order]);
   const add = (p: Participant) => { onChange([...savedIds, p.id]); setSearch(''); };
   const remove = (id: number) => onChange(savedIds.filter((x) => x !== id));
-  const move = (index: number, delta: -1 | 1) => {
-    const ids = [...savedIds];
-    const to = index + delta;
-    if (to < 0 || to >= ids.length) return;
-    [ids[index], ids[to]] = [ids[to], ids[index]];
-    onChange(ids);
+  const move = (id: number, delta: -1 | 1) => {
+    const ids = [...displayIds];
+    const from = ids.indexOf(id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    save(ids);
   };
 
-  // Pointer events rather than HTML drag-and-drop, which phones don't support.
+  // Pointer events rather than HTML drag-and-drop, which phones don't support. Listening on
+  // the window keeps the drag alive when a row moves into another place's card and its
+  // handle remounts. Rows are ranked by where they sit on screen, since people who can't be
+  // bought yet drop below the places rather than staying where the list put them.
   const startDrag = (e: PointerEvent<HTMLButtonElement>, id: number) => {
     e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({ id, order: savedIds });
+    setDrag({ id, order: displayIds, start: displayIds });
   };
-  const moveDrag = (e: PointerEvent<HTMLButtonElement>) => {
+  useEffect(() => {
     if (!drag) return;
-    const others = drag.order.filter((id) => id !== drag.id);
-    const index = others.filter((id) => {
-      const r = rowEls.current.get(id)?.getBoundingClientRect();
-      return r != null && r.top + r.height / 2 < e.clientY;
-    }).length;
-    const order = [...others.slice(0, index), drag.id, ...others.slice(index)];
-    if (order.some((id, i) => id !== drag.order[i])) setDrag({ ...drag, order });
-  };
-  const endDrag = () => {
-    if (drag && drag.order.some((id, i) => id !== savedIds[i])) onChange(drag.order);
-    setDrag(null);
-  };
-  const keyMove = (e: KeyboardEvent, index: number) => {
-    if (e.key === 'ArrowUp') { e.preventDefault(); move(index, -1); }
-    if (e.key === 'ArrowDown') { e.preventDefault(); move(index, 1); }
+    const onMove = (e: globalThis.PointerEvent) => {
+      const box = (id: number) => rowEls.current.get(id)?.getBoundingClientRect();
+      const others = drag.order
+        .filter((id) => id !== drag.id)
+        .sort((a, b) => (box(a)?.top ?? 0) - (box(b)?.top ?? 0));
+      const index = others.filter((id) => {
+        const r = box(id);
+        return r != null && r.top + r.height / 2 < e.clientY;
+      }).length;
+      const order = [...others.slice(0, index), drag.id, ...others.slice(index)];
+      if (order.some((id, i) => id !== drag.order[i])) setDrag({ ...drag, order });
+    };
+    const onUp = () => {
+      if (drag.order.some((id, i) => id !== drag.start[i])) onChange([...claimedOnList, ...drag.order]);
+      setDrag(null);
+    };
+    const onCancel = () => setDrag(null);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+  }, [drag, onChange, claimedOnList]);
+  const keyMove = (e: KeyboardEvent, id: number) => {
+    if (e.key === 'ArrowUp') { e.preventDefault(); move(id, -1); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); move(id, 1); }
   };
 
-  const claimPicks = async () => {
+  const run = async (fn: () => Promise<void>) => {
     setBusy(true);
-    try { await onClaimMany(picks); } finally { setBusy(false); }
-  };
-  const release = async (p: Participant) => {
-    setBusy(true);
-    try { await onRelease(p); } finally { setBusy(false); }
+    try { await fn(); } finally { setBusy(false); }
   };
 
   const addButton = (p: Participant) => (
@@ -153,6 +180,154 @@ export function BuyListPanel({
     </button>
   );
 
+  const listRow = (p: Participant) => {
+    const st = states.get(p.id)!;
+    const dragging = drag?.id === p.id;
+    const muted = st.kind === 'done' || st.kind === 'taken';
+    return (
+      <li
+        key={p.id}
+        ref={(el) => { if (el) rowEls.current.set(p.id, el); else rowEls.current.delete(p.id); }}
+        className={`rounded-md border px-1.5 py-1.5 flex items-center gap-1.5 transition-shadow ${
+          dragging ? 'shadow-lg ring-2 ring-yellow-400 relative z-10' : ''
+        } ${
+          st.kind === 'ready'
+            ? 'border-yellow-300 dark:border-yellow-700/60 bg-white dark:bg-gray-800/80'
+            : 'border-yellow-200 dark:border-gray-700 bg-white/60 dark:bg-gray-800/40'
+        } ${muted && !dragging ? 'opacity-60' : ''}`}
+      >
+        <button
+          type="button"
+          onPointerDown={(e) => startDrag(e, p.id)}
+          onKeyDown={(e) => keyMove(e, p.id)}
+          className="shrink-0 w-6 h-8 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 cursor-grab active:cursor-grabbing touch-none select-none"
+          aria-label={`Reorder ${p.first_name}: drag, or use the up and down arrow keys`}
+        >
+          ⠿
+        </button>
+        <span className="font-mono text-sm font-black w-4 text-yellow-700 dark:text-yellow-400 shrink-0">{numberOf.get(p.id)}</span>
+        <span className="flex-1 min-w-0">
+          <PersonName p={p} isMe={p.id === identityId} strike={st.kind === 'done'} />
+          <RowStatus st={st} gaps={p.gaps} />
+        </span>
+        <button type="button" onClick={() => remove(p.id)} className="shrink-0 w-6 h-8 text-xs text-gray-400 hover:text-red-600" aria-label={`Remove ${p.first_name} from your list`}>✕</button>
+      </li>
+    );
+  };
+
+  const firstIdeaOf = plan.slots.map((_, k) => plan.slots.slice(0, k).reduce((n, s) => n + s.open, 0));
+  const emptySpot = (key: string, ideaIndex: number) => {
+    const idea = spotIdeas[ideaIndex];
+    return (
+      <li key={key} className="rounded-md border-2 border-dashed border-yellow-300 dark:border-gray-600 px-2 py-1.5 flex items-center gap-2 min-h-[2.75rem]">
+        {idea ? (
+          <>
+            <span className="flex-1 min-w-0">
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Empty spot · suggestion</span>
+              <span className="block text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">{fullName(idea)}</span>
+              <span className="block text-[10px] text-gray-500 truncate">{reasonFor(idea)}</span>
+            </span>
+            {addButton(idea)}
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => searchRef.current?.focus()}
+            className="flex-1 text-left text-xs text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+          >
+            Empty spot · search below to add someone
+          </button>
+        )}
+      </li>
+    );
+  };
+
+  const placeCard = (slot: PlaceSlot, k: number) => {
+    const place = slot.place;
+    const onClock = place?.status === 'buying';
+    return (
+      <li
+        key={place?.id ?? 'planned'}
+        className={`rounded-lg border-2 p-1.5 ${
+          onClock
+            ? 'border-orange-400 bg-orange-50/70 dark:bg-orange-950/20'
+            : place
+              ? 'border-sky-300 dark:border-sky-800 bg-sky-50/60 dark:bg-sky-950/20'
+              : 'border-dashed border-gray-300 dark:border-gray-700'
+        }`}
+      >
+        <div className="flex items-center gap-1.5 px-1 pb-1">
+          <span className="flex-1 min-w-0">
+            <span className="block text-[11px] font-black text-gray-900 dark:text-white truncate">
+              {place ? place.label : 'Your first place in line'}
+            </span>
+            <span className="block text-[10px] text-gray-500">
+              {place
+                ? `Pick #${pickNumber(place.id)} · buys ${MAX_ACTIVE_CLAIMS}`
+                : `Each browser in the Queue-It line buys ${MAX_ACTIVE_CLAIMS}`}
+            </span>
+          </span>
+          <PlaceBadge place={place} now={now} />
+        </div>
+        <ol className="space-y-1">
+          {slot.claimed.map((p) => (
+            <li key={p.id} className="flex items-center gap-2 rounded-md border border-green-400 bg-green-50 dark:bg-green-950/30 px-2 py-1.5">
+              <span className="text-green-700 dark:text-green-400 text-xs font-black w-4 shrink-0">✓</span>
+              <span className="flex-1 min-w-0">
+                <PersonName p={p} isMe={p.id === identityId} />
+                <span className="block text-[10px] text-green-700 dark:text-green-400 font-bold">You&apos;re buying</span>
+              </span>
+              <ReleaseButton busy={busy} onClick={() => void run(() => onRelease(p))} />
+            </li>
+          ))}
+          {slot.upcoming.map(listRow)}
+          {Array.from({ length: slot.open }, (_, i) => emptySpot(`empty-${k}-${i}`, firstIdeaOf[k] + i))}
+        </ol>
+        {purchasing && placeAction()}
+      </li>
+    );
+
+    function placeAction() {
+      if (!place) {
+        return (
+          <button
+            type="button"
+            onClick={onOpenQueue}
+            className="mt-1.5 w-full text-xs font-bold px-3 py-2 rounded bg-sky-500 hover:bg-sky-400 text-white"
+          >
+            Join the Queue-It line to claim
+          </button>
+        );
+      }
+      if (onClock) {
+        if (slot.upcoming.length === 0) return null;
+        return (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void run(() => onClaimMany(slot.upcoming, place))}
+            className="mt-1.5 w-full text-sm font-black px-3 py-2 rounded-md bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-yellow-200 shadow disabled:opacity-60"
+          >
+            {busy ? 'Claiming…' : `Claim ${slot.upcoming.length} for ${place.label}: ${firstNames(slot.upcoming)}`}
+          </button>
+        );
+      }
+      return (
+        <div className="mt-1.5">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void run(() => onPlaceThrough(place))}
+            className="w-full text-xs font-bold px-3 py-2 rounded border-2 border-orange-400 text-orange-700 dark:text-orange-300 bg-white dark:bg-gray-900 hover:bg-orange-50 dark:hover:bg-orange-950/40 disabled:opacity-60"
+          >
+            {place.label} is through Queue-It
+          </button>
+          <p className="text-[10px] text-gray-500 mt-1 px-1">Claim unlocks once this browser is through.</p>
+        </div>
+      );
+    }
+  };
+
   return (
     <aside className="fixed inset-x-0 bottom-0 z-40 max-h-[80vh] rounded-t-2xl shadow-2xl border-t-4 sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:shadow-none sm:border-t-0 sm:border-l-4 sm:w-80 shrink-0 border-yellow-400 bg-amber-50 dark:bg-gray-900 flex flex-col min-h-0">
       <div className="px-3 py-2.5 border-b border-yellow-200 dark:border-gray-700 shrink-0">
@@ -163,41 +338,20 @@ export function BuyListPanel({
           <button type="button" onClick={onDismiss} className="text-yellow-700/70 hover:text-yellow-900 dark:text-yellow-500 text-sm px-1.5" aria-label="Close">✕</button>
         </div>
         <p className="text-gray-600 dark:text-gray-400 text-[11px] mt-1 leading-snug">
-          Put the people you want to buy for in order. Drag ⠿ to move someone.
-          {purchasing ? ' One tap claims your next ' : ' On purchase day, one tap claims your next '}
-          {MAX_ACTIVE_CLAIMS}. Only you see your list.
+          Put the people you want to buy for in order. Each of your places in line buys the
+          next {MAX_ACTIVE_CLAIMS}. Drag ⠿ to move someone to a different place. Only you see your list.
         </p>
-        {purchasing && (
-          picks.length > 0 ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void claimPicks()}
-              className="mt-2 w-full text-sm font-black px-3 py-2.5 rounded-md bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-yellow-200 shadow disabled:opacity-60"
-            >
-              {busy ? 'Claiming…' : `Claim my next ${picks.length}: ${firstNames(picks)}`}
-            </button>
-          ) : slotsLeft === 0 ? (
-            <p className="mt-2 text-[11px] font-bold text-orange-700 dark:text-orange-400">
-              All {MAX_ACTIVE_CLAIMS} claims in use. Finish buying or release someone to claim more.
-            </p>
-          ) : (
-            <p className="mt-2 text-[11px] font-bold text-gray-600 dark:text-gray-400">
-              Nobody on your list can be claimed right now. Add someone below.
-            </p>
-          )
-        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
-        {claimsOffList.length > 0 && (
+        {plan.unplaced.length > 0 && (
           <section>
             <SectionLabel>Also buying</SectionLabel>
             <ul className="space-y-1">
-              {claimsOffList.map((p) => (
+              {plan.unplaced.map((p) => (
                 <li key={p.id} className="flex items-center gap-2 rounded-md border border-green-400 bg-green-50 dark:bg-green-950/30 px-2 py-1.5">
                   <span className="flex-1 min-w-0 text-xs font-semibold text-gray-900 dark:text-white truncate">{fullName(p)}</span>
-                  <ReleaseButton busy={busy} onClick={() => void release(p)} />
+                  <ReleaseButton busy={busy} onClick={() => void run(() => onRelease(p))} />
                 </li>
               ))}
             </ul>
@@ -206,7 +360,7 @@ export function BuyListPanel({
 
         <section>
           <SectionLabel>Your list{savedIds.length > 0 ? ` · ${savedIds.length}` : ''}</SectionLabel>
-          {ranked.length === 0 && quickAddable.length > 0 && (
+          {savedIds.length === 0 && quickAddable.length > 0 && (
             <button
               type="button"
               onClick={() => onChange(quickAddable.map((p) => p.id))}
@@ -215,79 +369,24 @@ export function BuyListPanel({
               Start with {quickAddable.length === 1 ? fullName(quickAddable[0]) : `me + ${quickAddable.length - 1} from my group`}
             </button>
           )}
-          <ol className="space-y-1">
-            {ranked.map((p, i) => {
-              const st = states.get(p.id)!;
-              const isPick = pickIds.has(p.id);
-              const dragging = drag?.id === p.id;
-              const muted = st.kind === 'done' || st.kind === 'taken';
-              return (
-                <li
-                  key={p.id}
-                  ref={(el) => { if (el) rowEls.current.set(p.id, el); else rowEls.current.delete(p.id); }}
-                  className={`rounded-md border px-1.5 py-1.5 flex items-center gap-1.5 transition-shadow ${
-                    dragging ? 'shadow-lg ring-2 ring-yellow-400 relative z-10' : ''
-                  } ${
-                    isPick
-                      ? 'border-2 border-yellow-400 bg-yellow-50 dark:bg-yellow-950/30'
-                      : st.kind === 'mine'
-                        ? 'border-green-400 bg-green-50 dark:bg-green-950/30'
-                        : 'border-yellow-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/60'
-                  } ${muted && !dragging ? 'opacity-60' : ''}`}
+          <ol className="space-y-2">{plan.slots.map(placeCard)}</ol>
+          {plan.rest.length > 0 && (
+            <div className="mt-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1 px-1">
+                {overflowReady > 0 ? 'Next up · no place for them yet' : 'Rest of your list'}
+              </div>
+              <ol className="space-y-1">{plan.rest.map(listRow)}</ol>
+              {overflowReady > 0 && (
+                <button
+                  type="button"
+                  onClick={onOpenQueue}
+                  className="mt-1.5 w-full text-[11px] font-bold px-3 py-1.5 rounded border border-sky-400 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 >
-                  <button
-                    type="button"
-                    onPointerDown={(e) => startDrag(e, p.id)}
-                    onPointerMove={moveDrag}
-                    onPointerUp={endDrag}
-                    onPointerCancel={() => setDrag(null)}
-                    onKeyDown={(e) => keyMove(e, i)}
-                    className="shrink-0 w-6 h-8 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 cursor-grab active:cursor-grabbing touch-none select-none"
-                    aria-label={`Reorder ${p.first_name}: drag, or use the up and down arrow keys`}
-                  >
-                    ⠿
-                  </button>
-                  <span className="font-mono text-sm font-black w-4 text-yellow-700 dark:text-yellow-400 shrink-0">{i + 1}</span>
-                  <span className="flex-1 min-w-0">
-                    <span className="flex items-center gap-1 min-w-0">
-                      <span className={`font-semibold text-xs text-gray-900 dark:text-white truncate ${st.kind === 'done' ? 'line-through' : ''}`}>
-                        {fullName(p)}
-                      </span>
-                      {p.id === identityId && <span className="text-[9px] font-bold bg-yellow-400 text-black px-1 rounded shrink-0">YOU</span>}
-                    </span>
-                    <RowStatus st={st} gaps={p.gaps} isPick={isPick} />
-                  </span>
-                  {st.kind === 'mine' && <ReleaseButton busy={busy} onClick={() => void release(p)} />}
-                  <button type="button" onClick={() => remove(p.id)} className="shrink-0 w-6 h-8 text-xs text-gray-400 hover:text-red-600" aria-label={`Remove ${p.first_name} from your list`}>✕</button>
-                </li>
-              );
-            })}
-            {Array.from({ length: emptySpots }, (_, i) => {
-              const idea = spotIdeas[i];
-              return (
-                <li key={`empty-${i}`} className="rounded-md border-2 border-dashed border-yellow-300 dark:border-gray-600 px-2 py-1.5 flex items-center gap-2 min-h-[2.75rem]">
-                  {idea ? (
-                    <>
-                      <span className="flex-1 min-w-0">
-                        <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Empty spot · suggestion</span>
-                        <span className="block text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">{fullName(idea)}</span>
-                        <span className="block text-[10px] text-gray-500 truncate">{reasonFor(idea)}</span>
-                      </span>
-                      {addButton(idea)}
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => searchRef.current?.focus()}
-                      className="flex-1 text-left text-xs text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
-                    >
-                      Empty spot · search below to add someone
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
+                  + Add another browser to the line to buy {Math.min(overflowReady, MAX_ACTIVE_CLAIMS)} more
+                </button>
+              )}
+            </div>
+          )}
         </section>
 
         <section>
@@ -340,6 +439,28 @@ export function BuyListPanel({
   );
 }
 
+function PersonName({ p, isMe, strike }: { p: Participant; isMe: boolean; strike?: boolean }) {
+  return (
+    <span className="flex items-center gap-1 min-w-0">
+      <span className={`font-semibold text-xs text-gray-900 dark:text-white truncate ${strike ? 'line-through' : ''}`}>
+        {fullName(p)}
+      </span>
+      {isMe && <span className="text-[9px] font-bold bg-yellow-400 text-black px-1 rounded shrink-0">YOU</span>}
+    </span>
+  );
+}
+
+function PlaceBadge({ place, now }: { place: PurchaseQueueEntry | null; now: number }) {
+  if (!place) return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300 shrink-0">Not in line</span>;
+  if (place.status === 'buying') return <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0">ON THE CLOCK</span>;
+  const eta = etaRemainingMs(place, now);
+  return (
+    <span className="text-[10px] font-bold font-mono px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200 shrink-0">
+      {eta == null ? 'Waiting' : formatEtaRemaining(eta)}
+    </span>
+  );
+}
+
 function ReleaseButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
   return (
     <button
@@ -353,14 +474,13 @@ function ReleaseButton({ busy, onClick }: { busy: boolean; onClick: () => void }
   );
 }
 
-function RowStatus({ st, gaps, isPick }: { st: RowState; gaps: string[]; isPick: boolean }) {
+function RowStatus({ st, gaps }: { st: RowState; gaps: string[] }) {
   if (st.kind === 'done') return <span className="block text-[10px] text-green-700 dark:text-green-400 font-bold">✓ Done</span>;
   if (st.kind === 'mine') return <span className="block text-[10px] text-green-700 dark:text-green-400 font-bold">You&apos;re buying</span>;
   if (st.kind === 'taken') return <span className="block text-[10px] text-gray-500 truncate">{st.by} is buying</span>;
   if (st.kind === 'blocked') return <span className="block text-[10px] text-amber-700 dark:text-amber-400 truncate">Can&apos;t buy yet: {st.why.toLowerCase()}</span>;
   return (
     <span className="flex items-center gap-1 flex-wrap mt-0.5">
-      {isPick && <span className="text-[9px] font-black uppercase tracking-wider text-yellow-700 dark:text-yellow-400 mr-0.5">Next</span>}
       {gaps.map((d) => (
         <span key={d} className={`text-[9px] font-bold px-1 rounded ${DAY_CHIP_COLOR[d] ?? 'bg-zinc-600 text-white'}`}>{d}</span>
       ))}

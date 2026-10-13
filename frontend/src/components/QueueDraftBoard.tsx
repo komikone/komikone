@@ -73,8 +73,8 @@ export function BuyerQueuePanel({
   myClerkId: string | null;
   isAdmin: boolean;
   identityLinked: boolean;
-  /** Top of Who's next, shown on your place while it is on the clock. */
-  buyFor: Participant[];
+  /** Who each of your places is buying for off your buy list, shown while it's on the clock. */
+  buyFor: (placeId: number) => Participant[];
   onOpenWhosNext: () => void;
   onJoin: (label?: string) => Promise<void>;
   onDismiss: () => void;
@@ -259,17 +259,15 @@ export function BuyerQueuePanel({
                         <div className="text-[10px] font-black uppercase tracking-widest text-orange-700 dark:text-orange-300">
                           Buy for
                         </div>
-                        {buyFor.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={onOpenWhosNext}
-                            className="text-left text-xs font-semibold text-gray-900 dark:text-white hover:underline"
-                          >
-                            {buyFor.map((p) => `${p.first_name} ${p.last_name}`).join(', ')} →
-                          </button>
-                        ) : (
-                          <div className="text-xs text-gray-500">Nobody left to claim.</div>
-                        )}
+                        <button
+                          type="button"
+                          onClick={onOpenWhosNext}
+                          className="text-left text-xs font-semibold text-gray-900 dark:text-white hover:underline"
+                        >
+                          {buyFor(q.id).length > 0
+                            ? `${buyFor(q.id).map((p) => `${p.first_name} ${p.last_name}`).join(', ')} →`
+                            : 'Nobody planned yet. Open your buy list →'}
+                        </button>
                       </div>
                     )}
                     {open && (

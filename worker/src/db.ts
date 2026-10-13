@@ -56,6 +56,8 @@ export type Participant = {
   purchasing_coordinator: string;
   purchasing_claimed_by: string;
   purchasing_claimed_at: string | null;
+  /** Place in the Queue-It line this claim is being bought through. */
+  purchasing_claimed_queue_id: number | null;
   pur_preview: number;
   pur_thu: number;
   pur_fri: number;

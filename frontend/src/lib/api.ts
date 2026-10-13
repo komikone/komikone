@@ -147,6 +147,8 @@ export type Participant = {
   purchasing_coordinator: string;
   purchasing_claimed_by: string;
   purchasing_claimed_at: string | null;
+  /** Place in the Queue-It line this claim is being bought through. */
+  purchasing_claimed_queue_id?: number | null;
   pur_preview: boolean;
   pur_thu: boolean;
   pur_fri: boolean;
@@ -292,11 +294,11 @@ export const api = {
         headers: authHeaders(clerkToken),
         body: JSON.stringify(data),
       }),
-    claim: (eventId: number, pid: number, clerkToken: string, coordinator_name: string) =>
+    claim: (eventId: number, pid: number, clerkToken: string, coordinator_name: string, queue_id: number) =>
       req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/claim`, {
         method: 'POST',
         headers: authHeaders(clerkToken),
-        body: JSON.stringify({ coordinator_name }),
+        body: JSON.stringify({ coordinator_name, queue_id }),
       }),
     unclaim: (eventId: number, pid: number, clerkToken: string) =>
       req<{ ok: boolean }>(`/api/events/${eventId}/participants/${pid}/unclaim`, {

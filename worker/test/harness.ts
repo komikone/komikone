@@ -329,6 +329,7 @@ export function insertParticipant(db: DatabaseSync, eventId: number, over: {
   pur_sun?: number;
   purchasing_claimed_by?: string;
   purchasing_claimed_at?: string | null;
+  purchasing_claimed_queue_id?: number | null;
   who_purchased?: string;
   clerk_user_id?: string | null;
   group_id?: number | null;
@@ -339,9 +340,9 @@ export function insertParticipant(db: DatabaseSync, eventId: number, over: {
     INSERT INTO participants (
       event_id, first_name, last_name, member_id, return_eligible,
       req_sat, req_sun, pur_sat, pur_sun,
-      purchasing_claimed_by, purchasing_claimed_at, who_purchased,
+      purchasing_claimed_by, purchasing_claimed_at, purchasing_claimed_queue_id, who_purchased,
       clerk_user_id, group_id, email, badge_type
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     eventId,
     over.first_name ?? 'Avery',
@@ -355,12 +356,26 @@ export function insertParticipant(db: DatabaseSync, eventId: number, over: {
     over.pur_sun ?? 0,
     over.purchasing_claimed_by ?? '',
     over.purchasing_claimed_at ?? null,
+    over.purchasing_claimed_queue_id ?? null,
     over.who_purchased ?? '',
     over.clerk_user_id ?? null,
     over.group_id ?? null,
     over.email ?? '',
     over.badge_type ?? 'ADULT',
   );
+  return Number(res.lastInsertRowid);
+}
+
+export function insertPlace(db: DatabaseSync, eventId: number, participantId: number, clerkUserId: string, over: {
+  status?: string;
+  label?: string;
+} = {}): number {
+  const pos = db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM purchase_queue WHERE event_id = ?')
+    .get(eventId) as { p: number };
+  const res = db.prepare(`
+    INSERT INTO purchase_queue (event_id, participant_id, clerk_user_id, position, status, label)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(eventId, participantId, clerkUserId, pos.p, over.status ?? 'buying', over.label ?? 'Laptop');
   return Number(res.lastInsertRowid);
 }
 
