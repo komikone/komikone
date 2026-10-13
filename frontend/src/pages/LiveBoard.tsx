@@ -1126,7 +1126,7 @@ export default function LiveBoard() {
               onClick={toggleBuyerQueue}
               className={`text-xs font-bold uppercase tracking-wide px-3 py-1 rounded border transition-colors ${
                 showBuyerQueue
-                  ? 'bg-sky-400 text-black border-sky-200'
+                  ? 'text-sky-200 border-sky-400 bg-sky-400/15'
                   : 'text-sky-300 border-sky-700 hover:border-sky-400 hover:text-sky-200'
               }`}
             >
