@@ -65,7 +65,7 @@ export function CheckoutModal({
             <h2 className="text-gray-900 dark:text-white font-bold text-lg leading-tight">
               You&apos;re buying for {people.length} {people.length === 1 ? 'person' : 'people'}
             </h2>
-            <p className="text-gray-500 text-xs mt-0.5">Tap a Member ID to copy it. Tick each day as Comic-Con confirms it.</p>
+            <p className="text-gray-500 text-xs mt-0.5">Tap a last name or Member ID to copy it. Tick each day as Comic-Con confirms it.</p>
           </div>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-900 dark:hover:text-white text-lg px-1" aria-label="Close">✕</button>
         </div>
@@ -119,6 +119,38 @@ export function CheckoutModal({
   );
 }
 
+function CopyField({ label, value, mono = false, ariaLabel }: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  ariaLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    void navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      disabled={!value}
+      className="min-w-0 rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 px-2.5 py-1.5 text-left"
+      aria-label={ariaLabel}
+    >
+      <span className="flex items-center justify-between gap-1">
+        <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500">{label}</span>
+        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{copied ? 'Copied ✓' : 'Copy'}</span>
+      </span>
+      <span className={`block truncate font-bold text-gray-900 dark:text-white ${mono ? 'font-mono tracking-wider' : ''}`}>
+        {value || '—'}
+      </span>
+    </button>
+  );
+}
+
 function PersonCheckout({ p, event, isMe, busy, onToggle, onRelease }: {
   p: Participant;
   event: EventDetail | null;
@@ -127,15 +159,8 @@ function PersonCheckout({ p, event, isMe, busy, onToggle, onRelease }: {
   onToggle: (day: SaleDay, checked: boolean) => void;
   onRelease?: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
   const requested = SALE_DAYS.filter((d) => p[`req_${d}`]);
   const done = nothingLeftToBuy(p);
-  const copy = () => {
-    void navigator.clipboard.writeText(p.member_id).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
 
   return (
     <li className={`rounded-lg border-2 p-3 ${done ? 'border-green-500 bg-green-50 dark:bg-green-950/20' : 'border-gray-200 dark:border-gray-700'}`}>
@@ -155,15 +180,11 @@ function PersonCheckout({ p, event, isMe, busy, onToggle, onRelease }: {
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={copy}
-        className="mt-2 w-full flex items-center justify-between gap-2 rounded-md bg-gray-100 dark:bg-gray-800 px-3 py-2 text-left"
-        aria-label={`Copy Member ID for ${p.first_name}`}
-      >
-        <span className="font-mono text-base font-bold tracking-wider text-gray-900 dark:text-white">{p.member_id || '—'}</span>
-        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{copied ? 'Copied ✓' : 'Copy'}</span>
-      </button>
+      {/* Comic-Con's checkout asks for each badge holder's last name and Member ID. */}
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
+        <CopyField label="Last name" value={p.last_name} ariaLabel={`Copy last name for ${p.first_name}`} />
+        <CopyField label="Member ID" value={p.member_id} mono ariaLabel={`Copy Member ID for ${p.first_name}`} />
+      </div>
 
       <div className="mt-2 grid grid-cols-2 gap-1">
         {requested.map((d) => {
