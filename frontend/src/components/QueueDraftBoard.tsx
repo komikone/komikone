@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react';
-import type { Participant, PurchaseQueueEntry, PurchaseQueueStatus, SaleDay } from '../lib/api';
-import { SALE_DAYS, SALE_DAY_FULL, SALE_DAY_LABEL } from '../lib/purchaseBoard';
+import type { Participant, PurchaseQueueEntry, PurchaseQueueStatus } from '../lib/api';
 import {
   QUEUE_MOVE_SHOW_MS,
   activeQueue,
@@ -456,59 +455,5 @@ function EtaText({ entry, now, compact }: { entry: PurchaseQueueEntry; now: numb
       {formatEtaRemaining(remaining)}
       {!compact && clock && <span className="font-normal text-gray-500"> · due {clock}</span>}
     </span>
-  );
-}
-
-/**
- * Anyone on the call can flag a day the moment Comic-Con shows it as gone, so the whole
- * board stops treating it as something left to buy. Red across the top once any day is
- * out, so nobody keeps trying for it.
- */
-export function SoldOutBar({
-  soldOut, canEdit, onToggle,
-}: {
-  soldOut: SaleDay[];
-  canEdit: boolean;
-  onToggle: (day: SaleDay, soldOut: boolean) => void;
-}) {
-  const any = soldOut.length > 0;
-  if (!any && !canEdit) return null;
-  return (
-    <div className={`px-4 py-1.5 shrink-0 flex items-center gap-2 flex-wrap border-b-2 ${
-      any ? 'bg-red-600 border-red-800 text-white' : 'bg-zinc-900 border-zinc-800 text-zinc-400'
-    }`}>
-      {any ? (
-        <span className="text-xs font-black uppercase tracking-widest">
-          {soldOut.map((d) => SALE_DAY_FULL[d]).join(' · ')} sold out — don&apos;t try for {soldOut.length === 1 ? 'it' : 'them'}
-        </span>
-      ) : (
-        <span className="text-[11px] font-bold uppercase tracking-wider">Sold out?</span>
-      )}
-      {canEdit && (
-        <div className="ml-auto flex items-center gap-1">
-          {!any && <span className="hidden sm:inline text-[11px] mr-1">Tap a day when Comic-Con shows it&apos;s gone:</span>}
-          {SALE_DAYS.map((d) => {
-            const out = soldOut.includes(d);
-            return (
-              <button
-                key={d}
-                type="button"
-                onClick={() => onToggle(d, !out)}
-                title={out ? `Mark ${SALE_DAY_FULL[d]} available again` : `Mark ${SALE_DAY_FULL[d]} sold out`}
-                className={`text-[11px] font-bold px-2 py-0.5 rounded border transition-colors ${
-                  out
-                    ? 'bg-white text-red-700 border-white line-through'
-                    : any
-                      ? 'border-red-300 text-white hover:bg-red-500'
-                      : 'border-zinc-600 text-zinc-300 hover:border-red-400 hover:text-red-300'
-                }`}
-              >
-                {SALE_DAY_LABEL[d]}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
   );
 }
