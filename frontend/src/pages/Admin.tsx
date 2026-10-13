@@ -507,6 +507,8 @@ export default function Admin() {
               <OverviewTab
                 returnEvent={returnEvent}
                 openEvent={openEvent}
+                year={activeYear}
+                conYear={selectedYear}
                 auth={auth}
                 returnParticipants={returnParticipants}
                 openParticipants={openParticipants}
@@ -696,12 +698,14 @@ function EventToggle({
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 
 function OverviewTab({
-  returnEvent, openEvent, auth,
+  returnEvent, openEvent, year, conYear, auth,
   returnParticipants, openParticipants,
   allEvents, onUpdate,
 }: {
   returnEvent: EventDetail | null;
   openEvent: EventDetail | null;
+  year: Year | null;
+  conYear: number | null;
   auth: () => Promise<string>;
   returnParticipants: Participant[];
   openParticipants: Participant[];
@@ -730,17 +734,66 @@ function OverviewTab({
             onUpdate={onUpdate}
           />
         )}
-        {!returnEvent && (
-          <div className="bg-white/80 border border-dashed border-gray-300 rounded-xl p-8 flex items-center justify-center text-gray-600 text-sm">
-            No Return Reg event
-          </div>
+        {!returnEvent && conYear !== null && (
+          <AddEventCard regType="return" year={year} conYear={conYear} pricesFrom={openEvent} auth={auth} onCreated={onUpdate} />
         )}
-        {!openEvent && (
-          <div className="bg-white/80 border border-dashed border-gray-300 rounded-xl p-8 flex items-center justify-center text-gray-600 text-sm">
-            No Open Reg event
-          </div>
+        {!openEvent && conYear !== null && (
+          <AddEventCard regType="open" year={year} conYear={conYear} pricesFrom={returnEvent} auth={auth} onCreated={onUpdate} />
         )}
       </div>
+    </div>
+  );
+}
+
+const PRICE_KEYS = [
+  'price_preview_adult', 'price_thu_adult', 'price_fri_adult', 'price_sat_adult', 'price_sun_adult',
+  'price_preview_junior', 'price_thu_junior', 'price_fri_junior', 'price_sat_junior', 'price_sun_junior',
+] as const;
+
+/** Fills in the year's missing Return or Open Reg event, priced like the event it already has. */
+function AddEventCard({ regType, year, conYear, pricesFrom, auth, onCreated }: {
+  regType: 'return' | 'open';
+  year: Year | null;
+  conYear: number;
+  pricesFrom: EventDetail | null;
+  auth: () => Promise<string>;
+  onCreated: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const label = regType === 'return' ? 'Return Reg' : 'Open Reg';
+  const name = `${year?.name ?? `SDCC ${conYear}`} ${label}`;
+
+  const handleCreate = async () => {
+    if (!confirm(`Create "${name}"? It starts in setup, so nobody sees it until you open registration.`)) return;
+    setLoading(true);
+    try {
+      const prices = pricesFrom
+        ? Object.fromEntries(PRICE_KEYS.map((k) => [k, pricesFrom[k]]))
+        : SDCC_DEFAULTS;
+      await api.admin.events.create(await auth(), {
+        year: conYear, year_id: year?.id ?? null, name, reg_type: regType, status: 'setup', ...prices,
+      });
+      onCreated();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to create event');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white/80 dark:bg-gray-900/60 border border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-8 flex flex-col items-center justify-center gap-3 text-sm">
+      <p className="text-gray-600 dark:text-gray-400">No {label} event for {conYear}</p>
+      <button
+        onClick={handleCreate}
+        disabled={loading}
+        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded font-medium transition-colors"
+      >
+        {loading ? 'Creating…' : `+ Add ${label} event`}
+      </button>
+      <p className="text-xs text-gray-500 text-center">
+        {pricesFrom ? `Uses the same prices as ${pricesFrom.name}.` : 'Uses default SDCC prices.'} Change them in the Prices tab.
+      </p>
     </div>
   );
 }
