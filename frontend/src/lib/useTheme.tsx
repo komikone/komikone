@@ -2,11 +2,19 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { useLocation } from 'react-router-dom';
 
 type Theme = 'dark' | 'light';
+export type ThemePreference = Theme | 'system';
 
+// index.html reads this key before first paint, so keep the two in sync.
 const STORAGE_KEY = 'komikone_theme';
+const NEXT_PREFERENCE: Record<ThemePreference, ThemePreference> = {
+  system: 'light',
+  light: 'dark',
+  dark: 'system',
+};
 
 const ThemeContext = createContext<{
   theme: Theme;
+  preference: ThemePreference;
   toggle: () => void;
   isDark: boolean;
 } | null>(null);
@@ -16,16 +24,28 @@ function applyTheme(theme: Theme) {
   else document.documentElement.classList.remove('dark');
 }
 
-function readStoredTheme(): Theme {
+function readStoredPreference(): ThemePreference {
   const saved = localStorage.getItem(STORAGE_KEY);
-  return saved === 'light' || saved === 'dark' ? saved : 'light';
+  return saved === 'light' || saved === 'dark' ? saved : 'system';
 }
+
+const darkQuery = () => window.matchMedia('(prefers-color-scheme: dark)');
 
 /** Homepage always renders light content; theme toggle only applies inside the app. */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const isHome = location.pathname === '/';
-  const [theme, setTheme] = useState<Theme>(readStoredTheme);
+  const [preference, setPreference] = useState<ThemePreference>(readStoredPreference);
+  const [systemDark, setSystemDark] = useState(() => darkQuery().matches);
+
+  useEffect(() => {
+    const mq = darkQuery();
+    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const theme: Theme = preference === 'system' ? (systemDark ? 'dark' : 'light') : preference;
 
   useEffect(() => {
     if (isHome) document.documentElement.classList.remove('dark');
@@ -33,13 +53,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [isHome, theme]);
 
   const toggle = () => {
-    const next: Theme = theme === 'dark' ? 'light' : 'dark';
-    localStorage.setItem(STORAGE_KEY, next);
-    setTheme(next);
+    const next = NEXT_PREFERENCE[preference];
+    if (next === 'system') localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, next);
+    setPreference(next);
   };
 
   return (
-    <ThemeContext.Provider value={{ theme, toggle, isDark: theme === 'dark' }}>
+    <ThemeContext.Provider value={{ theme, preference, toggle, isDark: theme === 'dark' }}>
       {children}
     </ThemeContext.Provider>
   );

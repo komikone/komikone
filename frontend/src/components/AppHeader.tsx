@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
-import { useTheme } from '../lib/useTheme';
 import { HeaderUserMenu } from './HeaderUserMenu';
+import { ThemeToggle } from './ThemeToggle';
 
 type Props = {
   title?: string;
@@ -10,8 +10,6 @@ type Props = {
 
 /** Dark top bar for in-app pages — home link, optional back nav, theme toggle. */
 export function AppHeader({ title, backTo, children }: Props) {
-  const { toggle, isDark } = useTheme();
-
   return (
     <header className="shrink-0 bg-black/90 backdrop-blur-sm border-b-2 border-white/10 px-4 sm:px-6 py-2.5 flex items-center gap-3 sm:gap-4 z-30">
       <Link to="/" className="font-bangers text-xl text-white tracking-wide shrink-0 hover:text-yellow-400 transition-colors">
@@ -35,13 +33,7 @@ export function AppHeader({ title, backTo, children }: Props) {
       )}
       {children}
       <div className="ml-auto flex items-center gap-3 shrink-0">
-        <button
-          type="button"
-          onClick={toggle}
-          className="text-xs text-gray-400 hover:text-yellow-400 border border-white/20 px-2 py-0.5 rounded transition-colors"
-        >
-          {isDark ? '☀ Day' : '◑ Night'}
-        </button>
+        <ThemeToggle className="text-xs text-gray-400 hover:text-yellow-400 border border-white/20 px-2 py-0.5 rounded transition-colors" />
         <HeaderUserMenu />
       </div>
     </header>

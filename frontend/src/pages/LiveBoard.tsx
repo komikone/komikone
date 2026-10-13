@@ -14,7 +14,7 @@ import { BuyerQueuePanel, SoldOutBar } from '../components/QueueDraftBoard';
 import { BuyListPanel } from '../components/BuyListPanel';
 import { planBuyList } from '../lib/buyPlan';
 import { HeaderUserMenu } from '../components/HeaderUserMenu';
-import { useTheme } from '../lib/useTheme';
+import { ThemeToggle } from '../components/ThemeToggle';
 import { MemberId, normalizeMemberIdInput } from '../components/MemberId';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 import {
@@ -200,8 +200,6 @@ export default function LiveBoard() {
 
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { user } = useUser();
-  const { toggle, isDark } = useTheme();
-
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [serverParticipants, setServerParticipants] = useState<Participant[]>([]);
   const [buyerQueue, setBuyerQueue] = useState<PurchaseQueueEntry[]>([]);
@@ -1061,14 +1059,10 @@ export default function LiveBoard() {
           >
             {simulation ? 'Sim ON' : 'Simulate'}
           </button>
-          <button
-            type="button"
-            onClick={toggle}
+          <ThemeToggle
+            compact
             className="text-zinc-400 dark:text-zinc-300 hover:text-yellow-400 text-xs border border-zinc-700 dark:border-zinc-600 px-2 py-0.5 rounded transition-colors"
-            aria-label={isDark ? 'Switch to day mode' : 'Switch to night mode'}
-          >
-            {isDark ? '☀' : '◑'}<span className="hidden sm:inline">{isDark ? ' Day' : ' Night'}</span>
-          </button>
+          />
           <HeaderUserMenu
             boardIdentity={me ? {
               displayName: myDisplayName,
