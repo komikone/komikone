@@ -94,6 +94,7 @@ export function CheckoutModal({
               <span className="font-mono font-bold text-gray-900 dark:text-white">{formatDollars(total)}</span>
             </div>
           )}
+          <div className="text-center text-sm font-bold text-gray-900 dark:text-white truncate">{place.label}</div>
           <button
             type="button"
             disabled={busy || people.length === 0}
@@ -107,8 +108,8 @@ export function CheckoutModal({
             {busy
               ? 'Saving…'
               : unfinished.length === 0 && people.length > 0
-                ? `All set · Complete ${place.label}`
-                : `Complete ${place.label}`}
+                ? 'All set · Complete Checkout'
+                : 'Complete Checkout'}
           </button>
           <p className="text-[10px] text-gray-500 text-center">
             Completing marks this browser done in the Queue-It line and takes everyone finished off your list.
@@ -182,7 +183,7 @@ function PersonCheckout({ p, event, isMe, busy, onToggle, onRelease }: {
 
       {/* Comic-Con's checkout asks for each badge holder's last name and Member ID. */}
       <div className="mt-2 grid grid-cols-2 gap-1.5">
-        <CopyField label="Last name" value={p.last_name} ariaLabel={`Copy last name for ${p.first_name}`} />
+        <CopyField label="Last name" value={p.last_name.trim().toUpperCase()} mono ariaLabel={`Copy last name for ${p.first_name}`} />
         <CopyField label="Member ID" value={(p.member_id || '').trim().toUpperCase()} mono ariaLabel={`Copy Member ID for ${p.first_name}`} />
       </div>
 
