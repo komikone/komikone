@@ -351,8 +351,8 @@ export default function LiveBoard() {
     try {
       const [ev, ps, queue] = await Promise.all([
         api.events.get(Number(eventId), clerkToken),
-        // Include return-ineligible rows so group members are never silently missing.
-        api.participants.list(Number(eventId), clerkToken, { includeIneligible: true }),
+        // Return Reg boards list only people who can be bought for; the server drops the rest.
+        api.participants.list(Number(eventId), clerkToken),
         // null rather than [] on failure: an empty list here wiped everyone's places off
         // the screen for a whole poll whenever one request blipped.
         api.purchaseQueue.list(Number(eventId), clerkToken).catch(() => null),
