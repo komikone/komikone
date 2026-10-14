@@ -23,11 +23,11 @@ export function DaysPanel({ event, participants, canEdit, onToggle, onDismiss }:
   };
 
   return (
-    <aside className="fixed inset-x-0 bottom-0 z-40 max-h-[80vh] rounded-t-2xl shadow-2xl border-t-4 sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:shadow-none sm:border-t-0 sm:border-l-4 sm:w-80 shrink-0 border-rose-400 bg-rose-50 dark:bg-gray-900 flex flex-col min-h-0">
-      <div className="px-3 py-2.5 border-b border-rose-200 dark:border-gray-700 shrink-0">
+    <aside className="fixed inset-x-0 bottom-0 z-40 max-h-[80vh] rounded-t-2xl shadow-2xl border-t sm:static sm:z-auto sm:max-h-none sm:rounded-none sm:shadow-none sm:border-t-0 sm:border-l sm:w-80 shrink-0 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col min-h-0">
+      <div className="px-3 py-2.5 border-b border-gray-200 dark:border-gray-700 shrink-0">
         <div className="flex items-center justify-between gap-2">
-          <div className="text-rose-700 dark:text-rose-300 text-[11px] font-black uppercase tracking-widest">Days · what&apos;s still available</div>
-          <button type="button" onClick={onDismiss} className="text-rose-700/70 hover:text-rose-900 dark:text-rose-400 text-sm px-1.5" aria-label="Close">✕</button>
+          <div className="text-gray-700 dark:text-gray-200 text-[11px] font-black uppercase tracking-widest">Days · what&apos;s still available</div>
+          <button type="button" onClick={onDismiss} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-sm px-1.5" aria-label="Close">✕</button>
         </div>
         <p className="text-gray-600 dark:text-gray-400 text-[11px] mt-1 leading-snug">
           {canEdit
@@ -37,51 +37,48 @@ export function DaysPanel({ event, participants, canEdit, onToggle, onDismiss }:
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
-        <ul className="space-y-1.5">
+        <ul className="rounded-lg border border-gray-200 dark:border-gray-700/70 bg-gray-50 dark:bg-gray-800/40 divide-y divide-gray-200 dark:divide-gray-700/70">
           {SALE_DAYS.map((day) => {
             const out = isSoldOut(event, day);
             const wanted = participants.filter((p) => p[`req_${day}`]);
             const bought = wanted.filter((p) => p[`pur_${day}`]).length;
             const left = wanted.length - bought;
             return (
-              <li
-                key={day}
-                className={`rounded-lg border-2 px-2.5 py-2 ${
-                  out
-                    ? 'border-red-400 bg-red-50 dark:bg-red-950/30 dark:border-red-800'
-                    : 'border-green-300 bg-white dark:bg-gray-800/70 dark:border-green-800'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="flex-1 min-w-0">
-                    <span className={`block text-sm font-black text-gray-900 dark:text-white ${out ? 'line-through decoration-red-500' : ''}`}>
-                      {SALE_DAY_FULL[day]}
-                    </span>
-                    <span className="block text-[11px] text-gray-500">
-                      {out
-                        ? `${left} wanted it and missed out · ${bought} bought`
-                        : `${left} still need it · ${bought} bought`}
-                    </span>
-                  </span>
-                  <span className={`shrink-0 text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                    out ? 'bg-red-600 text-white' : 'bg-green-600 text-white'
+              <li key={day} className="flex items-center gap-2.5 px-3 py-2.5">
+                <span
+                  className={`shrink-0 w-2 h-2 rounded-full ${out ? 'bg-red-500' : 'bg-green-500'}`}
+                  aria-hidden
+                />
+                <span className="flex-1 min-w-0">
+                  <span className={`block text-sm font-bold ${
+                    out ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'
                   }`}>
-                    {out ? 'Sold out' : 'Available'}
+                    {SALE_DAY_FULL[day]}
                   </span>
-                </div>
-                {canEdit && (
+                  <span className="block text-[11px] text-gray-500">
+                    {out
+                      ? `Sold out · ${left} missed out · ${bought} bought`
+                      : `${left} still need it · ${bought} bought`}
+                  </span>
+                </span>
+                {canEdit ? (
                   <button
                     type="button"
                     disabled={busy !== null}
                     onClick={() => void toggle(day, !out)}
-                    className={`mt-1.5 w-full text-xs font-bold px-3 py-1.5 rounded border disabled:opacity-50 ${
+                    className={`shrink-0 whitespace-nowrap text-[11px] font-semibold px-2 py-1 rounded-md border transition-colors disabled:opacity-50 ${
                       out
-                        ? 'border-green-500 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30'
-                        : 'border-red-400 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30'
+                        ? 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-green-500 hover:text-green-700 dark:hover:text-green-400'
+                        : 'border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-red-400 hover:text-red-600 dark:hover:text-red-400'
                     }`}
+                    title={out ? `${SALE_DAY_FULL[day]} is back on sale` : `Comic-Con shows ${SALE_DAY_FULL[day]} is gone`}
                   >
-                    {busy === day ? 'Saving…' : out ? `${SALE_DAY_FULL[day]} is back · mark available` : `Mark ${SALE_DAY_FULL[day]} sold out`}
+                    {busy === day ? 'Saving…' : out ? 'Mark available' : 'Mark sold out'}
                   </button>
+                ) : (
+                  <span className={`shrink-0 text-[11px] font-semibold ${out ? 'text-red-600 dark:text-red-400' : 'text-green-700 dark:text-green-400'}`}>
+                    {out ? 'Sold out' : 'Available'}
+                  </span>
                 )}
               </li>
             );
@@ -89,8 +86,8 @@ export function DaysPanel({ event, participants, canEdit, onToggle, onDismiss }:
         </ul>
 
         {stranded.length > 0 && (
-          <section className="pt-2 border-t border-rose-200 dark:border-gray-700">
-            <div className="text-[10px] font-black uppercase tracking-widest text-rose-700/80 dark:text-rose-400/80 mb-1">
+          <section className="pt-2 border-t border-gray-200 dark:border-gray-700">
+            <div className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-1">
               Nothing left to buy · {stranded.length}
             </div>
             <p className="text-[11px] text-gray-500 mb-1.5 leading-snug">
