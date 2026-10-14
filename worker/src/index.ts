@@ -986,7 +986,7 @@ async function deletePracticeCopies(db: D1Database, eventId: number): Promise<vo
 
 async function createPracticeCopy(db: D1Database, source: Event): Promise<number> {
   const created = await insertCopy(db, 'events', source as unknown as Record<string, unknown>, {
-    name: `${source.name} · Practice`,
+    name: `${source.name} · Simulation`,
     status: 'purchasing',
     year_id: null,
     practice_of: source.id,
@@ -1051,8 +1051,8 @@ app.post('/api/events/:id/practice', async (c) => {
   const event = await getEvent(c.env.DB, eventId);
   if (!event) return err('Event not found', 404);
   if (event.practice_of) return json({ id: event.id, practice_of: event.practice_of });
-  if (event.status === 'purchasing') return err('Purchasing is open, so practice is closed', 409);
-  if (!(await canPractice(c.env.DB, access, eventId))) return err('Only people on this board can practice', 403);
+  if (event.status === 'purchasing') return err('Purchasing is open, so the simulation is closed', 409);
+  if (!(await canPractice(c.env.DB, access, eventId))) return err('Only people on this board can join the simulation', 403);
 
   const existing = await c.env.DB.prepare('SELECT MIN(id) AS id FROM events WHERE practice_of = ?')
     .bind(eventId).first<{ id: number | null }>();
@@ -1069,8 +1069,8 @@ app.post('/api/events/:id/practice/reset', async (c) => {
   if (!given) return err('Event not found', 404);
   const source = given.practice_of ? await getEvent(c.env.DB, given.practice_of) : given;
   if (!source) return err('Event not found', 404);
-  if (source.status === 'purchasing') return err('Purchasing is open, so practice is closed', 409);
-  if (!(await canPractice(c.env.DB, access, source.id))) return err('Only people on this board can practice', 403);
+  if (source.status === 'purchasing') return err('Purchasing is open, so the simulation is closed', 409);
+  if (!(await canPractice(c.env.DB, access, source.id))) return err('Only people on this board can join the simulation', 403);
 
   await deletePracticeCopies(c.env.DB, source.id);
   return json({ id: await createPracticeCopy(c.env.DB, source), practice_of: source.id });

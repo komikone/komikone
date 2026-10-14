@@ -168,7 +168,7 @@ export function BuyerQueuePanel({
                 disabled={busy}
                 onClick={() => void run(actions.onClearAll)}
                 className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 hover:underline disabled:opacity-50 px-1"
-                title="Admin: remove every place, e.g. leftovers from practice"
+                title="Admin: remove every place, e.g. leftovers from a simulation"
               >
                 Clear line
               </button>

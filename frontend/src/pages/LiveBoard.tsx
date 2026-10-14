@@ -248,7 +248,7 @@ export default function LiveBoard() {
   const canPractice = practiceOf == null && event != null && event.status !== 'purchasing' && event.status !== 'complete';
 
   const goPractice = async (reset: boolean) => {
-    if (reset && !window.confirm('Start practice over for everyone practicing? All practice claims, purchases and places in line go back to the real board.')) return;
+    if (reset && !window.confirm('Start the simulation over for everyone in it? All simulated claims, purchases and places in line go back to the real board.')) return;
     setPracticeBusy(true);
     try {
       const clerkToken = await getToken({ template: 'komikone' });
@@ -258,7 +258,7 @@ export default function LiveBoard() {
         : await api.practice.join(Number(eventId), clerkToken);
       navigate(`/live/${id}`);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Could not open practice');
+      alert(e instanceof Error ? e.message : 'Could not open the simulation');
     } finally {
       setPracticeBusy(false);
     }
@@ -842,7 +842,7 @@ export default function LiveBoard() {
     const live = event?.status === 'purchasing' && practiceOf == null;
     if (!window.confirm(
       `Clear all ${count} place${count === 1 ? '' : 's'} from the Queue-It line for everyone?`
-      + (live ? '\n\nPurchase day is LIVE. Only do this if these are leftover practice places.' : '')
+      + (live ? '\n\nPurchase day is LIVE. Only do this if these are leftover simulation places.' : '')
       + '\n\nThis can\'t be undone.',
     )) return;
     const clerkToken = await getToken({ template: 'komikone' });
@@ -1033,9 +1033,9 @@ export default function LiveBoard() {
             <Link
               to={`/live/${practiceOf}`}
               className="text-xs font-bold px-2.5 py-0.5 rounded border bg-fuchsia-500 text-white border-fuchsia-300 shadow-[0_0_12px_rgba(217,70,239,0.55)] whitespace-nowrap"
-              title="Back to the real board. Practice stays as it is for anyone still practicing."
+              title="Back to the real board. The simulation stays as it is for anyone still in it."
             >
-              Leave practice
+              Leave simulation
             </Link>
           ) : canPractice && (
             <button
@@ -1043,9 +1043,9 @@ export default function LiveBoard() {
               onClick={() => goPractice(false)}
               disabled={practiceBusy}
               className="text-xs font-bold px-2.5 py-0.5 rounded border transition-colors text-zinc-400 dark:text-zinc-300 border-zinc-700 dark:border-zinc-600 hover:text-fuchsia-300 hover:border-fuchsia-500 disabled:opacity-50 whitespace-nowrap"
-              title="Join the shared practice board: everyone practicing sees the same claims, purchases and line. The real board is untouched."
+              title="Join the shared simulation: everyone in it sees the same claims, purchases and line. The real board is untouched."
             >
-              {practiceBusy ? 'Opening…' : 'Practice'}
+              {practiceBusy ? 'Opening…' : 'Simulation'}
             </button>
           )}
           <ThemeToggle
@@ -1068,9 +1068,9 @@ export default function LiveBoard() {
       <div className="shrink-0 max-h-[50vh] overflow-y-auto sm:max-h-none sm:overflow-visible">
       {practiceOf != null && (
         <div className="bg-fuchsia-600 text-white px-4 py-2 shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1 border-b-2 border-fuchsia-300">
-          <span className="text-xs font-black uppercase tracking-[0.2em]">Practice</span>
+          <span className="text-xs font-black uppercase tracking-[0.2em]">Simulation</span>
           <span className="text-xs text-fuchsia-100">
-            Shared with everyone practicing. Claims, purchases, sold-out days and the line here never touch the real board. Your buy list is the real one.
+            Shared with everyone in the simulation. Claims, purchases, sold-out days and the line here never touch the real board. Your buy list is the real one.
           </span>
           <div className="ml-auto flex items-center gap-3 shrink-0">
             <button
@@ -1082,7 +1082,7 @@ export default function LiveBoard() {
               Start over
             </button>
             <Link to={`/live/${practiceOf}`} className="text-xs font-bold underline hover:no-underline">
-              Leave practice
+              Leave simulation
             </Link>
           </div>
         </div>
@@ -1204,7 +1204,7 @@ export default function LiveBoard() {
         <div className="bg-amber-50 dark:bg-yellow-950/30 border-b-2 border-amber-300 dark:border-yellow-800 px-4 py-2 shrink-0">
           <span className="text-amber-800 dark:text-yellow-300 text-xs font-bold uppercase tracking-wider">Preview · </span>
           <span className="text-amber-700 dark:text-yellow-400/90 text-xs">
-            Look around and get familiar with the board. Claiming opens when purchase day starts. Tap Practice to rehearse with everyone.
+            Look around and get familiar with the board. Claiming opens when purchase day starts. Tap Simulation to rehearse with everyone.
           </span>
         </div>
       )}
@@ -1212,7 +1212,7 @@ export default function LiveBoard() {
         <div className="bg-blue-50 dark:bg-blue-950/30 border-b-2 border-blue-300 dark:border-blue-800 px-4 py-2 shrink-0">
           <span className="text-blue-700 dark:text-blue-300 text-xs font-bold uppercase tracking-wider">Registration is open · </span>
           <span className="text-blue-600 dark:text-blue-400 text-xs">
-            Purchase day hasn&apos;t started. Verify your requested days, Member ID, and badge type, or tap Practice to rehearse claiming with everyone.
+            Purchase day hasn&apos;t started. Verify your requested days, Member ID, and badge type, or tap Simulation to rehearse claiming with everyone.
           </span>
         </div>
       )}
