@@ -298,6 +298,7 @@ export default function LiveBoard() {
   // Filter
   const [filterText, setFilterText] = useState('');
   const [filterStatus, setFilterStatus] = useState<RowStatus | 'all'>('all');
+  const [eligibleOnly, setEligibleOnly] = useState(false);
 
   // Column widths (resizable, movable cols only)
   const [colWidths, setColWidths] = useState<Partial<Record<ColKey, number>>>({});
@@ -351,7 +352,7 @@ export default function LiveBoard() {
     try {
       const [ev, ps, queue] = await Promise.all([
         api.events.get(Number(eventId), clerkToken),
-        // Return Reg boards list only people who can be bought for; the server drops the rest.
+        // Return Reg boards list only return-eligible people; the server drops the rest.
         api.participants.list(Number(eventId), clerkToken),
         // null rather than [] on failure: an empty list here wiped everyone's places off
         // the screen for a whole poll whenever one request blipped.
@@ -684,6 +685,8 @@ export default function LiveBoard() {
 
   const filtered = orderedParticipants.filter((p) => {
     if (filterStatus !== 'all' && rowStatus(p, now) !== filterStatus) return false;
+    // Not return eligible, no badge days, or no Member ID — they can't be bought for.
+    if (eligibleOnly && purchaseBlockers(p, event).length > 0) return false;
     if (!filterText) return true;
     const q = filterText.includes('*') ? filterText : `*${filterText}*`;
     const re = wildcardToRegex(q);
@@ -1251,8 +1254,22 @@ export default function LiveBoard() {
                   {label}
                 </button>
               ))}
+              <span className="w-px h-4 bg-gray-300 dark:bg-gray-600 shrink-0 self-center" aria-hidden />
+              <button
+                type="button"
+                aria-pressed={eligibleOnly}
+                onClick={() => setEligibleOnly((on) => !on)}
+                title="Hide people who won't be eligible: not return eligible, no badge days, or no Member ID"
+                className={`text-xs px-2.5 py-1 rounded-full border transition-colors shrink-0 whitespace-nowrap ${
+                  eligibleOnly
+                    ? 'bg-yellow-400 text-black border-transparent'
+                    : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+                }`}
+              >
+                Eligible
+              </button>
             </div>
-            {(filterText || filterStatus !== 'all') && (
+            {(filterText || filterStatus !== 'all' || eligibleOnly) && (
               <span className="text-xs text-gray-400 dark:text-gray-600">{displayRows.length} of {participants.length}</span>
             )}
             <div className="ml-auto flex gap-3">
