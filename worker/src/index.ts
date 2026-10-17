@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, enrichParticipant, inviteUnavailableMessage, MAX_SHARED_INVITE_USES, isClaimExpired, MAX_ACTIVE_CLAIMS, anyPurchased, nothingLeftToBuy, SALE_DAYS, type SaleDay } from './db';
+import { type Event, type Participant, type Coordinator, type YearMeta, type Group, type InviteRequest, type Profile, type Year, type YearMember, type Invite, type PurchaseQueueEntry, type PurchaseQueueStatus, enrichParticipant, inviteUnavailableMessage, MAX_SHARED_INVITE_USES, isClaimExpired, CLAIM_TIMEOUT_MINUTES, MAX_ACTIVE_CLAIMS, anyPurchased, nothingLeftToBuy, SALE_DAYS, type SaleDay } from './db';
 import {
   assertPreviewNightAllowed,
   assertRegistrationOpen,
@@ -657,12 +657,68 @@ app.post('/api/events/:id/participants/:pid/claim', async (c) => {
     );
   }
 
-  await c.env.DB.prepare(`
+  // The reads above can both pass when two buyers click at once. The write itself
+  // re-checks the claim and the 3-person cap in one statement, so the second one loses.
+  const written = await c.env.DB.prepare(`
     UPDATE participants
     SET purchasing_claimed_by = ?, purchasing_claimed_at = datetime('now'),
         purchasing_claimed_queue_id = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).bind(body.coordinator_name.trim(), queueId, pid).run();
+    WHERE id = ? AND event_id = ?
+      AND (
+        IFNULL(purchasing_claimed_by, '') = ''
+        OR purchasing_claimed_at IS NULL
+        OR datetime(replace(replace(purchasing_claimed_at, 'T', ' '), 'Z', ''))
+            <= datetime('now', '-${CLAIM_TIMEOUT_MINUTES} minutes')
+      )
+      AND (
+        SELECT COUNT(*) FROM participants AS slot
+        WHERE slot.event_id = ?
+          AND slot.purchasing_claimed_queue_id = ?
+          AND slot.id != ?
+          AND (
+            slot.pur_preview = 1 OR slot.pur_thu = 1 OR slot.pur_fri = 1 OR slot.pur_sat = 1 OR slot.pur_sun = 1
+            OR (
+              IFNULL(slot.purchasing_claimed_by, '') != ''
+              AND slot.purchasing_claimed_at IS NOT NULL
+              AND datetime(replace(replace(slot.purchasing_claimed_at, 'T', ' '), 'Z', ''))
+                  > datetime('now', '-${CLAIM_TIMEOUT_MINUTES} minutes')
+              AND (
+                NOT (slot.req_preview = 1 OR slot.req_thu = 1 OR slot.req_fri = 1 OR slot.req_sat = 1 OR slot.req_sun = 1)
+                OR (slot.req_preview = 1 AND slot.pur_preview = 0 AND ? = 0)
+                OR (slot.req_thu = 1 AND slot.pur_thu = 0 AND ? = 0)
+                OR (slot.req_fri = 1 AND slot.pur_fri = 0 AND ? = 0)
+                OR (slot.req_sat = 1 AND slot.pur_sat = 0 AND ? = 0)
+                OR (slot.req_sun = 1 AND slot.pur_sun = 0 AND ? = 0)
+              )
+            )
+          )
+      ) < ?
+  `).bind(
+    body.coordinator_name.trim(), queueId, pid, eventId,
+    eventId, queueId, pid,
+    event.sold_out_preview ? 1 : 0,
+    event.sold_out_thu ? 1 : 0,
+    event.sold_out_fri ? 1 : 0,
+    event.sold_out_sat ? 1 : 0,
+    event.sold_out_sun ? 1 : 0,
+    MAX_ACTIVE_CLAIMS,
+  ).run();
+
+  if (!written.meta.changes) {
+    const again = await c.env.DB.prepare('SELECT * FROM participants WHERE id = ? AND event_id = ?')
+      .bind(pid, eventId).first<Participant>();
+    if (!again) return err('Participant not found', 404);
+    if (again.purchasing_claimed_by && !isClaimExpired(again.purchasing_claimed_at)) {
+      return err(`Already claimed by ${again.purchasing_claimed_by}`, 409);
+    }
+    if (nothingLeftToBuy(again, event)) {
+      return err(`Nothing left to buy for ${again.first_name}: every day they wanted is bought or sold out`, 409);
+    }
+    return err(
+      `"${place.label}" already has ${MAX_ACTIVE_CLAIMS} people (Comic-Con purchase limit). Use another place in line or release someone.`,
+      400,
+    );
+  }
 
   return json({ ok: true });
 });
@@ -672,6 +728,29 @@ app.post('/api/events/:id/participants/:pid/unclaim', async (c) => {
   const pid = Number(c.req.param('pid'));
   const access = await authenticate(c, c.env.ADMIN_SECRET, c.env.CLERK_JWKS_URL ?? '');
   if (!access) return err('Authentication required', 401);
+
+  const target = await c.env.DB.prepare(
+    'SELECT purchasing_claimed_by, purchasing_claimed_queue_id FROM participants WHERE id = ? AND event_id = ?'
+  ).bind(pid, eventId).first<{ purchasing_claimed_by: string; purchasing_claimed_queue_id: number | null }>();
+  if (!target) return err('Participant not found', 404);
+
+  if (!access.isAdmin) {
+    const me = await c.env.DB.prepare(
+      'SELECT first_name, last_name FROM participants WHERE event_id = ? AND clerk_user_id = ?'
+    ).bind(eventId, access.userId).first<{ first_name: string; last_name: string }>();
+    const myName = me ? `${me.first_name} ${me.last_name}`.trim().toLowerCase() : '';
+    const claimedBy = (target.purchasing_claimed_by ?? '').trim().toLowerCase();
+    let ownsPlace = false;
+    if (target.purchasing_claimed_queue_id) {
+      const place = await c.env.DB.prepare(
+        'SELECT clerk_user_id FROM purchase_queue WHERE id = ? AND event_id = ?'
+      ).bind(target.purchasing_claimed_queue_id, eventId).first<{ clerk_user_id: string }>();
+      ownsPlace = place?.clerk_user_id === access.userId;
+    }
+    if (!ownsPlace && (!myName || claimedBy !== myName)) {
+      return err('Only the person who claimed them can release the claim', 403);
+    }
+  }
 
   await c.env.DB.prepare(`
     UPDATE participants
@@ -939,17 +1018,13 @@ app.post('/api/events/:id/purchase-queue/join', async (c) => {
   const body = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
 
   // Multiple joins allowed — one entry per Queue-It cookie / browser session.
-  const maxPos = await c.env.DB.prepare(
-    'SELECT COALESCE(MAX(position), 0) AS m FROM purchase_queue WHERE event_id = ?'
-  ).bind(eventId).first<{ m: number }>();
-  const position = (maxPos?.m ?? 0) + 1;
-
+  // Position is chosen inside the insert so two people joining at once can't land on the same number.
   const label = cleanQueueLabel(body.label) || await nextDefaultQueueLabel(c.env.DB, eventId, access.userId);
 
   await c.env.DB.prepare(`
     INSERT INTO purchase_queue (event_id, participant_id, clerk_user_id, position, status, label)
-    VALUES (?, ?, ?, ?, 'waiting', ?)
-  `).bind(eventId, me.id, access.userId, position, label).run();
+    VALUES (?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM purchase_queue WHERE event_id = ?), 'waiting', ?)
+  `).bind(eventId, me.id, access.userId, eventId, label).run();
 
   return json(await listPurchaseQueue(c.env.DB, eventId));
 });

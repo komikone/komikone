@@ -1893,7 +1893,9 @@ function CellContent({
             >
               {formatClaimCountdown(remainingMs)}
             </span>
-            <button onClick={() => onUnclaim(p)} className="text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400 underline">Release</button>
+            {canTogglePurchase && (
+              <button onClick={() => onUnclaim(p)} className="text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400 underline">Release</button>
+            )}
           </div>
         );
       }
