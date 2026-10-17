@@ -1466,6 +1466,7 @@ export default function LiveBoard() {
                             canEditRequested={!showPurchaseChrome && canEditIdentityRow(p, me, identityId, myClerkId)}
                             canEditProfile={canEditIdentityRow(p, me, identityId, myClerkId)}
                             canTogglePurchase={isPlatformAdmin || canEditPurchases(p, myDisplayName, now)}
+                            canMarkUnrequested={isPlatformAdmin}
                             blockers={purchaseBlockers(p, event)}
                             now={now}
                             onUnclaim={handleUnclaim}
@@ -1557,6 +1558,7 @@ export default function LiveBoard() {
             onOpenQueue={openBuyerQueue}
             onDismiss={() => setShowNextUp(false)}
             onTogglePurchased={handlePurchaseToggle}
+            allowUnrequestedPurchases={isPlatformAdmin}
             onCompletePlace={async (place, finished) => {
               await handleQueueStatus(place.id, 'done');
               const finishedIds = new Set(finished.map((p) => p.id));
@@ -1613,6 +1615,7 @@ function CopyCell({ value, children }: { value: string; children?: React.ReactNo
 function CellContent({
   col, p, status, eventStatus, editingRow, setEditingRow, canEditRequested, canEditProfile, canTogglePurchase,
   blockers, now, onUnclaim, onRequestedToggle, onPurchaseToggle, onWhoChange, onEditParticipant,
+  canMarkUnrequested,
   buyListRank, onAddToBuyList, onOpenBuyList, claimPlaceLabel,
 }: {
   col: ColKey;
@@ -1625,6 +1628,8 @@ function CellContent({
   canEditRequested: boolean;
   canEditProfile: boolean;
   canTogglePurchase: boolean;
+  /** Admin can record a day that was bought even though it was never requested. */
+  canMarkUnrequested: boolean;
   blockers: PurchaseBlocker[];
   now: number;
   onUnclaim: (p: Participant) => void;
@@ -1773,26 +1778,39 @@ function CellContent({
           {DAY_KEYS.map((day) => {
             const req = p[`req_${day}` as keyof Participant] as boolean;
             const bought = p[`pur_${day}` as keyof Participant] as boolean;
+            const canToggle = req ? canTogglePurchase : canMarkUnrequested;
+            const boughtCls = bought
+              ? 'bg-green-500 border-green-600 dark:bg-green-500 dark:border-green-400'
+              : req
+                ? 'bg-transparent border-gray-300 dark:border-gray-300'
+                : 'bg-transparent border-dashed border-amber-400 dark:border-amber-600';
             return (
               <div key={day} style={{ width: DAY_SLOT_W, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                {!req ? (
-                  <div className="w-4 h-4 rounded-sm border border-gray-200 dark:border-gray-300" />
-                ) : canTogglePurchase ? (
+                {canToggle ? (
                   <button
                     onClick={() => onPurchaseToggle(p, day, !bought)}
-                    className={`w-4 h-4 rounded-sm border-2 transition-colors ${
-                      bought
-                        ? 'bg-green-500 border-green-600 dark:bg-green-500 dark:border-green-400'
-                        : 'bg-transparent border-gray-300 hover:border-green-400 hover:bg-green-50 dark:border-gray-300 dark:hover:border-green-500'
-                    }`}
+                    title={req ? undefined : 'Not requested — mark it bought anyway'}
+                    className={`w-4 h-4 rounded-sm border-2 transition-colors ${boughtCls} ${
+                      !bought && req ? 'hover:border-green-400 hover:bg-green-50 dark:hover:border-green-500' : ''
+                    } ${!bought && !req ? 'hover:bg-amber-50 dark:hover:bg-amber-950/40' : ''}`}
                   />
                 ) : (
                   <div
-                    title={isClaimLive(p, now) ? 'Only the claimer can mark purchases' : 'Claim this person first to mark purchases'}
-                    className={`w-4 h-4 rounded-sm border-2 cursor-not-allowed ${
+                    title={
+                      !req && bought
+                        ? 'Bought, though it was not requested'
+                        : !req
+                          ? undefined
+                          : isClaimLive(p, now)
+                            ? 'Only the claimer can mark purchases'
+                            : 'Claim this person first to mark purchases'
+                    }
+                    className={`w-4 h-4 rounded-sm border-2 ${bought || req ? 'cursor-not-allowed' : ''} ${
                       bought
                         ? 'bg-green-500/70 border-green-600/70 dark:bg-green-500/60 dark:border-green-400/60'
-                        : 'border-gray-200 dark:border-gray-300 opacity-70'
+                        : req
+                          ? 'border-gray-200 dark:border-gray-300 opacity-70'
+                          : 'border border-gray-200 dark:border-gray-300'
                     }`}
                   />
                 )}

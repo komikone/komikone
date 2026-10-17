@@ -788,6 +788,19 @@ app.patch('/api/events/:id/participants/:pid/purchased', async (c) => {
     pur_sat?: boolean; pur_sun?: boolean; who_purchased?: string;
   }>();
 
+  // Buyers record the days that were asked for. An admin can also record a substitute
+  // day bought after another one sold out.
+  if (!access.isAdmin) {
+    const requested = await c.env.DB.prepare(
+      `SELECT req_preview, req_thu, req_fri, req_sat, req_sun
+       FROM participants WHERE id = ? AND event_id = ?`
+    ).bind(pid, eventId).first<{
+      req_preview: number; req_thu: number; req_fri: number; req_sat: number; req_sun: number;
+    }>();
+    const extra = SALE_DAYS.find((d) => body[`pur_${d}`] != null && !requested?.[`req_${d}`]);
+    if (extra) return err('Only an admin can mark a day bought when it was not requested', 403);
+  }
+
   // Only the days sent change. Ticking one day must not undo another the client hadn't
   // refreshed yet, which a full overwrite would.
   const flag = (v: boolean | undefined) => (v == null ? null : v ? 1 : 0);

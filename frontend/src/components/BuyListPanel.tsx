@@ -44,7 +44,7 @@ const firstNames = (ps: Participant[]) => ps.map((p) => p.first_name).join(', ')
 export function BuyListPanel({
   event, participants, list, identityId, myDisplayName, quickAdd, suggested, reasonFor,
   places, pickNumber, purchasing, now, onChange, onClaimMany, onRelease, onPlaceThrough, onOpenQueue, onDismiss,
-  onTogglePurchased, onCompletePlace,
+  onTogglePurchased, onCompletePlace, allowUnrequestedPurchases = false,
 }: {
   event: EventDetail | null;
   participants: Participant[];
@@ -72,6 +72,8 @@ export function BuyListPanel({
   onTogglePurchased: (p: Participant, day: SaleDay, checked: boolean) => Promise<void>;
   /** Marks the place done; `finished` have nothing left to buy. */
   onCompletePlace: (place: PurchaseQueueEntry, finished: Participant[]) => Promise<void>;
+  /** Admin can record a substitute day that was never requested. */
+  allowUnrequestedPurchases?: boolean;
 }) {
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
@@ -518,6 +520,7 @@ export function BuyListPanel({
           event={event}
           identityId={identityId}
           onTogglePurchased={onTogglePurchased}
+          allowUnrequested={allowUnrequestedPurchases}
           onRelease={onRelease}
           onComplete={async (finished) => {
             await onCompletePlace(checkoutSlot.place!, finished);

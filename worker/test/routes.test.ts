@@ -410,6 +410,38 @@ describe('PATCH /participants/:pid/purchased', () => {
     expect(getParticipant(h.db, pid).purchasing_claimed_by).toBe('Tony Nguyen');
   });
 
+  it('lets an admin mark a day that was never requested', async () => {
+    const eventId = insertEvent(h.db);
+    seedBuyer(eventId);
+    const pid = insertParticipant(h.db, eventId, {
+      req_sat: 1,
+      req_sun: 0,
+      purchasing_claimed_by: 'Tony Nguyen',
+      purchasing_claimed_at: new Date().toISOString(),
+    });
+
+    const buyer = await h.request(`/api/events/${eventId}/participants/${pid}/purchased`, {
+      method: 'PATCH',
+      as: TONY,
+      body: JSON.stringify({ pur_sun: true, who_purchased: 'Tony Nguyen' }),
+    });
+    expect(buyer.status).toBe(403);
+    await expect(buyer.json()).resolves.toEqual({
+      error: 'Only an admin can mark a day bought when it was not requested',
+    });
+    expect(getParticipant(h.db, pid).pur_sun).toBe(0);
+
+    const admin = await h.request(`/api/events/${eventId}/participants/${pid}/purchased`, {
+      method: 'PATCH',
+      as: TONY,
+      asAdmin: true,
+      body: JSON.stringify({ pur_sun: true, who_purchased: 'Tony Nguyen' }),
+    });
+    expect(admin.status).toBe(200);
+    expect(getParticipant(h.db, pid).pur_sun).toBe(1);
+    expect(getParticipant(h.db, pid).req_sun).toBe(0);
+  });
+
   it('lets the buyer on record correct days after the claim auto-released', async () => {
     const eventId = insertEvent(h.db);
     seedBuyer(eventId);

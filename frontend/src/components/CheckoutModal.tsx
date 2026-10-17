@@ -17,6 +17,7 @@ const fullName = (p: Participant) => `${p.first_name} ${p.last_name}`.trim();
  */
 export function CheckoutModal({
   place, people, event, identityId, onTogglePurchased, onRelease, onComplete, onClose,
+  allowUnrequested = false,
 }: {
   place: PurchaseQueueEntry;
   /** Claimed through this place, plus anyone it already finished. */
@@ -28,6 +29,8 @@ export function CheckoutModal({
   /** `finished` have nothing left to buy and come off your list. */
   onComplete: (finished: Participant[]) => Promise<void>;
   onClose: () => void;
+  /** Admin can record a substitute day that was never requested. */
+  allowUnrequested?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const run = async (fn: () => Promise<void>) => {
@@ -80,6 +83,7 @@ export function CheckoutModal({
               busy={busy}
               onToggle={(day, checked) => void run(() => onTogglePurchased(p, day, checked))}
               onRelease={p.any_purchased ? undefined : () => void run(() => onRelease(p))}
+              allowUnrequested={allowUnrequested}
             />
           ))}
           {people.length === 0 && (
@@ -152,15 +156,16 @@ function CopyField({ label, value, mono = false, ariaLabel }: {
   );
 }
 
-function PersonCheckout({ p, event, isMe, busy, onToggle, onRelease }: {
+function PersonCheckout({ p, event, isMe, busy, onToggle, onRelease, allowUnrequested = false }: {
   p: Participant;
   event: EventDetail | null;
   isMe: boolean;
   busy: boolean;
   onToggle: (day: SaleDay, checked: boolean) => void;
   onRelease?: () => void;
+  allowUnrequested?: boolean;
 }) {
-  const requested = SALE_DAYS.filter((d) => p[`req_${d}`]);
+  const days = allowUnrequested ? SALE_DAYS : SALE_DAYS.filter((d) => p[`req_${d}`] || p[`pur_${d}`]);
   const done = nothingLeftToBuy(p);
 
   return (
@@ -188,25 +193,28 @@ function PersonCheckout({ p, event, isMe, busy, onToggle, onRelease }: {
       </div>
 
       <div className="mt-2 grid grid-cols-2 gap-1">
-        {requested.map((d) => {
+        {days.map((d) => {
           const bought = !!p[`pur_${d}`];
-          const soldOut = !bought && isSoldOut(event, d);
+          const requested = !!p[`req_${d}`];
+          const soldOut = !bought && requested && isSoldOut(event, d);
+          const locked = !allowUnrequested && !requested;
           return (
             <label
               key={d}
               className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm ${
-                soldOut ? 'opacity-60' : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60'
+                soldOut || locked ? 'opacity-60' : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60'
               }`}
             >
               <input
                 type="checkbox"
                 checked={bought}
-                disabled={busy || soldOut}
+                disabled={busy || soldOut || locked}
                 onChange={(e) => onToggle(d, e.target.checked)}
                 className="w-5 h-5 rounded accent-green-600"
               />
               <span className={`flex-1 ${bought ? 'text-green-700 dark:text-green-400 font-semibold' : 'text-gray-800 dark:text-gray-200'}`}>
                 {SALE_DAY_FULL[d]}
+                {!requested && <span className="ml-1 text-[10px] font-bold text-amber-600 dark:text-amber-400">NOT REQUESTED</span>}
               </span>
               {soldOut && <span className="text-[10px] font-bold text-red-600 dark:text-red-400">SOLD OUT</span>}
               {bought && <span className="text-[10px] font-bold text-green-700 dark:text-green-400">BOUGHT</span>}
